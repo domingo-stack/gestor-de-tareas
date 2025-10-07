@@ -1,0 +1,8 @@
+{
+    "record": {
+      "id": 12345,
+      "title": "Este es un Evento de Prueba desde la Terminal",
+      "team": "Marketing",
+      "start_date": "2025-10-06"
+    }
+  }

@@ -48,7 +48,7 @@ export default function AddEventModal({ isOpen, onClose, onEventAdded, user, sup
       .from('company_events')
       .insert({
         title, description, start_date: startDate, end_date: endDate || null,
-        team, video_link: videoLink || null, user_id: user.id
+        team, video_link: videoLink || null, user_id: user.id, is_draft: false,
       });
 
     setLoading(false);

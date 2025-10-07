@@ -19,7 +19,7 @@ import SelectCell from '@/components/SelectCell';
 console.log('Inspeccionando EditableCell:', EditableCell);
 console.log('Inspeccionando SelectCell:', SelectCell);
 import EditableDateCell from '@/components/EditableDateCell';
-import { EventClickArg } from '@fullcalendar/core';
+import { EventClickArg, EventContentArg } from '@fullcalendar/core';
 const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
     Marketing:        { background: '#fdf2f8', text: '#be185d' }, // Rosa
     Producto:         { background: '#f0fdf4', text: '#166534' }, // Verde
@@ -48,7 +48,8 @@ const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
     end: string | undefined;
     backgroundColor?: string; // <-- AÑADE ESTA LÍNEA
     textColor?: string;     // <-- Y ESTA LÍNEA
-    borderColor?: string;   // <-- Y ESTA LÍNEA
+    borderColor?: string;
+    is_draft?: boolean;   // <-- Y ESTA LÍNEA
     extendedProps: {
       description: string | null;
       video_link: string | null;
@@ -65,8 +66,56 @@ type CompanyEventFromDB = {
     description: string | null;
     video_link: string | null;
     team: string;
+    is_draft: boolean;
     custom_data: any; // Dejamos 'any' aquí a propósito porque custom_data es flexible por diseño.
   };
+
+  // --- PLANTILLA PARA DISEÑAR CADA EVENTO EN EL CALENDARIO ---
+  function renderEventContent(eventInfo: EventContentArg) {
+    // 'eventInfo' es un objeto que nos da FullCalendar con todos los datos del evento.
+  
+    // 1. Extraemos los datos que queremos mostrar.
+    //    Nuestros datos personalizados están en 'extendedProps.custom_data'.
+    const { custom_data } = eventInfo.event.extendedProps;
+    const estado = custom_data?.Estado; // Usamos '?' por si el evento no tiene este dato
+    const formato = custom_data?.Formato; 
+    const pilar = custom_data?.['Pilar de Contenido']; // Usamos '?' por si el evento no tiene este dato
+  
+    // 2. Devolvemos el HTML (en formato JSX) que queremos mostrar dentro de la tarjeta.
+    return (
+      <div className="p-1 overflow-hidden text-xs w-full">
+        {/* Primero, mostramos el título del evento en negrita */}
+        <b className="truncate block">{eventInfo.event.title}</b>
+        
+        {/* Luego, creamos un contenedor para nuestras etiquetas personalizadas */}
+        <div className="flex flex-wrap gap-1 mt-1">
+          
+          {/* Creamos la etiqueta para 'Estado' (solo si el dato existe) */}
+          {estado && (
+            <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded-full font-medium">
+              {estado}
+            </span>
+          )}
+  
+          {/* Creamos la etiqueta para 'Formato' (solo si el dato existe) */}
+          {formato && (
+            <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full font-medium">
+              {formato}
+            </span>
+          )}
+          {/* Creamos la etiqueta para 'Pilar de Contenido' (solo si el dato existe) */}
+          {pilar && (
+            <span className="bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full font-medium">
+              {pilar}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  }
+  
+  // Justo debajo de esta función debería estar tu línea:
+  // export default function CalendarPage() { ... }
 
 export default function CalendarPage() {
   const { supabase, user } = useAuth();
@@ -83,33 +132,42 @@ export default function CalendarPage() {
     // Si no, filtra los eventos cuyo equipo coincida con el filtro
     return events.filter(event => event.extendedProps.team === teamFilter);
   }, [events, teamFilter]);
+  const marketingEvents = useMemo(() => 
+    events.filter(event => event.extendedProps.team === 'Marketing'), 
+    [events]
+);
 
-  const fetchEvents = useCallback(async () => { // <-- ENVOLVEMOS LA FUNCIÓN
+  // En app/calendar/page.tsx
+
+const fetchEvents = useCallback(async () => {
     if (!supabase) return;
     setLoading(true);
     const { data, error } = await supabase.from('company_events').select('*');
 
     if (error) {
-      console.error('Error fetching company events:', error);
+        console.error('Error fetching company events:', error);
     } else if (data) {
         const formattedEvents = data.map((event: CompanyEventFromDB) => {
             const teamColor = TEAM_COLORS[event.team] || TEAM_COLORS['General'];
             return {
-              id: String(event.id),
-              title: event.title,
-              start: event.start_date,
-              end: event.end_date || undefined,
-              backgroundColor: teamColor.background,
-              textColor: teamColor.text,
-              borderColor: teamColor.text, // Usamos el mismo color del texto para el borde
-              extendedProps: {
-                description: event.description,
-                video_link: event.video_link,
-                team: event.team
-              }
+                id: String(event.id),
+                title: event.title,
+                start: event.start_date,
+                end: event.end_date || undefined,
+                backgroundColor: teamColor.background,
+                textColor: teamColor.text,
+                borderColor: teamColor.text,
+                is_draft: event.is_draft,
+                extendedProps: {
+                    description: event.description,
+                    video_link: event.video_link,
+                    team: event.team,
+                    // --- LA LÍNEA QUE FALTABA ---
+                    custom_data: event.custom_data 
+                }
             };
-          });
-      setEvents(formattedEvents);
+        });
+        setEvents(formattedEvents);
     }
     setLoading(false);
 }, [supabase]);
@@ -178,68 +236,87 @@ export default function CalendarPage() {
   };
 
   // En app/calendar/page.tsx
-  const handleUpdateEventField = async (eventId: string, columnId: string, value: string | number | null) => {
+  const handleUpdateEventField = async (eventId: string, columnId: string, value: any) => {
     if (!supabase) return;
-  
-    let updateObject: { [key: string]: string | number | null | object } = {};
-  
-    if (['title', 'start_date', 'team'].includes(columnId)) {
-      updateObject = { [columnId]: value };
-    } else {
-      const { data: currentData } = await supabase
-        .from('company_events')
-        .select('custom_data')
-        .eq('id', Number(eventId))
-        .single();
-  
-      const newCustomData = {
-        ...(currentData?.custom_data || {}),
-        [columnId]: value,
-      };
-      updateObject = { custom_data: newCustomData };
-    }
-  
-    // 👇 CAMBIO CLAVE: Añadimos .select().single() al final de la actualización
-    const { data: updatedEvent, error } = await supabase
-      .from('company_events')
-      .update(updateObject)
-      .eq('id', Number(eventId))
-      .select() // Le pedimos que nos devuelva la fila actualizada
-      .single(); // Y que nos la dé como un solo objeto
-  
-    if (error) {
-      alert('Error al actualizar el campo: ' + error.message);
-    } else if (updatedEvent) {
 
-        const typedUpdatedEvent = updatedEvent as CompanyEventFromDB;
-      // 👇 YA NO LLAMAMOS a fetchEvents(). 
-      // Actualizamos el estado localmente con los datos frescos que recibimos.
-  
-      // Primero, formateamos el evento que nos devuelve Supabase
-      const formattedEvent = {
-        id: String(typedUpdatedEvent.id),
-        title: typedUpdatedEvent.title,
-        start: typedUpdatedEvent.start_date,
-        end: typedUpdatedEvent.end_date || undefined,
-        backgroundColor: TEAM_COLORS[typedUpdatedEvent.team]?.background || TEAM_COLORS['General'].background,
-        textColor: TEAM_COLORS[typedUpdatedEvent.team]?.text || TEAM_COLORS['General'].text,
-        borderColor: TEAM_COLORS[typedUpdatedEvent.team]?.text || TEAM_COLORS['General'].text,
-        extendedProps: {
-          description: typedUpdatedEvent.description,
-          video_link: typedUpdatedEvent.video_link,
-          team: typedUpdatedEvent.team,
-          custom_data: typedUpdatedEvent.custom_data
+    // --- INICIO DE LA LÓGICA DE ACTUALIZACIÓN OPTIMISTA ---
+
+    // 1. Guardamos una copia del estado actual, por si necesitamos revertir en caso de error.
+    const originalEvents = [...events];
+
+    // 2. Creamos el nuevo estado de la lista de eventos de forma anticipada.
+    const newEvents = events.map(event => {
+        if (event.id === eventId) {
+            // Si este es el evento que estamos cambiando...
+            const updatedEvent = { ...event };
+            const customDataFields = ['Formato', 'Pilar de Contenido', 'Estado'];
+
+            // Actualizamos el campo correspondiente en el objeto del evento.
+            if (customDataFields.includes(columnId)) {
+                updatedEvent.extendedProps.custom_data = {
+                    ...updatedEvent.extendedProps.custom_data,
+                    [columnId]: value,
+                };
+            } else if (columnId === 'title') {
+                updatedEvent.title = value;
+            } else if (columnId === 'start_date') {
+                updatedEvent.start = value;
+            }
+            
+            // Si es un borrador y le ponemos título, lo "publicamos".
+            if (event.is_draft && columnId === 'title' && value) {
+                updatedEvent.is_draft = false;
+            }
+
+            return updatedEvent;
         }
-      };
-  
-      // Reemplazamos solo el evento modificado en nuestra lista de eventos
-      setEvents(currentEvents => 
-        currentEvents.map(event => 
-          event.id === eventId ? formattedEvent : event
-        )
-      );
+        return event; // Para los demás eventos, no hacemos nada.
+    });
+
+    // 3. ¡Actualizamos la UI al instante con el nuevo estado!
+    setEvents(newEvents);
+
+    // 4. Ahora, intentamos guardar en la base de datos en segundo plano.
+    try {
+        const originalEventFromState = originalEvents.find(e => e.id === eventId);
+        let updateObject: { [key: string]: any } = {};
+        const customDataFields = ['Formato', 'Pilar de Contenido', 'Estado'];
+
+        if (customDataFields.includes(columnId)) {
+            const newCustomData = {
+                ...originalEventFromState?.extendedProps.custom_data,
+                [columnId]: value,
+            };
+            updateObject = { custom_data: newCustomData };
+        } else {
+            updateObject = { [columnId]: value };
+        }
+
+        if (originalEventFromState?.is_draft && value) {
+          updateObject.is_draft = false;
+      }
+
+      console.log('Objeto que se enviará a Supabase:', updateObject);
+
+        const { error } = await supabase
+            .from('company_events')
+            .update(updateObject)
+            .eq('id', Number(eventId));
+
+        // Si la base de datos da un error, lo "lanzamos" para que el 'catch' lo atrape.
+        if (error) {
+            throw error;
+        }
+        if (originalEventFromState?.is_draft && value) {
+          const { error: publishError } = await supabase.rpc('publish_event', { p_event_id: Number(eventId) });
+          if (publishError) throw publishError;
+      }
+    } catch (error) {
+        // 5. Si algo falla al guardar, mostramos una alerta y revertimos la UI a su estado original.
+        alert('Error al guardar el cambio: ' + (error as Error).message);
+        setEvents(originalEvents);
     }
-  };
+};
 
   // En app/calendar/page.tsx
   const handleAddNewRow = async () => {
@@ -247,7 +324,7 @@ export default function CalendarPage() {
   
     const { data: newEventData, error } = await supabase
       .rpc('create_blank_event', {
-        p_team: teamFilter === 'Todos' ? 'General' : teamFilter 
+        p_team: 'Marketing'
       });
   
     if (error) {
@@ -265,6 +342,7 @@ export default function CalendarPage() {
         backgroundColor: teamColor.background,
         textColor: teamColor.text,
         borderColor: teamColor.text,
+        is_draft: newEvent.is_draft,
         extendedProps: {
           description: newEvent.description,
           video_link: newEvent.video_link,
@@ -434,9 +512,10 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
                     height="auto"
                     eventClick={handleEventClick}
                     events={filteredEvents} 
+                    eventContent={renderEventContent} 
                 />
             )}
-            <TableView onUpdateEvent={handleUpdateEventField} columns={marketingColumns} events={filteredEvents} />
+            <TableView onUpdateEvent={handleUpdateEventField} columns={marketingColumns} events={marketingEvents} />
             <div className="mt-2">
     <button 
         onClick={handleAddNewRow}
