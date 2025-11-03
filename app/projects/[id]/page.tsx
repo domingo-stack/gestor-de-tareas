@@ -167,7 +167,7 @@ const fetchData = useCallback(async () => {
 
     // 2. Llamamos a la función RPC usando el team_id del proyecto actual.
     //    No necesitamos buscar el equipo del usuario, ¡ya lo sabemos!
-    const { error } = await supabase.rpc('create_task', { 
+    const { error } = await supabase.rpc('create_task_v2', { 
         p_title: taskData.title, 
         p_description: taskData.description, 
         p_project_id: projectId, // Usamos el ID del proyecto de la página
@@ -248,47 +248,66 @@ const fetchData = useCallback(async () => {
       }
     };
     
-      const handleUpdateTask = async (updatedData: TaskUpdatePayload) => {
-    
-        if (!editingTask) return;
-    
-        setIsSaving(true);
-    
-     
-    
-        const { error } = await supabase.rpc('update_task', {
-    
-          p_task_id: editingTask.id,
-    
-          p_new_title: updatedData.title,
-    
-          p_new_description: updatedData.description,
-    
-          p_new_due_date: updatedData.due_date,
-    
-          p_new_project_id: updatedData.project_id,
-    
-          p_new_assignee_id: updatedData.assignee_user_id
-    
-        });
-    
-     
-    
-        if (error) {
-    
-          console.error('Error updating task via RPC:', error);
-    
-          alert('Error al guardar los cambios.');
-    
-        }
-    
-     
-    
-        await fetchData();
-    
-        setIsSaving(false);
-    
-      };
+  // En app/projects/[id]/page.tsx
+
+const handleUpdateTask = async (updatedData: TaskUpdatePayload) => {
+  if (!editingTask) return;
+
+  // 1. Mostramos "Guardando..."
+  setIsSaving(true);
+
+  // 2. Enviamos los cambios a la base de datos (RPC)
+  const { error } = await supabase.rpc('update_task', {
+      p_task_id: editingTask.id,
+      p_new_title: updatedData.title,
+      p_new_description: updatedData.description,
+      p_new_due_date: updatedData.due_date,
+      p_new_project_id: updatedData.project_id,
+      p_new_assignee_id: updatedData.assignee_user_id
+  });
+
+  // 3. Si hay un error, paramos y avisamos al usuario
+  if (error) {
+      console.error('Error updating task via RPC:', error);
+      alert('Error al guardar los cambios.');
+      setIsSaving(false); // Dejamos de guardar
+      return; // Detenemos la función
+  }
+
+  // 4. --- ¡AQUÍ ESTÁ LA MAGIA! ---
+  // Si el guardado fue exitoso, NO llamamos a fetchData().
+  // Actualizamos el estado local de React manualmente.
+
+  // 4a. Necesitamos "enriquecer" los datos guardados (como hicimos en fetchData)
+  // para que la UI muestre el email del asignado y el nombre del proyecto.
+  const membersMap = new Map(teamMembers.map((m: TeamMember) => [m.user_id, m.email]));
+  const assigneeEmail = updatedData.assignee_user_id
+      ? membersMap.get(updatedData.assignee_user_id)
+      : undefined;
+  const project = allProjects.find(p => p.id === updatedData.project_id);
+
+  // 4b. Creamos la versión final de la tarea actualizada
+  const fullyUpdatedTask = {
+      ...editingTask, // Empezamos con la tarea que estaba abierta
+      ...updatedData,   // Sobreescribimos con los datos del formulario
+      assignee: typeof assigneeEmail === 'string' ? { email: assigneeEmail } : null, // Actualizamos el email del asignado
+      projects: project || null // Actualizamos el proyecto
+  };
+
+  // 4c. Actualizamos la lista de tareas (el Kanban)
+  setTasks(currentTasks =>
+      currentTasks.map(t =>
+          t.id === editingTask.id ? fullyUpdatedTask : t
+      )
+  );
+
+  // 4d. Actualizamos la tarea que está abierta en el modal
+  // (Esto es clave para que el modal no "pestañee")
+  setEditingTask(fullyUpdatedTask);
+
+  // 5. Ocultamos el "Guardando..."
+  setIsSaving(false);
+};
     
      
     

@@ -220,8 +220,17 @@ useEffect(() => {
       alert('Error: No tienes un equipo activo seleccionado.');
       return; 
     }
+
+    console.log("Datos enviados a create_task_v2:", { 
+      p_title: taskData.title, 
+      p_description: taskData.description, 
+      p_project_id: taskData.projectId,
+      p_due_date: taskData.dueDate, 
+      p_assignee_id: taskData.assigneeId, // <-- ¡Quiero ver esto!
+      p_team_id: profileData.active_team_id
+    });
   
-    const { error } = await supabase.rpc('create_task', { 
+    const { error } = await supabase.rpc('create_task_v2', { 
       p_title: taskData.title, 
       p_description: taskData.description, 
       p_project_id: taskData.projectId, 
@@ -231,8 +240,10 @@ useEffect(() => {
     });
   
     if (error) { 
+      // ¡Este console.error nos dará el objeto completo del error!
+      console.error('Error detallado al crear la tarea:', error); 
       alert('Error al crear la tarea: ' + error.message); 
-    } else { 
+  } else { 
       await fetchData(); 
       closeCreateModal(); 
     }

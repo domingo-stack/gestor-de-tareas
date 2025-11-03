@@ -23,7 +23,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="es">
-      <body className={nunito.className}>
+      <body className={nunito.className} suppressHydrationWarning={true}>
         <AuthProvider> {/* <-- 2. ENVUELVE TODO CON EL PROVIDER */}
           <Navbar />
           {children}

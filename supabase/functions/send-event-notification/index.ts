@@ -88,6 +88,7 @@ if (recipientEmails.length === 0) {
               <h1>${creatorIdentifier} ha creado un nuevo evento:</h1>
               <p class="item"><strong>Evento:</strong> ${newEvent.title}</p>
               <p class="item"><strong>Equipo:</strong> ${newEvent.team}</p>
+              <p class="item"><strong>Equipo:</strong> ${newEvent.description}</p>
               <p class="item"><strong>Fecha:</strong> ${new Date(newEvent.start_date).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
               <a href="https://gestor.califica.ai/calendar" class="button">Ver en el Calendario</a>
             </div>

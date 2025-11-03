@@ -7,7 +7,7 @@ import Notifications from '@/components/Notifications'
 import { useState, useEffect } from 'react'
 
 export default function Navbar() {
-  const { user, supabase } = useAuth()
+  const { user, supabase, isLoading } = useAuth()
   const [role, setRole] = useState<string | null>(null);
   const router = useRouter()
   // El estado de teamName no se usa en el JSX, pero mantenemos la lógica por si acaso.

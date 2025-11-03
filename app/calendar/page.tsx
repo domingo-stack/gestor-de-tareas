@@ -19,7 +19,7 @@ import SelectCell from '@/components/SelectCell';
 console.log('Inspeccionando EditableCell:', EditableCell);
 console.log('Inspeccionando SelectCell:', SelectCell);
 import EditableDateCell from '@/components/EditableDateCell';
-import { EventClickArg, EventContentArg } from '@fullcalendar/core';
+import { EventClickArg, EventContentArg, DatesSetArg } from '@fullcalendar/core';
 const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
     Marketing:        { background: '#fdf2f8', text: '#be185d' }, // Rosa
     Producto:         { background: '#f0fdf4', text: '#166534' }, // Verde
@@ -125,6 +125,7 @@ export default function CalendarPage() {
   const [selectedEvent, setSelectedEvent] = useState<CompanyEvent | null>(null);
   const [oneditEvent, setOneEditEvent] = useState<CompanyEvent | null>(null);
   const [teamFilter, setTeamFilter] = useState('Todos');
+  const [viewDateRange, setViewDateRange] = useState<{ start: Date; end: Date } | null>(null);
   const filteredEvents = useMemo(() => {
     if (teamFilter === 'Todos') {
       return events; // Si el filtro es "Todos", muestra todos los eventos
@@ -136,6 +137,28 @@ export default function CalendarPage() {
     events.filter(event => event.extendedProps.team === 'Marketing'), 
     [events]
 );
+const tableEvents = useMemo(() => {
+  // Si el rango de fechas aún no se ha cargado, mostramos todo lo de marketing
+  if (!viewDateRange) {
+      return marketingEvents;
+  }
+
+  // Convertimos las fechas del rango a un formato comparable (sin la hora)
+  const viewStart = new Date(viewDateRange.start.toDateString());
+  const viewEnd = new Date(viewDateRange.end.toDateString());
+
+  return marketingEvents.filter(event => {
+      // Nos aseguramos de que el evento tenga una fecha de inicio
+      if (!event.start) return false; 
+      
+      // Convertimos la fecha de inicio del evento
+      const eventStart = new Date(new Date(event.start).toDateString());
+      
+      // Comprobamos si la fecha de inicio del evento está DENTRO del rango visible
+      // (FullCalendar nos da 'end' como el día *después* del último día visible, por eso usamos '<')
+      return eventStart >= viewStart && eventStart < viewEnd;
+  });
+}, [marketingEvents, viewDateRange]);
 
   // En app/calendar/page.tsx
 
@@ -354,6 +377,13 @@ const fetchEvents = useCallback(async () => {
       setEvents(currentEvents => [formattedEvent, ...currentEvents]);
     }
   };
+
+  const handleDatesSet = (dateInfo: DatesSetArg) => {
+    setViewDateRange({
+      start: dateInfo.start,
+      end: dateInfo.end
+    });
+  };
   // En app/calendar/page.tsx, dentro del componente CalendarPage
 
 // Definimos las columnas que queremos para la tabla
@@ -513,9 +543,10 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
                     eventClick={handleEventClick}
                     events={filteredEvents} 
                     eventContent={renderEventContent} 
+                    datesSet={handleDatesSet}
                 />
             )}
-            <TableView onUpdateEvent={handleUpdateEventField} columns={marketingColumns} events={marketingEvents} />
+            <TableView onUpdateEvent={handleUpdateEventField} columns={marketingColumns} events={tableEvents} />
             <div className="mt-2">
     <button 
         onClick={handleAddNewRow}
