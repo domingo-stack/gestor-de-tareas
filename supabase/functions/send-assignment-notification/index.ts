@@ -17,6 +17,8 @@ interface TaskPayload {
 }
 
 serve(async (req: Request) => {
+
+  console.log("¡Función de correo INICIADA!");
   const executionId = req.headers.get('x-supabase-edge-execution-id');
   const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
@@ -29,11 +31,14 @@ serve(async (req: Request) => {
 
     const payload: TaskPayload = await req.json();
     const newTask = payload.record;
+    console.log("Payload recibido para tarea ID:", newTask.id);
     
     // Si no hay un usuario asignado, no hacemos nada.
     if (!newTask.assignee_user_id) {
+      console.log("No hay asignado, saliendo.");
       return new Response(JSON.stringify({ message: "No hay usuario asignado, no se notifica." }), { status: 200 });
     }
+    console.log(`Buscando email para usuario: ${newTask.assignee_user_id}`);
 
     // 1. Buscamos el correo del usuario asignado
     const { data: user, error: userError } = await supabaseAdmin.auth.admin.getUserById(newTask.assignee_user_id);
@@ -41,6 +46,7 @@ serve(async (req: Request) => {
     if (!user?.user?.email) throw new Error("Usuario no encontrado o no tiene email.");
 
     const recipientEmail = user.user.email;
+    console.log(`Email encontrado: ${recipientEmail}. Buscando proyecto...`);
     const creatorEmail = "tareas@califica.ai"; // Puedes cambiar esto si quieres
 
     // 2. Buscamos el nombre del proyecto
@@ -52,6 +58,7 @@ serve(async (req: Request) => {
     if (projectError) throw new Error(`Error al buscar proyecto: ${projectError.message}`);
     
     const projectName = project?.name || 'un proyecto';
+    console.log(`Proyecto encontrado: ${projectName}. Enviando correo...`);
     const taskLink = `https://gestor.califica.ai/projects/${newTask.project_id}?task=${newTask.id}`; // Enlace directo a la tarea
 
     // 3. Enviamos el correo
@@ -85,6 +92,11 @@ serve(async (req: Request) => {
               <p>Se te ha asignado la siguiente tarea:</p>
               <p class="item"><strong>Tarea:</strong> ${newTask.title}</p>
               <p class="item"><strong>Proyecto:</strong> ${projectName}</p>
+              <p class="item"><strong>Descripción:</strong> ${
+                (typeof (newTask as any).description === 'string' && (newTask as any).description.trim().length > 0)
+                  ? (newTask as any).description
+                  : 'Sin descripción'
+              }</p>
               <a href="${taskLink}" class="button">Ver Tarea en el Gestor</a>
             </div>
           </div>
@@ -92,6 +104,7 @@ serve(async (req: Request) => {
         </html>
       `,
     });
+    console.log("¡Correo enviado con éxito a Resend!");
 
     // 4. (Opcional) Creamos la notificación en la app también
     await supabaseAdmin.from('notifications').insert({
