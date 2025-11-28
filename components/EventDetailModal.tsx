@@ -48,7 +48,7 @@ const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
 };
 
 const ESTADO_OPTIONS = ['Sin empezar', 'Escribiendo Guión', 'Creando', 'Grabando', 'Editando', 'Programando', 'Publicado'];
-const FORMATO_OPTIONS = ['Post', 'Story', 'Reel'];
+const FORMATO_OPTIONS = ['Post','Blog', 'Story', 'Reel'];
 const PILAR_OPTIONS = ['Educativo', 'Venta', 'Divertido'];
 
 export default function EventDetailModal({ event, onClose, onDelete, onUpdate }: EventDetailModalProps) {
