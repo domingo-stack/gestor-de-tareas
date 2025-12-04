@@ -505,7 +505,7 @@ const tableEvents = useMemo(() => {
 
 // Definimos las columnas que queremos para la tabla
 const ESTADO_OPTIONS = ['Sin estado','Sin empezar', 'Escribiendo Guión', 'Creando', 'Grabando', 'Editando', 'Programando', 'Publicado'];
-const FORMATO_OPTIONS = ['Sin formato', 'Post', 'Blog', 'Story', 'Reel'];
+const FORMATO_OPTIONS = ['Sin formato', 'Post', 'Blog', 'Story', 'Reel', 'In-app Notification', 'Correo'];
 const PILAR_OPTIONS = ['Sin pilar', 'Educativo', 'Venta', 'Divertido'];
 
 // En app/calendar/page.tsx, reemplaza tu 'marketingColumns'
