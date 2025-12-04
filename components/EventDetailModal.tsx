@@ -64,7 +64,7 @@ const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
 };
 
 const ESTADO_OPTIONS = ['Sin estado', 'Sin empezar', 'Escribiendo Guión', 'Creando', 'Grabando', 'Editando', 'Programando', 'Publicado'];
-const FORMATO_OPTIONS = ['Sin formato', 'Post', 'Blog', 'Story', 'Reel'];
+const FORMATO_OPTIONS = ['Sin formato', 'Post', 'Blog', 'Story', 'Reel', 'In-app Notification', 'Correo'];
 const PILAR_OPTIONS = ['Sin pilar', 'Educativo', 'Venta', 'Divertido'];
 
 const DUE_DATE_PRESETS = [
