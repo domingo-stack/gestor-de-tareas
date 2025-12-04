@@ -158,31 +158,61 @@ const fetchData = useCallback(async () => {
 
   // En app/projects/[id]/page.tsx
 
-  const handleAddTask = async (taskData: { title: string; description: string; dueDate: string | null; assigneeId: string | null; projectId: number | null; }) => {
-    // 1. Verificamos que tenemos todo lo necesario.
-    if (!user || !supabase || !project) {
-      alert("Error: No se puede crear la tarea porque falta información del proyecto o del usuario.");
-      return;
+  const handleAddTask = async (taskData: { title: string; description: string; projectId: number | null; dueDate: string | null; assigneeId: string | null; }) => {
+    if (!user) return;
+  
+    const { data: profileData } = await supabase.from('profiles').select('active_team_id').eq('id', user.id).single();
+    if (!profileData?.active_team_id) { 
+      alert('Error: No tienes un equipo activo seleccionado.');
+      return; 
     }
 
-    // 2. Llamamos a la función RPC usando el team_id del proyecto actual.
-    //    No necesitamos buscar el equipo del usuario, ¡ya lo sabemos!
-    const { error } = await supabase.rpc('create_task_v2', { 
-        p_title: taskData.title, 
-        p_description: taskData.description, 
-        p_project_id: projectId, // Usamos el ID del proyecto de la página
-        p_due_date: taskData.dueDate, 
-        p_assignee_id: taskData.assigneeId, 
-        p_team_id: project.team_id // <-- La clave está aquí
-    });
+    // 1. MANTENEMOS TU LÓGICA ACTUAL (RPC)
+    // Forzamos el projectId de la URL si no viene en el formulario
+    const finalProjectId = taskData.projectId || projectId; 
 
+    const { error } = await supabase.rpc('create_task_v2', { 
+      p_title: taskData.title, 
+      p_description: taskData.description, 
+      p_project_id: finalProjectId, 
+      p_due_date: taskData.dueDate, 
+      p_assignee_id: taskData.assigneeId, 
+      p_team_id: profileData.active_team_id
+    });
+  
     if (error) { 
-        alert('Error al crear la tarea: ' + error.message); 
+      console.error('Error detallado al crear la tarea:', error); 
+      alert('Error al crear la tarea: ' + error.message); 
     } else { 
-        await fetchData(); // Refrescamos los datos para ver la nueva tarea
-        setIsCreateTaskModalOpen(false); 
+      // 2. RECUPERACIÓN INTELIGENTE (Buscamos la última creada)
+      const { data: latestTask } = await supabase
+          .from('tasks')
+          .select()
+          .eq('owner_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+      // 3. 🔥 LLAMADA A LA EDGE FUNCTION
+      if (latestTask && latestTask.assignee_user_id) {
+          fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-assignment-notification`, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+              },
+              body: JSON.stringify({ 
+                  record: latestTask,
+                  type: 'INSERT'
+              })
+          }).catch(err => console.error("Error enviando correo:", err));
+      }
+
+      await fetchData(); 
+      setIsCreateTaskModalOpen(false); // Cerramos el modal específico de esta página
     }
   };
+  
   const handleArchiveProject = async () => {
     if (!project) return;
     
@@ -206,19 +236,49 @@ const fetchData = useCallback(async () => {
 
     
     
-      const handleTaskCompleted = async (taskToUpdate: Task) => {
+  const handleTaskCompleted = async (taskToUpdate: Task) => {
+    // 1. Actualización Optimista
+    const newCompletedState = !taskToUpdate.completed;
+    const newTasks = tasks.map(task => task.id === taskToUpdate.id ? { ...task, completed: newCompletedState } : task);
+    setTasks(newTasks);
     
-        const newTasks = tasks.map(task => task.id === taskToUpdate.id ? { ...task, completed: !task.completed } : task);
-    
-        setTasks(newTasks);
-    
-        if (editingTask && editingTask.id === taskToUpdate.id) { setEditingTask({ ...editingTask, completed: !editingTask.completed }); }
-    
-        const { error } = await supabase.from('tasks').update({ completed: !taskToUpdate.completed, completed_at: !taskToUpdate.completed ? new Date().toISOString() : null }).eq('id', taskToUpdate.id);
-    
-        if (error) { console.error('Error updating task:', error); await fetchData(); }
-    
-      };
+    if (editingTask && editingTask.id === taskToUpdate.id) { 
+        setEditingTask({ ...editingTask, completed: newCompletedState }); 
+    }
+
+    // 2. Update en DB
+    const { data: updatedTask, error } = await supabase
+        .from('tasks')
+        .update({ 
+            completed: newCompletedState, 
+            completed_at: newCompletedState ? new Date().toISOString() : null 
+        })
+        .eq('id', taskToUpdate.id)
+        .select()
+        .single();
+
+    if (error) { 
+        console.error('Error updating task:', error); 
+        await fetchData(); // Revertir
+    } else if (updatedTask && newCompletedState === true) {
+        // 3. 🔥 LLAMADA A LA EDGE FUNCTION
+        const actorEmail = user?.email || "Alguien";
+
+        fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-assignment-notification`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify({ 
+                record: updatedTask,
+                old_record: { completed: false }, 
+                type: 'UPDATE',
+                actor_email: actorEmail
+            })
+        }).catch(err => console.error("Error enviando notificación de completado:", err));
+    }
+  };
     
     
     
@@ -413,53 +473,41 @@ const handleUpdateTask = async (updatedData: TaskUpdatePayload) => {
     
     
     
-      const handleCommentAdd = async (content: string) => {
-    
-        if (!editingTask || !user) return;
-    
-    
-    
-        const mentionRegex = /@([\w.-]+@[\w.-]+)/g;
-    
-        const mentionedEmails = [...content.matchAll(mentionRegex)].map(match => match[1]);
-    
-    
-    
-        const membersMap = new Map(teamMembers.map(m => [m.email, m.user_id]));
-    
-        const mentionedUserIds = mentionedEmails
-    
-            .map(email => membersMap.get(email))
-    
-            .filter((id): id is string => id !== undefined);
-    
-    
-    
-        const { data, error } = await supabase.rpc('add_comment_and_notify', {
-    
-            p_task_id: editingTask.id,
-    
-            p_content: content,
-    
-            p_mentioned_user_ids: mentionedUserIds
-    
-        });
-    
-    
-    
-        if (error) {
-    
-            console.error('Error adding comment:', error);
-    
-            alert('Error al añadir comentario: ' + error.message);
-    
-        } else if (data) {
-    
-            setComments([...comments, data as Comment]);
-    
-        }
-    
-      };
+    const handleCommentAdd = async (content: string) => {
+      if (!editingTask || !user) return;
+  
+      // 1. MANTENEMOS TU RPC (Es más seguro si ya tienes lógica ahí)
+      // Calculamos los IDs mencionados como lo hacías antes
+      const mentionRegex = /@([\w.-]+@[\w.-]+)/g;
+      const mentionedEmails = [...content.matchAll(mentionRegex)].map(match => match[1]);
+      const membersMap = new Map(teamMembers.map(m => [m.email, m.user_id]));
+      const mentionedUserIds = mentionedEmails
+        .map(email => membersMap.get(email))
+        .filter((id): id is string => id !== undefined); 
+  
+      const { data, error } = await supabase.rpc('add_comment_and_notify', {
+          p_task_id: editingTask.id,
+          p_content: content,
+          p_mentioned_user_ids: mentionedUserIds
+      });
+  
+      if (error) {
+          console.error('Error adding comment:', error);
+          alert('Error al añadir comentario: ' + error.message);
+      } else if (data) {
+          setComments([...comments, data as Comment]);
+  
+          // 2. 🔥 LLAMADA A LA EDGE FUNCTION (Notificaciones)
+          fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/notify-mentions`, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`
+              },
+              body: JSON.stringify({ record: data }) // 'data' es el comentario creado
+          }).catch(err => console.error("Error enviando notificación:", err));
+      }
+    };
     
     
     

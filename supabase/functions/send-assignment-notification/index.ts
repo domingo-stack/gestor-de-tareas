@@ -2,122 +2,128 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { Resend } from 'https://esm.sh/resend'
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 
-// Interfaz para entender los datos que nos enviará el Trigger
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
 interface TaskPayload {
   record: {
     id: number;
     title: string;
     assignee_user_id: string;
+    owner_id: string;
     project_id: number;
+    completed: boolean;
   };
-  old_record?: { // old_record solo existe en un UPDATE
+  old_record?: {
     assignee_user_id?: string;
+    completed?: boolean;
   };
   type: 'INSERT' | 'UPDATE';
+  actor_email?: string; // <--- Nuevo campo opcional
 }
 
 serve(async (req: Request) => {
-
-  console.log("¡Función de correo INICIADA!");
-  const executionId = req.headers.get('x-supabase-edge-execution-id');
-  const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-
-  const logError = async (message: string, stack: string | null = null) => { /* ... (tu función logError se queda igual) ... */ };
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
 
   try {
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    );
+
     const resendApiKey = Deno.env.get('RESEND_API_KEY');
-    if (!resendApiKey) throw new Error("Falta RESEND_API_KEY.");
+    if (!resendApiKey) throw new Error("Falta RESEND_API_KEY");
     const resend = new Resend(resendApiKey);
 
     const payload: TaskPayload = await req.json();
-    const newTask = payload.record;
-    console.log("Payload recibido para tarea ID:", newTask.id);
+    const { record, old_record, type, actor_email } = payload;
+
+    // Identificar quién asignó (o quien completa si viene el dato)
+    // Si no viene actor_email (caso insert), buscamos al owner
+    let assignerEmail = actor_email || "Alguien";
     
-    // Si no hay un usuario asignado, no hacemos nada.
-    if (!newTask.assignee_user_id) {
-      console.log("No hay asignado, saliendo.");
-      return new Response(JSON.stringify({ message: "No hay usuario asignado, no se notifica." }), { status: 200 });
+    if (!actor_email && record.owner_id) {
+        const { data: ownerData } = await supabaseAdmin.auth.admin.getUserById(record.owner_id);
+        if (ownerData?.user?.email) assignerEmail = ownerData.user.email;
     }
-    console.log(`Buscando email para usuario: ${newTask.assignee_user_id}`);
 
-    // 1. Buscamos el correo del usuario asignado
-    const { data: user, error: userError } = await supabaseAdmin.auth.admin.getUserById(newTask.assignee_user_id);
-    if (userError) throw new Error(`Error al buscar usuario: ${userError.message}`);
-    if (!user?.user?.email) throw new Error("Usuario no encontrado o no tiene email.");
-
-    const recipientEmail = user.user.email;
-    console.log(`Email encontrado: ${recipientEmail}. Buscando proyecto...`);
-    const creatorEmail = "tareas@califica.ai"; // Puedes cambiar esto si quieres
-
-    // 2. Buscamos el nombre del proyecto
-    const { data: project, error: projectError } = await supabaseAdmin
-      .from('projects')
-      .select('name')
-      .eq('id', newTask.project_id)
-      .single();
-    if (projectError) throw new Error(`Error al buscar proyecto: ${projectError.message}`);
+    // --- CASO 1: ASIGNACIÓN (INSERT o cambio de assignee) ---
+    const isNewAssignment = type === 'INSERT' || (type === 'UPDATE' && record.assignee_user_id !== old_record?.assignee_user_id);
     
-    const projectName = project?.name || 'un proyecto';
-    console.log(`Proyecto encontrado: ${projectName}. Enviando correo...`);
-    const taskLink = `https://gestor.califica.ai/projects/${newTask.project_id}?task=${newTask.id}`; // Enlace directo a la tarea
+    if (isNewAssignment && record.assignee_user_id) {
+        // Obtenemos email del destinatario
+        const { data: userData } = await supabaseAdmin.auth.admin.getUserById(record.assignee_user_id);
+        const recipientEmail = userData?.user?.email;
 
-    // 3. Enviamos el correo
-    await resend.emails.send({
-      from: 'tareas@califica.ai',
-      to: recipientEmail,
-      subject: `¡Nueva tarea asignada!: ${newTask.title}`,
-      html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
-            .container { max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-            .header { background-color: #3c527a; color: #ffffff; padding: 20px; text-align: center; }
-            .content { padding: 30px; color: #333; }
-            .content h1 { font-size: 20px; color: #383838; }
-            .content p { line-height: 1.6; }
-            .item { margin-bottom: 10px; }
-            .item strong { color: #3c527a; }
-            .button { display: inline-block; padding: 12px 24px; margin-top: 20px; background-color: #ff8080; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <h2>¡Te han asignado una nueva tarea!</h2>
-            </div>
-            <div class="content">
-              <h1>Hola,</h1>
-              <p>Se te ha asignado la siguiente tarea:</p>
-              <p class="item"><strong>Tarea:</strong> ${newTask.title}</p>
-              <p class="item"><strong>Proyecto:</strong> ${projectName}</p>
-              <p class="item"><strong>Descripción:</strong> ${
-                (typeof (newTask as any).description === 'string' && (newTask as any).description.trim().length > 0)
-                  ? (newTask as any).description
-                  : 'Sin descripción'
-              }</p>
-              <a href="${taskLink}" class="button">Ver Tarea en el Gestor</a>
-            </div>
-          </div>
-        </body>
-        </html>
-      `,
+        // DATOS DEL PROYECTO
+        const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', record.project_id).single();
+        const projectName = project?.name || 'General';
+
+        if (recipientEmail) {
+            // EVITAR ENVÍO DOBLE: Si me asigno tarea a mí mismo, ¿quiero correo?
+            // Si NO quieres correo cuando te asignas a ti mismo, descomenta esto:
+            // if (recipientEmail === assignerEmail) {
+            //    return new Response(JSON.stringify({ message: "Auto-asignación ignorada" }), { status: 200, headers: corsHeaders });
+            // }
+
+            await resend.emails.send({
+                from: 'tareas@califica.ai',
+                to: [recipientEmail], // Solo al asignado
+                subject: `📋 ${assignerEmail} te asignó una tarea`,
+                html: `
+                  <div style="font-family: sans-serif; color: #333;">
+                    <h2 style="color: #3c527a;">Nueva Asignación</h2>
+                    <p><strong>${assignerEmail}</strong> te ha asignado:</p>
+                    <div style="background: #f9f9f9; padding: 15px; border-left: 4px solid #ff8080; margin: 20px 0;">
+                        <p style="margin: 5px 0;"><strong>Tarea:</strong> ${record.title}</p>
+                        <p style="margin: 5px 0;"><strong>Proyecto:</strong> ${projectName}</p>
+                    </div>
+                    <a href="https://gestor.califica.ai/projects/${record.project_id}?task=${record.id}" style="background:#3c527a; color:white; padding:10px 20px; text-decoration:none; border-radius:5px;">Ver Tarea</a>
+                  </div>
+                `
+            });
+        }
+    }
+
+    // --- CASO 2: TAREA COMPLETADA ---
+    if (type === 'UPDATE' && record.completed === true && old_record?.completed === false) {
+        // Notificamos al DUEÑO de la tarea (owner_id)
+        if (record.owner_id) {
+            const { data: ownerUser } = await supabaseAdmin.auth.admin.getUserById(record.owner_id);
+            const ownerEmail = ownerUser?.user?.email;
+
+            // No notificar si el dueño es el mismo que la completó (Opcional, pero recomendado)
+            if (ownerEmail && ownerEmail !== actor_email) {
+                await resend.emails.send({
+                    from: 'tareas@califica.ai',
+                    to: [ownerEmail],
+                    subject: `✅ Tarea completada por ${assignerEmail}`,
+                    html: `
+                      <div style="font-family: sans-serif; color: #333;">
+                        <h2 style="color: #166534;">¡Tarea Finalizada!</h2>
+                        <p><strong>${assignerEmail}</strong> ha marcado como completada la tarea:</p>
+                        <p style="font-size: 18px; font-weight: bold;">"${record.title}"</p>
+                        <a href="https://gestor.califica.ai/projects/${record.project_id}?task=${record.id}" style="color: #3c527a;">Ver tarea</a>
+                      </div>
+                    `
+                });
+            }
+        }
+    }
+
+    return new Response(JSON.stringify({ message: "OK" }), { 
+      status: 200, 
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
-    console.log("¡Correo enviado con éxito a Resend!");
 
-    // 4. (Opcional) Creamos la notificación en la app también
-    await supabaseAdmin.from('notifications').insert({
-      recipient_user_id: newTask.assignee_user_id,
-      message: `Te asignaron la tarea: "${newTask.title}" en el proyecto ${projectName}`,
-      link_url: taskLink,
+  } catch (error: any) {
+    return new Response(JSON.stringify({ error: error.message }), { 
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
-
-    return new Response(JSON.stringify({ message: "OK" }), { status: 200 });
-
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Ocurrió un error desconocido';
-    await logError(errorMessage, error instanceof Error ? error.stack : null);
-    return new Response(JSON.stringify({ error: errorMessage }), { status: 500 });
   }
 });

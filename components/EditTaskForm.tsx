@@ -8,6 +8,8 @@ import { Listbox, Transition } from '@headlessui/react'
 import { CheckIcon, UserPlusIcon, XCircleIcon, CalendarDaysIcon, FolderIcon, UserCircleIcon } from '@heroicons/react/24/outline'
 import { User } from '@supabase/supabase-js'
 import { TaskUpdatePayload } from '@/lib/types';
+import MediaTextarea from '@/components/MediaTextarea';
+import { stripHtml } from '@/lib/textUtils';
 
 type EditTaskFormProps = {
   task: Task;
@@ -51,7 +53,7 @@ export default function EditTaskForm({
   onCollaboratorAdd,
 }: EditTaskFormProps) {
   const [title, setTitle] = useState(task.title);
-  const [description, setDescription] = useState(task.description || '');
+  const [description, setDescription] = useState(stripHtml(task.description) || '');
   const [dueDate, setDueDate] = useState(task.due_date ? task.due_date.split('T')[0] : '');
   const [selectedProjectId, setSelectedProjectId] = useState<number | ''>(task.projects?.id || '');
   const [selectedAssigneeId, setSelectedAssigneeId] = useState<string | ''>(task.assignee_user_id || '');
@@ -144,7 +146,7 @@ export default function EditTaskForm({
 
   useEffect(() => {
     setTitle(task.title);
-    setDescription(task.description || '');
+    setDescription(stripHtml(task.description) || '');
     setDueDate(task.due_date ? task.due_date.split('T')[0] : '');
     setSelectedProjectId(task.projects?.id || '');
     setSelectedAssigneeId(task.assignee_user_id || '');
@@ -163,6 +165,8 @@ export default function EditTaskForm({
       onCommentAdd(newComment.trim());
       setNewComment('');
     }
+
+    
   };
 
   const isCompleted = task.completed;
@@ -232,10 +236,15 @@ export default function EditTaskForm({
   
         <div className="mb-8">
           <label className="block text-sm font-medium text-gray-600 mb-2">Descripción</label>
-          <RichTextEditor 
-              content={description} 
-              onChange={(newDescription) => {setDescription(newDescription)}}
-              disabled={isCompleted} 
+          <MediaTextarea 
+              value={description}
+              // 👇 TIPO EXPLÍCITO AQUÍ TAMBIÉN
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDescription(e.target.value)} 
+              onTextInsert={(text: string) => setDescription(text)}
+              
+              disabled={isCompleted}
+              placeholder="Describe la tarea, pega imágenes (Ctrl+V) o añade enlaces..."
+              rows={6}
           />
         </div>
       </div>
@@ -297,14 +306,20 @@ export default function EditTaskForm({
           <Avatar email={currentUser?.email}/>
           <div className="flex-1">
             <div className="mentions-container">
-              <textarea 
-                ref={commentTextareaRef}
+            <MediaTextarea 
+                ref={commentTextareaRef} // Mantenemos la ref para las menciones
                 value={newComment} 
+                
+                // Mantenemos tu lógica de menciones intacta
                 onChange={handleCommentChange} 
                 onKeyDown={handleCommentKeyDown}
-                placeholder="Escribe un comentario..." 
+                
+                // Nueva lógica: Qué hacer cuando se sube una imagen
+                onTextInsert={(text: string) => setNewComment(text)}
+                
+                placeholder="Escribe un comentario o pega una imagen..." 
                 rows={3} 
-                className="w-full p-2 border border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500"
+                className="w-full" // El estilo interno ya lo maneja el componente, pero ajustamos el contenedor
                 disabled={isCompleted}
                 onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
               />

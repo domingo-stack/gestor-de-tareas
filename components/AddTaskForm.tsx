@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { useAuth } from '@/context/AuthContext';
-import RichTextEditor from './RichTextEditor'
+import MediaTextarea from './MediaTextarea';
+import { stripHtml } from '@/lib/textUtils';
 
 type TeamMember = { user_id: string; email: string; role: string; };
 type Project = { id: number; name: string; };
@@ -73,7 +74,13 @@ export default function AddTaskForm({ onAddTask, projects, onCancel }: AddTaskFo
         
         <div>
           <label className="text-sm font-medium text-gray-500">Descripción</label>
-          <RichTextEditor content={description} onChange={setDescription} disabled={false} />
+          <MediaTextarea 
+            value={description} 
+            // 👇 AQUÍ AGREGAMOS EL TIPO EXPLÍCITO
+            onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setDescription(e.target.value)} 
+            onTextInsert={(text: string) => setDescription(text)}
+            placeholder="Detalles, enlaces, o pega una imagen (Ctrl+V)..."
+          />
         </div>
   
         <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-4">

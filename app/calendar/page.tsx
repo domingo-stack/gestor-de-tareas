@@ -19,7 +19,7 @@ import SelectCell from '@/components/SelectCell';
 console.log('Inspeccionando EditableCell:', EditableCell);
 console.log('Inspeccionando SelectCell:', SelectCell);
 import EditableDateCell from '@/components/EditableDateCell';
-import { EventClickArg, EventContentArg, DatesSetArg } from '@fullcalendar/core';
+import { EventClickArg, EventContentArg, DatesSetArg, EventDropArg } from '@fullcalendar/core';
 const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
     Marketing:        { background: '#fdf2f8', text: '#be185d' }, // Rosa
     Producto:         { background: '#f0fdf4', text: '#166534' }, // Verde
@@ -49,7 +49,8 @@ const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
     backgroundColor?: string; // <-- AÑADE ESTA LÍNEA
     textColor?: string;     // <-- Y ESTA LÍNEA
     borderColor?: string;
-    is_draft?: boolean;   // <-- Y ESTA LÍNEA
+    is_draft?: boolean;
+    task_id?: number | null;   // <-- Y ESTA LÍNEA
     extendedProps: {
       description: string | null;
       video_link: string | null;
@@ -58,7 +59,7 @@ const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
     }
   };
   // Debajo de tu "type CompanyEvent"
-type CompanyEventFromDB = {
+  type CompanyEventFromDB = {
     id: number;
     title: string;
     start_date: string;
@@ -67,48 +68,63 @@ type CompanyEventFromDB = {
     video_link: string | null;
     team: string;
     is_draft: boolean;
-    custom_data: any; // Dejamos 'any' aquí a propósito porque custom_data es flexible por diseño.
-  };
+    task_id?: number | null;
+    custom_data: any;
+    // 👇 CAMBIO: Aceptamos Objeto O Array para evitar errores
+    task_data?: {
+      status: string;
+      completed: boolean;
+    } | {
+      status: string;
+      completed: boolean;
+    }[] | null; 
+};
 
   // --- PLANTILLA PARA DISEÑAR CADA EVENTO EN EL CALENDARIO ---
+  // --- PLANTILLA PARA DISEÑAR CADA EVENTO EN EL CALENDARIO ---
   function renderEventContent(eventInfo: EventContentArg) {
-    // 'eventInfo' es un objeto que nos da FullCalendar con todos los datos del evento.
+    // 1. Extraemos las propiedades que calculamos en fetchEvents
+    const { custom_data, has_task, is_completed } = eventInfo.event.extendedProps;
+    
+    // Debug rápido: Si abres la consola y pasas el mouse, verás que aquí también llega TRUE
+    // console.log("Renderizando:", eventInfo.event.title, "Completado:", is_completed);
+
+    const estado = custom_data?.Estado;
+    const formato = custom_data?.Formato;
+    const pilar = custom_data?.['Pilar de Contenido'];
   
-    // 1. Extraemos los datos que queremos mostrar.
-    //    Nuestros datos personalizados están en 'extendedProps.custom_data'.
-    const { custom_data } = eventInfo.event.extendedProps;
-    const estado = custom_data?.Estado; // Usamos '?' por si el evento no tiene este dato
-    const formato = custom_data?.Formato; 
-    const pilar = custom_data?.['Pilar de Contenido']; // Usamos '?' por si el evento no tiene este dato
-  
-    // 2. Devolvemos el HTML (en formato JSX) que queremos mostrar dentro de la tarjeta.
     return (
-      <div className="p-1 overflow-hidden text-xs w-full">
-        {/* Primero, mostramos el título del evento en negrita */}
-        <b className="truncate block">{eventInfo.event.title}</b>
+      <div className="p-1 overflow-hidden text-xs w-full relative">
         
-        {/* Luego, creamos un contenedor para nuestras etiquetas personalizadas */}
+        {/* --- LÓGICA VISUAL DE ESTADO --- */}
+        {has_task && (
+            is_completed ? (
+                /* CASO A: TAREA COMPLETADA (Doble Check Verde) ✅✅ */
+                <div className="absolute top-0 right-0 bg-green-50 rounded-full p-0.5 shadow-sm border border-green-200 flex -space-x-1 z-10" title="Tarea Completada">
+                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-green-600">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-green-600">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                </div>
+            ) : (
+                /* CASO B: TAREA PENDIENTE (Check Simple Morado) ☑️ */
+                <div className="absolute top-0 right-0 bg-white rounded-full p-0.5 shadow-sm border border-gray-200 z-10" title="Tarea Pendiente">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-purple-600">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                    </svg>
+                </div>
+            )
+        )}
+
+        {/* Título y Etiquetas (Sin cambios) */}
+        <b className="truncate block pr-6">{eventInfo.event.title}</b>
+        
         <div className="flex flex-wrap gap-1 mt-1">
-          
-          {/* Creamos la etiqueta para 'Estado' (solo si el dato existe) */}
-          {estado && (
-            <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded-full font-medium">
-              {estado}
-            </span>
-          )}
-  
-          {/* Creamos la etiqueta para 'Formato' (solo si el dato existe) */}
-          {formato && (
-            <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full font-medium">
-              {formato}
-            </span>
-          )}
-          {/* Creamos la etiqueta para 'Pilar de Contenido' (solo si el dato existe) */}
-          {pilar && (
-            <span className="bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full font-medium">
-              {pilar}
-            </span>
-          )}
+          {estado && <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded-full font-medium">{estado}</span>}
+          {formato && <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full font-medium">{formato}</span>}
+          {pilar && <span className="bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full font-medium">{pilar}</span>}
         </div>
       </div>
     );
@@ -162,16 +178,56 @@ const tableEvents = useMemo(() => {
 
   // En app/calendar/page.tsx
 
-const fetchEvents = useCallback(async () => {
+  const fetchEvents = useCallback(async () => {
     if (!supabase) return;
     setLoading(true);
-    const { data, error } = await supabase.from('company_events').select('*');
+
+    const { data, error } = await supabase
+      .from('company_events')
+      .select(`
+        *,
+        task_data:tasks!company_events_task_id_fkey (
+          status,
+          completed
+        )
+      `);
 
     if (error) {
         console.error('Error fetching company events:', error);
     } else if (data) {
-        const formattedEvents = data.map((event: CompanyEventFromDB) => {
+        // Log para depuración (Míralo en la consola del navegador F12)
+        console.log("🔥 Datos crudos de eventos:", data);
+
+        const eventsData = data as unknown as CompanyEventFromDB[];
+
+        const formattedEvents = eventsData.map((event) => {
             const teamColor = TEAM_COLORS[event.team] || TEAM_COLORS['General'];
+            
+            // 👇 LÓGICA HÍBRIDA (A prueba de errores) 👇
+            let linkedTask = null;
+
+            if (event.task_data) {
+                if (Array.isArray(event.task_data)) {
+                    // Si por alguna razón llega como array, tomamos el primero
+                    linkedTask = event.task_data.length > 0 ? event.task_data[0] : null;
+                } else {
+                    // Si llega como objeto (lo más probable), lo usamos directo
+                    linkedTask = event.task_data;
+                }
+            }
+            
+            const isCompleted = linkedTask?.completed === true;
+
+            if (event.title === "Esto es una prueba") { // O el nombre de tu evento
+              console.warn("🕵️ REPORTE PARA EL DEV:", {
+                  Titulo: event.title,
+                  Tiene_Task_ID: event.task_id,
+                  Data_Tarea_Cruda: event.task_data, // ¿Viene null o con datos?
+                  Tarea_Procesada: linkedTask,
+                  Esta_Completada: isCompleted
+              });
+          }
+
             return {
                 id: String(event.id),
                 title: event.title,
@@ -181,19 +237,22 @@ const fetchEvents = useCallback(async () => {
                 textColor: teamColor.text,
                 borderColor: teamColor.text,
                 is_draft: event.is_draft,
+                task_id: event.task_id,
                 extendedProps: {
                     description: event.description,
                     video_link: event.video_link,
                     team: event.team,
-                    // --- LA LÍNEA QUE FALTABA ---
-                    custom_data: event.custom_data 
+                    custom_data: event.custom_data,
+                    
+                    has_task: !!event.task_id,
+                    is_completed: isCompleted
                 }
             };
         });
         setEvents(formattedEvents);
     }
     setLoading(false);
-}, [supabase]);
+  }, [supabase]);
   
 
   useEffect(() => {
@@ -240,21 +299,79 @@ const fetchEvents = useCallback(async () => {
     end_date: string | null;
     team: string;
     video_link: string | null;
+    custom_data?: any;
+    // 👇 Nuevos campos opcionales para la lógica de tareas
+    create_task?: boolean;
+    task_assignee_id?: string;
+    task_project_id?: number;
+    task_due_date?: string;
   };
   
+  // app/calendar/page.tsx
+
   const handleUpdateEvent = async (eventId: string, updatedData: EventUpdatePayload) => {
     if (!supabase) return;
-  
-    const { error } = await supabase
-      .from('company_events')
-      .update(updatedData) // Pasamos todos los datos actualizados
-      .eq('id', Number(eventId));
-  
-    if (error) {
-      alert('Error al actualizar el evento: ' + error.message);
-    } else {
-      setSelectedEvent(null);
-      await fetchEvents();
+
+    // 1. DESESTRUCTURACIÓN (El paso clave que falta)
+    // Separamos los datos visuales (create_task, etc) de los datos reales del evento
+    const {
+        create_task,
+        task_assignee_id,
+        task_project_id,
+        task_due_date,
+        ...eventFields // <--- Aquí quedan SOLO los campos que sí existen en company_events
+    } = updatedData;
+
+    try {
+        let taskIdToLink = null;
+
+        // 2. Si el usuario pidió crear tarea, la creamos
+        if (create_task) {
+             if (!user) throw new Error("Debes iniciar sesión para crear tareas.");
+
+             const newTaskPayload = {
+                 title: eventFields.title,
+                 description: eventFields.description,
+                 status: 'Por Hacer',
+                 project_id: task_project_id || null,
+                 assignee_user_id: task_assignee_id || null,
+                 owner_id: user.id,
+                 team_id: 2, 
+                 due_date: task_due_date || null,
+                 completed: false
+             };
+
+             const { data: taskData, error: taskError } = await supabase
+                 .from('tasks')
+                 .insert(newTaskPayload)
+                 .select('id')
+                 .single();
+
+             if (taskError) throw taskError;
+             taskIdToLink = taskData.id;
+        }
+
+        // 3. ACTUALIZAMOS EL EVENTO (Usando eventFields limpios)
+        const finalEventPayload: any = { ...eventFields };
+        
+        if (taskIdToLink) {
+            finalEventPayload.task_id = taskIdToLink;
+        }
+
+        const { error } = await supabase
+          .from('company_events')
+          .update(finalEventPayload) // <--- Ahora sí, sin campos basura
+          .eq('id', Number(eventId));
+      
+        if (error) throw error;
+
+        // 4. Éxito
+        setSelectedEvent(null);
+        await fetchEvents();
+
+    } catch (error: any) {
+        console.error("Error en update:", error);
+        alert('Error al actualizar el evento: ' + error.message);
     }
   };
 
@@ -387,9 +504,9 @@ const fetchEvents = useCallback(async () => {
   // En app/calendar/page.tsx, dentro del componente CalendarPage
 
 // Definimos las columnas que queremos para la tabla
-const ESTADO_OPTIONS = ['Sin empezar', 'Escribiendo Guión', 'Creando', 'Grabando', 'Editando', 'Programando', 'Publicado'];
-const FORMATO_OPTIONS = ['Post', 'Story', 'Reel'];
-const PILAR_OPTIONS = ['Educativo', 'Venta', 'Divertido'];
+const ESTADO_OPTIONS = ['Sin estado','Sin empezar', 'Escribiendo Guión', 'Creando', 'Grabando', 'Editando', 'Programando', 'Publicado'];
+const FORMATO_OPTIONS = ['Sin formato', 'Post', 'Blog', 'Story', 'Reel'];
+const PILAR_OPTIONS = ['Sin pilar', 'Educativo', 'Venta', 'Divertido'];
 
 // En app/calendar/page.tsx, reemplaza tu 'marketingColumns'
 
@@ -479,6 +596,64 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
     }
   ];
 
+  // --- LÓGICA DE DRAG & DROP ---
+  const handleEventDrop = async (info: EventDropArg) => {
+    if (!supabase) return;
+
+    // 1. Capturamos los datos
+    const eventId = info.event.id;
+    const newStart = info.event.start;
+    const newEnd = info.event.end;
+    const taskId = info.event.extendedProps.task_id; // Aquí usamos el ID que mapeamos en fetchEvents
+
+    // Helper para formatear fecha a YYYY-MM-DD
+    const toISODate = (d: Date) => d.toISOString().split('T')[0];
+
+    if (!newStart) return;
+
+    try {
+      // 2. Actualizamos el Evento en Supabase
+      const updatePayload: any = {
+        start_date: toISODate(newStart),
+      };
+      if (newEnd) {
+        updatePayload.end_date = toISODate(newEnd);
+      }
+
+      const { error: eventError } = await supabase
+        .from('company_events')
+        .update(updatePayload)
+        .eq('id', Number(eventId));
+
+      if (eventError) throw eventError;
+
+      // 3. Sincronización: Si tiene tarea vinculada, la movemos
+      if (taskId) {
+        // Lógica de negocio: La tarea vence 1 día antes del evento (igual que en tu modal)
+        const newTaskDueDate = new Date(newStart);
+        newTaskDueDate.setDate(newTaskDueDate.getDate() - 1); 
+        
+        const { error: taskError } = await supabase
+          .from('tasks') // Asegúrate de que tu tabla pública sea 'tasks'
+          .update({ due_date: toISODate(newTaskDueDate) })
+          .eq('id', taskId);
+
+        if (taskError) {
+            console.error('Error sincronizando tarea:', taskError);
+            // No revertimos el evento porque el evento sí se movió bien, solo avisamos
+            alert('El evento se movió, pero hubo un error actualizando la fecha de la tarea.');
+        } else {
+            console.log('Sincronización exitosa: Tarea movida al', toISODate(newTaskDueDate));
+        }
+      }
+
+    } catch (error) {
+      console.error('Error al mover evento:', error);
+      alert('No se pudo mover el evento. Intenta nuevamente.');
+      info.revert(); // IMPORTANTE: Devuelve el evento a su posición original visualmente
+    }
+  };
+
   return (
     <AuthGuard>
       <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
@@ -544,6 +719,8 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
                     events={filteredEvents} 
                     eventContent={renderEventContent} 
                     datesSet={handleDatesSet}
+                    editable={true}              // Permite arrastrar
+    eventDrop={handleEventDrop}
                 />
             )}
             <TableView onUpdateEvent={handleUpdateEventField} columns={marketingColumns} events={tableEvents} />
