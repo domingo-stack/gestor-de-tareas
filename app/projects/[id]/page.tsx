@@ -2,7 +2,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Task, Comment, Project, ProjectMember, TeamMember, Collaborator, TaskUpdatePayload, CollaboratorRecord } from '@/lib/types'
 import Modal from '@/components/Modal'
@@ -20,6 +20,7 @@ import DeleteProjectModal from '@/components/DeleteProjectModal'
 import { TrashIcon } from '@/components/icons/TrashIcon'
 import ProjectDriveLink from '@/components/ProjectDriveLink'
 import Dropdown from '@/components/Dropdown'
+
 
 const KANBAN_COLUMNS = ['Por Hacer', 'En Progreso', 'Hecho'];
 
@@ -53,10 +54,12 @@ export default function ProjectDetailPage() {
   // Removed duplicate setCreateModalContent definition
   const [isSaving, setIsSaving] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
-
+  const searchParams = useSearchParams();
   const [statusFilter, setStatusFilter] = useState<StatusFilterValue>('all');
   const [assigneeFilter, setAssigneeFilter] = useState<string>('all');
-  
+  const closeCreateModal = () => {
+    setIsCreateTaskModalOpen(false);
+  };
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
   const handleArchiveTask = async (taskId: number) => {
     // Quita la tarea de la vista inmediatamente
@@ -133,6 +136,24 @@ const fetchData = useCallback(async () => {
     fetchData();
   }, [fetchData]);
 
+    // 👇 PEGA ESTE EFECTO NUEVO ANTES DEL RETURN
+useEffect(() => {
+  // Si hay tareas cargadas y tenemos un parámetro 'task' en la URL...
+  const taskIdFromUrl = searchParams.get('task');
+
+  if (taskIdFromUrl && tasks.length > 0 && !editingTask) {
+      const taskToOpen = tasks.find(t => t.id === Number(taskIdFromUrl));
+
+      if (taskToOpen) {
+          // ...Simulamos que el usuario hizo click en la tarea
+          handleSelectTask(taskToOpen);
+
+          // Opcional: Limpiamos la URL para que no se reabra al refrescar (puedes quitar esta línea si prefieres mantener el link)
+          // router.replace(`/projects/${projectId}`, { scroll: false });
+      }
+  }
+}, [tasks, searchParams]); // Se ejecuta cuando cargan las tareas o cambia la URL
+
   const filteredTasks = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
     return tasks.filter(task => {
@@ -157,6 +178,21 @@ const fetchData = useCallback(async () => {
   }, [tasks, statusFilter, assigneeFilter]);
 
   // En app/projects/[id]/page.tsx
+  const handleCloseEditModal = () => {
+    setEditingTask(null); // 1. Cerramos el modal visualmente
+
+    // 2. Revisamos si hay boleto de regreso
+    const returnTo = searchParams.get('returnTo');
+    
+    if (returnTo) {
+      router.push(returnTo); // ✈️ Volvemos al calendario
+    } else {
+      // Si no hay boleto, solo limpiamos la URL para que no quede ?task=...
+      const newParams = new URLSearchParams(searchParams.toString());
+      newParams.delete('task');
+      router.replace(`/projects/${projectId}?${newParams.toString()}`, { scroll: false });
+    }
+  };
 
   const handleAddTask = async (taskData: { title: string; description: string; projectId: number | null; dueDate: string | null; assigneeId: string | null; }) => {
     if (!user) return;
@@ -581,6 +617,8 @@ const handleUpdateTask = async (updatedData: TaskUpdatePayload) => {
     throw new Error('Function not implemented.')
   }
 
+
+
   return (
     <AuthGuard>
       <DndContext sensors={sensors} collisionDetection={rectIntersection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -728,7 +766,7 @@ const handleUpdateTask = async (updatedData: TaskUpdatePayload) => {
                 currentUser={user}
                 isSaving={isSaving}
                 onSave={handleUpdateTask}
-                onCancel={() => setEditingTask(null)}
+                onCancel={handleCloseEditModal}
                 onCommentAdd={handleCommentAdd}
                 onToggleComplete={handleTaskCompleted}
                 onCollaboratorAdd={handleCollaboratorAdd}

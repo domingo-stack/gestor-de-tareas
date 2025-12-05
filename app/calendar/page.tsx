@@ -20,6 +20,14 @@ console.log('Inspeccionando EditableCell:', EditableCell);
 console.log('Inspeccionando SelectCell:', SelectCell);
 import EditableDateCell from '@/components/EditableDateCell';
 import { EventClickArg, EventContentArg, DatesSetArg, EventDropArg } from '@fullcalendar/core';
+// Removed conflicting import of TeamMember from '@/lib/types'
+
+type TeamMember = {
+  user_id: string;
+  email: string;
+  role: string;
+};
+
 const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
     Marketing:        { background: '#fdf2f8', text: '#be185d' }, // Rosa
     Producto:         { background: '#f0fdf4', text: '#166534' }, // Verde
@@ -139,6 +147,14 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<CompanyEvent | null>(null);
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  useEffect(() => {
+    const fetchMembers = async () => {
+      const { data } = await supabase.rpc('get_team_members');
+      if (data) setTeamMembers(data);
+  };
+  fetchMembers();
+  }, [supabase]);
   const [oneditEvent, setOneEditEvent] = useState<CompanyEvent | null>(null);
   const [teamFilter, setTeamFilter] = useState('Todos');
   const [viewDateRange, setViewDateRange] = useState<{ start: Date; end: Date } | null>(null);
@@ -162,7 +178,7 @@ const tableEvents = useMemo(() => {
   // Convertimos las fechas del rango a un formato comparable (sin la hora)
   const viewStart = new Date(viewDateRange.start.toDateString());
   const viewEnd = new Date(viewDateRange.end.toDateString());
-
+  
   return marketingEvents.filter(event => {
       // Nos aseguramos de que el evento tenga una fecha de inicio
       if (!event.start) return false; 
@@ -183,14 +199,19 @@ const tableEvents = useMemo(() => {
     setLoading(true);
 
     const { data, error } = await supabase
-      .from('company_events')
-      .select(`
-        *,
-        task_data:tasks!company_events_task_id_fkey (
-          status,
-          completed
-        )
-      `);
+        .from('company_events')
+        .select(`
+          *,
+          task_data:tasks (
+            id,
+            title,
+            status,
+            completed,
+            project_id,
+            assignee_user_id
+          )
+        `) // <--- Fíjate que aquí ya no hay barras // ni texto extra
+        
 
     if (error) {
         console.error('Error fetching company events:', error);
@@ -243,6 +264,7 @@ const tableEvents = useMemo(() => {
                     video_link: event.video_link,
                     team: event.team,
                     custom_data: event.custom_data,
+                    task_data: linkedTask, // <--- Añadimos la tarea procesada
                     
                     has_task: !!event.task_id,
                     is_completed: isCompleted
@@ -748,7 +770,7 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
         onClose={() => setSelectedEvent(null)}
         onDelete={handleDeleteEvent}
         onUpdate={handleUpdateEvent}
+        teamMembers={teamMembers}
       />
     </AuthGuard>
-  );
-}
+  );}
