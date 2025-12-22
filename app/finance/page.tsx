@@ -544,36 +544,67 @@ const handleDelete = async (id: string) => {
                            </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-                           {/* SECCIÓN REVENUE */}
-                           {pnlData.matrix['REVENUE'] && <PnLSection title="Ingresos" data={pnlData.matrix['REVENUE']} details={pnlData.detailMatrix} parentKey="REVENUE" months={pnlData.sortedMonths} totalColor="bg-green-50/50" />}
-                           
-                           {/* SECCIÓN COGS */}
-                           {pnlData.matrix['COGS'] && <PnLSection title="Costo de Venta (COGS)" data={pnlData.matrix['COGS']} details={pnlData.detailMatrix} parentKey="COGS" months={pnlData.sortedMonths} />}
-                           
-                           {/* MARGEN BRUTO */}
-                           <tr className="bg-blue-50 border-y-2 border-blue-100">
-                              <td className="px-6 py-3 font-bold text-gray-900 sticky left-0 bg-blue-50 border-r border-blue-200 z-10">MARGEN BRUTO ($)</td>
-                              {pnlData.sortedMonths.map(m => {
-                                 const gross = getParentTotal('REVENUE', m) - getParentTotal('COGS', m);
-                                 return <td key={m} className="px-6 py-3 text-right font-bold text-gray-800">{fmt(gross)}</td>
-                              })}
-                           </tr>
+  {/* SECCIÓN REVENUE */}
+  {pnlData.matrix['REVENUE'] && <PnLSection title="Ingresos" data={pnlData.matrix['REVENUE']} details={pnlData.detailMatrix} parentKey="REVENUE" months={pnlData.sortedMonths} totalColor="bg-green-50/50" />}
+  
+  {/* SECCIÓN COGS */}
+  {pnlData.matrix['COGS'] && <PnLSection title="Costo de Venta (COGS)" data={pnlData.matrix['COGS']} details={pnlData.detailMatrix} parentKey="COGS" months={pnlData.sortedMonths} />}
+  
+  {/* --- MARGEN BRUTO ($) --- */}
+  <tr className="bg-blue-50 border-t-2 border-blue-100">
+      <td className="px-6 py-3 font-bold text-gray-900 sticky left-0 bg-blue-50 border-r border-blue-200 z-10">MARGEN BRUTO ($)</td>
+      {pnlData.sortedMonths.map(m => {
+          const gross = getParentTotal('REVENUE', m) - getParentTotal('COGS', m);
+          return <td key={m} className="px-6 py-3 text-right font-bold text-gray-800">{fmt(gross)}</td>
+      })}
+  </tr>
+  {/* --- MARGEN BRUTO (%) [NUEVO] --- */}
+  <tr className="bg-blue-50/50 border-b-2 border-blue-100">
+      <td className="px-6 py-2 text-xs font-semibold text-blue-800 sticky left-0 bg-blue-50/50 border-r border-blue-200 z-10 pl-10">↳ Margen Bruto %</td>
+      {pnlData.sortedMonths.map(m => {
+          const rev = getParentTotal('REVENUE', m);
+          const gross = rev - getParentTotal('COGS', m);
+          // Evitamos división por cero
+          const pct = rev !== 0 ? (gross / rev) : 0;
+          return <td key={m} className="px-6 py-2 text-right text-xs font-bold text-blue-600">
+            {(pct * 100).toFixed(1)}%
+          </td>
+      })}
+  </tr>
 
-                           {/* SECCIÓN OPEX */}
-                           {pnlData.matrix['OPEX'] && <PnLSection title="Gastos Operativos (OpEx)" data={pnlData.matrix['OPEX']} details={pnlData.detailMatrix} parentKey="OPEX" months={pnlData.sortedMonths} />}
-                           
-                           {/* SECCIÓN TAX */}
-                           {pnlData.matrix['TAX'] && <PnLSection title="Impuestos" data={pnlData.matrix['TAX']} details={pnlData.detailMatrix} parentKey="TAX" months={pnlData.sortedMonths} />}
-                           
-                           {/* UTILIDAD NETA */}
-                           <tr className="bg-gray-900 text-white font-bold text-base">
-                              <td className="px-6 py-4 sticky left-0 bg-gray-900 border-r border-gray-700 z-10">UTILIDAD NETA</td>
-                              {pnlData.sortedMonths.map(m => {
-                                 const net = getParentTotal('REVENUE', m) - getParentTotal('COGS', m) - getParentTotal('OPEX', m) - getParentTotal('TAX', m);
-                                 return <td key={m} className={`px-6 py-4 text-right ${net < 0 ? 'text-red-300' : 'text-emerald-300'}`}>{fmt(net)}</td>
-                              })}
-                           </tr>
-                        </tbody>
+  {/* SECCIÓN OPEX */}
+  {pnlData.matrix['OPEX'] && <PnLSection title="Gastos Operativos (OpEx)" data={pnlData.matrix['OPEX']} details={pnlData.detailMatrix} parentKey="OPEX" months={pnlData.sortedMonths} />}
+  
+  {/* SECCIÓN TAX */}
+  {pnlData.matrix['TAX'] && <PnLSection title="Impuestos" data={pnlData.matrix['TAX']} details={pnlData.detailMatrix} parentKey="TAX" months={pnlData.sortedMonths} />}
+  
+  {/* --- UTILIDAD NETA ($) --- */}
+  <tr className="bg-gray-900 text-white font-bold text-base border-t border-gray-700">
+      <td className="px-6 py-4 sticky left-0 bg-gray-900 border-r border-gray-700 z-10">UTILIDAD NETA ($)</td>
+      {pnlData.sortedMonths.map(m => {
+          const net = getParentTotal('REVENUE', m) - getParentTotal('COGS', m) - getParentTotal('OPEX', m) - getParentTotal('TAX', m);
+          return <td key={m} className={`px-6 py-4 text-right ${net < 0 ? 'text-red-300' : 'text-emerald-300'}`}>{fmt(net)}</td>
+      })}
+  </tr>
+  {/* --- UTILIDAD NETA (%) [NUEVO] --- */}
+  <tr className="bg-gray-800 text-gray-300 text-sm font-medium">
+      <td className="px-6 py-2 sticky left-0 bg-gray-800 border-r border-gray-700 z-10 pl-10">↳ Margen Neto %</td>
+      {pnlData.sortedMonths.map(m => {
+          const rev = getParentTotal('REVENUE', m);
+          const net = rev - getParentTotal('COGS', m) - getParentTotal('OPEX', m) - getParentTotal('TAX', m);
+          const pct = rev !== 0 ? (net / rev) : 0;
+          
+          // Color condicional para el porcentaje también
+          let colorClass = "text-gray-300";
+          if (pct > 0.20) colorClass = "text-emerald-400 font-bold"; // Más del 20% es excelente
+          else if (pct < 0) colorClass = "text-red-400";
+
+          return <td key={m} className={`px-6 py-2 text-right ${colorClass}`}>
+            {(pct * 100).toFixed(1)}%
+          </td>
+      })}
+  </tr>
+</tbody>
                      </table>
                   </div>
                )}
