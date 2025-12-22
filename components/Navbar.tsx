@@ -56,26 +56,42 @@ export default function Navbar() {
               <>
                 <Notifications />
                 <Link
-                href="/calendar"
-                className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
-            >
-                Ir a Kali-Calendario
-            </Link>
-                {role === 'Dueño' && (
+                  href="/calendar"
+                  className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                >
+                  Ir a Kali-Calendario
+                </Link>
+
+                {/* 👇 AQUÍ ESTÁ EL CAMBIO CLAVE 
+                   Solo mostramos esto si el rol es 'superadmin'.
+                   Nota: Mantuve 'Dueño' por si tú todavía tienes ese rol en tu usuario actual,
+                   para que no se te desaparezca mientras te cambias el rol.
+                   Si ya todos son 'superadmin', puedes borrar "|| role === 'Dueño'".
+                */}
+                {(role === 'superadmin' || role === 'Dueño') && (
+                  <Link 
+                    href="/finance" 
+                    className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 flex items-center gap-2"
+                  >
+                    <span>Finanzas 💰</span>
+                  </Link>
+                )}
+
+                {/* Mantuve la lógica original del botón Invitar */}
+                {(role === 'Dueño' || role === 'superadmin') && (
                   <Link
                     href="/settings/team"
                     className="px-3 py-2 text-sm font-medium rounded-md"
-                    // 👇 Color Naranja Hardcodeado
                     style={{ backgroundColor: '#ff8080', color: 'white' }}
                   >
                     Invitar
                   </Link>
                 )}
+                
                 <span className="text-sm text-gray-600 hidden sm:block">{user.email}</span>
                 <button
                   onClick={handleLogout}
                   className="px-3 py-2 text-sm font-medium rounded-md"
-                   // 👇 Color Azul Hardcodeado
                   style={{ backgroundColor: '#3c527a', color: 'white' }}
                 >
                   Cerrar Sesión
@@ -85,14 +101,12 @@ export default function Navbar() {
               <>
                 <Link
                   href="/login"
-                  // Estilo de borde con color secundario
                   className="px-3 py-2 text-sm font-medium text-secondary border border-secondary rounded-md hover:bg-secondary hover:text-white"
                 >
                   Login
                 </Link>
                 <Link
                   href="/register"
-                  // Color primario (naranja) aplicado
                   className="px-3 py-2 text-sm font-medium text-white bg-primary rounded-md hover:opacity-90"
                 >
                   Registrarse
@@ -103,5 +117,4 @@ export default function Navbar() {
         </div>
       </div>
     </nav>
-  )
-}
+  )}
