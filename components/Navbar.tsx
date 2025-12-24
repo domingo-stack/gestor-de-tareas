@@ -68,17 +68,17 @@ export default function Navbar() {
                    para que no se te desaparezca mientras te cambias el rol.
                    Si ya todos son 'superadmin', puedes borrar "|| role === 'Dueño'".
                 */}
-                {(role === 'superadmin' || role === 'Dueño') && (
+                {(role === 'superadmin') && (
                   <Link 
                     href="/finance" 
                     className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 flex items-center gap-2"
                   >
-                    <span>Finanzas 💰</span>
+                    <span>Kali-Finanzas💰</span>
                   </Link>
                 )}
 
                 {/* Mantuve la lógica original del botón Invitar */}
-                {(role === 'Dueño' || role === 'superadmin') && (
+                {( role === 'superadmin') && (
                   <Link
                     href="/settings/team"
                     className="px-3 py-2 text-sm font-medium rounded-md"
