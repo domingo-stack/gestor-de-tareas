@@ -6,10 +6,15 @@ import UploadFinanceModal from '@/components/UploadFinanceModal'
 import { useAuth } from '@/context/AuthContext'
 import { Toaster, toast } from 'sonner' 
 import FinancialCharts from '@/components/FinancialCharts'
+import CurrencyEditModal from '@/components/CurrencyEditModal'
+import CategorySettingsModal from '@/components/CategorySettingsModal'
+import OperationalMetricsModal from '@/components/OperationalMetricsModal'
+import StrategicKPIs from '@/components/StrategicKPIs'
+import Modal from '@/components/Modal'
+import CacEvolutionChart from '@/components/CacEvolutionChart'
 
 // --- 1. DEFINICIÓN DE TIPOS (Ajustados a tu DB) ---
 
-// Tipo para Cuentas (fin_accounts) - ID es number (int8)
 type Account = {
   id: number; 
   name: string;
@@ -19,7 +24,6 @@ type Account = {
   last_updated?: string;
 }
 
-// Tipo para Categorías
 type Category = {
   id: string;
   name: string;
@@ -27,13 +31,12 @@ type Category = {
   parent_category: string; 
 }
 
-// Tipo para Transacciones
 type Transaction = {
   id: string;
   created_at: string;
   transaction_date: string;
   description: string;
-  raw_description: string;
+  raw_description: string | null; // Tipamos que puede ser null
   amount_original: number;
   currency_original: string;
   amount_usd: number;
@@ -48,12 +51,61 @@ type Transaction = {
   } | null;
 }
 
+type MonthlyMetric = {
+  id: string;
+  month_date: string;
+  new_customers_count: number;
+};
+
 // Tipos para Filtros
 type DateRange = 'current_month' | 'last_3_months' | 'last_6_months' | 'last_12_months' | 'all';
 type FilterStatus = 'pending_review' | 'verified' | 'all';
 
-// --- 2. COMPONENTE P&L SECTION (Expandido y Corregido) ---
-// Este componente maneja las secciones desplegables (Ingresos, Gastos, etc.)
+// --- 1.1 NUEVOS TIPOS Y LÓGICA (Hito 1) ---
+
+// Estado para controlar el modal de edición de moneda
+export type CurrencyEditState = {
+  isOpen: boolean;
+  transactionId: string | null;
+  currentData: {
+    amount_original: number;
+    currency_original: string;
+    amount_usd: number;
+  } | null;
+};
+
+// Función Helper: Lógica de Negocio para el recálculo
+// (Confirmada con tu lógica actual: Rate = Original / USD)
+export const calculateTransactionValues = (
+  currency: string, 
+  amountOriginal: number, 
+  amountUsdInput: number
+) => {
+  // 1. Caso USD: Integridad forzada
+  if (currency === 'USD') {
+    return {
+      amount_original: amountOriginal,
+      currency_original: 'USD',
+      amount_usd: amountOriginal,
+      exchange_rate: 1
+    };
+  }
+
+  // 2. Caso Otra Moneda: Calculamos la tasa
+  const safeAmountUsd = amountUsdInput !== 0 ? amountUsdInput : 1;
+  const exchangeRate = amountOriginal / safeAmountUsd;
+
+  return {
+    amount_original: amountOriginal,
+    currency_original: currency,
+    amount_usd: amountUsdInput,
+    exchange_rate: exchangeRate
+  };
+};
+
+// ... Aquí siguen tus tipos originales (Account, Category, Transaction) ...
+
+// --- 2. COMPONENTE P&L SECTION ---
 const PnLSection = ({ 
   title, 
   data,          
@@ -78,7 +130,6 @@ const PnLSection = ({
     setOpenCategories(prev => ({ ...prev, [catName]: !prev[catName] }));
   };
 
-  // Calcular totales de la fila principal (Header de Sección)
   const monthlyTotals = months.map(m => {
     return Object.values(data).reduce((sum, catObj) => sum + (catObj[m] || 0), 0);
   });
@@ -87,7 +138,7 @@ const PnLSection = ({
 
   return (
     <>
-      {/* CABECERA DE SECCIÓN (Ej: GASTOS OPERATIVOS) */}
+      {/* CABECERA DE SECCIÓN */}
       <tr 
         onClick={() => setIsSectionOpen(!isSectionOpen)} 
         className={`${totalColor} hover:bg-gray-100 cursor-pointer transition-colors border-b border-gray-200`}
@@ -103,7 +154,7 @@ const PnLSection = ({
         ))}
       </tr>
 
-      {/* FILAS DE CATEGORÍAS (Ej: Software, Nómina) */}
+      {/* FILAS DE CATEGORÍAS */}
       {isSectionOpen && Object.keys(data).sort().map(catName => {
         const isCatOpen = openCategories[catName];
         const catDetails = details?.[parentKey]?.[catName] || {};
@@ -127,7 +178,7 @@ const PnLSection = ({
               ))}
             </tr>
 
-            {/* FILAS DE DETALLE (Ej: AWS, Adobe, Sueldo Juan) */}
+            {/* FILAS DE DETALLE */}
             {isCatOpen && Object.keys(catDetails).sort().map(desc => (
               <tr key={desc} className="bg-gray-50/50 border-b border-gray-100">
                 <td className="px-6 py-1.5 text-xs text-gray-500 pl-16 border-r border-gray-100 sticky left-0 bg-gray-50/50 z-10 italic truncate max-w-[200px]" title={desc}>
@@ -153,10 +204,20 @@ export default function FinancePage() {
   
   // --- ESTADOS DE UI ---
   const [isModalOpen, setIsModalOpen] = useState(false)
+  const [isMetricsOpen, setIsMetricsOpen] = useState(false);
+  const [monthlyMetrics, setMonthlyMetrics] = useState<MonthlyMetric[]>([]);
+  // --- ESTADO PARA EDICIÓN DE MONEDA (HITO 3) ---
+const [currencyEdit, setCurrencyEdit] = useState<CurrencyEditState>({
+  isOpen: false,
+  transactionId: null,
+  currentData: null
+});
   const [activeTab, setActiveTab] = useState<'gestion' | 'reportes'>('gestion');
   const [dateRange, setDateRange] = useState<DateRange>('last_12_months'); 
   const [statusFilter, setStatusFilter] = useState<FilterStatus>('pending_review');
   const [loading, setLoading] = useState(true);
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [isChartOpen, setIsChartOpen] = useState(false);
 
   // --- DATOS ---
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -169,12 +230,11 @@ export default function FinancePage() {
 
   // --- EDICIÓN Y SELECCIÓN ---
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ description: '', amount_usd: 0, category_id: '' });
+  const [editForm, setEditForm] = useState({ description: '', amount_usd: 0, category_id: '', raw_description: '' });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   // --- MODAL DE SALDOS ---
   const [isBalanceModalOpen, setIsBalanceModalOpen] = useState(false);
-  // Usamos un objeto para editar saldos temporalmente: { [id_cuenta]: saldo }
   const [balancesForm, setBalancesForm] = useState<Record<string, number>>({});
 
   // 1. CARGA INICIAL DE DATOS
@@ -182,21 +242,27 @@ export default function FinancePage() {
     if (!user) return;
     setLoading(true);
     try {
-      // A. Categorías
       const { data: cats } = await supabase.from('fin_categories').select('*').order('name');
       if (cats) setCategories(cats);
 
-      // B. Cuentas
       const { data: accs } = await supabase.from('fin_accounts').select('*').order('id');
       if (accs) {
         setAccounts(accs);
-        // Inicializar formulario de balances (convertimos ID numérico a string para usar como key)
         const initialForm: Record<string, number> = {};
         accs.forEach((a: Account) => initialForm[a.id.toString()] = a.balance);
         setBalancesForm(initialForm);
       }
+      // ... cargas categorías, cuentas, transacciones ...
 
-      // C. Transacciones
+// NUEVO: Cargar métricas operativas
+const { data: metricsData } = await supabase
+.from('fin_monthly_metrics')
+.select('*')
+.order('month_date', { ascending: false });
+if (metricsData) setMonthlyMetrics(metricsData);
+
+// ... setTransactions, etc ...
+
       const { data: txs, error } = await supabase
         .from('fin_transactions')
         .select(`*, fin_categories (name, slug, type, parent_category)`)
@@ -216,18 +282,15 @@ export default function FinancePage() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Resetear paginación al cambiar filtros
   useEffect(() => {
     setCurrentPage(1);
     setSelectedIds([]);
   }, [dateRange, statusFilter, rowsPerPage]);
 
-  // --- FUNCIÓN: ACTUALIZAR SALDOS BANCARIOS ---
   const updateBalances = async () => {
     try {
-      // Convertimos el formulario de vuelta al formato de la DB
       const updates = Object.entries(balancesForm).map(([idString, balance]) => ({
-        id: parseInt(idString), // Convertimos la key string a número (int8)
+        id: parseInt(idString), 
         balance: Number(balance),
         last_updated: new Date().toISOString()
       }));
@@ -237,14 +300,13 @@ export default function FinancePage() {
       
       toast.success('Saldos actualizados correctamente');
       setIsBalanceModalOpen(false);
-      fetchData(); // Recargamos para ver cambios
+      fetchData(); 
     } catch (err) {
       console.error(err);
       toast.error('Error al actualizar saldos');
     }
   };
 
-  // --- LÓGICA DE FILTROS ---
   const filterByDate = (tx: Transaction) => {
     const txDate = new Date(tx.transaction_date);
     const now = new Date();
@@ -262,21 +324,18 @@ export default function FinancePage() {
   const filteredTransactions = useMemo(() => transactions.filter(filterByDate), [transactions, dateRange]);
   const viewTransactions = filteredTransactions.filter(t => statusFilter === 'all' || t.status === statusFilter);
   
-  // --- LÓGICA PAGINACIÓN ---
   const indexOfLastRow = currentPage * rowsPerPage;
   const indexOfFirstRow = indexOfLastRow - rowsPerPage;
   const currentRows = viewTransactions.slice(indexOfFirstRow, indexOfLastRow);
   const totalPages = Math.ceil(viewTransactions.length / rowsPerPage);
 
-  // --- LÓGICA P&L MATRIX ---
+  // --- LÓGICA P&L MATRIX (CORREGIDA) ---
   const pnlData = useMemo(() => {
     const monthsSet = new Set<string>();
     filteredTransactions.forEach(tx => monthsSet.add(tx.transaction_date.substring(0, 7)));
     const sortedMonths = Array.from(monthsSet).sort(); 
 
-    // Nivel 1: [Parent][Category][Month]
     const matrix: Record<string, Record<string, Record<string, number>>> = {};
-    // Nivel 2: [Parent][Category][Description][Month]
     const detailMatrix: Record<string, Record<string, Record<string, Record<string, number>>>> = {};
 
     filteredTransactions.forEach(tx => {
@@ -284,6 +343,8 @@ export default function FinancePage() {
       const catName = tx.fin_categories?.name || 'Sin Clasificar';
       const desc = tx.description.trim(); 
       const month = tx.transaction_date.substring(0, 7);
+      // CORRECCIÓN AQUÍ: Evitamos el crash si es null
+      const raw_desc = (tx.raw_description || '').trim();
       const amount = Number(tx.amount_usd);
 
       // Llenar Matriz Principal
@@ -295,6 +356,7 @@ export default function FinancePage() {
       if (!detailMatrix[parent]) detailMatrix[parent] = {};
       if (!detailMatrix[parent][catName]) detailMatrix[parent][catName] = {};
       if (!detailMatrix[parent][catName][desc]) detailMatrix[parent][catName][desc] = {};
+      if (!detailMatrix[parent][catName][desc]) detailMatrix[parent][catName][desc] = {};
       
       detailMatrix[parent][catName][desc][month] = (detailMatrix[parent][catName][desc][month] || 0) + amount;
     });
@@ -302,7 +364,6 @@ export default function FinancePage() {
     return { sortedMonths, matrix, detailMatrix };
   }, [filteredTransactions]);
 
-  // Helpers para P&L
   const getParentTotal = (parent: string, month: string) => {
     const section = pnlData.matrix[parent];
     if (!section) return 0;
@@ -312,12 +373,22 @@ export default function FinancePage() {
   const totalIncome = filteredTransactions.filter(t => t.fin_categories?.type === 'income').reduce((s, t) => s + Number(t.amount_usd), 0);
   const totalSpend = filteredTransactions.filter(t => t.fin_categories?.type === 'expense').reduce((s, t) => s + Number(t.amount_usd), 0);
   
-  const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
+  const fmt = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(n);
   const fmtNum = (n: number) => new Intl.NumberFormat('en-US', { style: 'decimal', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 
   // --- ACCIONES DE GESTIÓN ---
-  const startEdit = (tx: Transaction) => { setEditingId(tx.id); setEditForm({ description: tx.description, amount_usd: tx.amount_usd, category_id: tx.category_id || '' }); };
-  
+  const startEdit = (tx: Transaction) => {
+    setEditingId(tx.id);
+    setEditForm({
+      description: tx.description,
+      amount_usd: tx.amount_usd,
+      category_id: tx.category_id,
+      // CORRECCIÓN AQUÍ: Evitamos crash al abrir modal
+      raw_description: tx.raw_description || '',
+      
+    });
+  };
+
   const saveEdit = async (id: string) => { 
     const { error } = await supabase.from('fin_transactions').update(editForm).eq('id', id); 
     if(!error) { toast.success('Guardado'); setEditingId(null); fetchData(); }
@@ -328,7 +399,6 @@ export default function FinancePage() {
     if(!error) { toast.success('Verificado'); fetchData(); }
   };
   
-  // Selección Masiva
   const toggleSelect = (id: string) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   
   const toggleSelectAllPage = () => { 
@@ -343,33 +413,66 @@ export default function FinancePage() {
     const { error } = await supabase.from('fin_transactions').update({ status: 'verified' }).in('id', selectedIds); 
     if (!error) { toast.success(`${selectedIds.length} transacciones verificadas`); setSelectedIds([]); fetchData(); }
   };
-  // Función para eliminar un movimiento
-const handleDelete = async (id: string) => {
-    // 1. Confirmación simple (puedes usar un modal más bonito si prefieres)
-    if (!window.confirm("¿Estás seguro de que quieres eliminar este movimiento? Esta acción no se puede deshacer.")) {
-      return;
-    }
+
+  // --- LÓGICA DE EDICIÓN DE MONEDA ---
   
+  // 1. Abrir el Modal con los datos actuales de la fila
+  const openCurrencyModal = (tx: Transaction) => {
+    setCurrencyEdit({
+      isOpen: true,
+      transactionId: tx.id,
+      currentData: {
+        amount_original: tx.amount_original || 0, // Fallback por seguridad
+        currency_original: tx.currency_original || 'USD',
+        amount_usd: tx.amount_usd
+      }
+    });
+  };
+
+  // 2. Guardar en Supabase (Recibe el payload ya calculado desde el Modal)
+  const saveCurrencyData = async (newData: { 
+    currency_original: string; 
+    amount_original: number; 
+    amount_usd: number; 
+    exchange_rate: number 
+  }) => {
+    if (!currencyEdit.transactionId) return;
+
     try {
-      // 2. Llamada a Supabase para borrar
       const { error } = await supabase
         .from('fin_transactions')
-        .delete()
-        .eq('id', id);
-  
+        .update(newData)
+        .eq('id', currencyEdit.transactionId);
+
       if (error) throw error;
-  
-      // 3. Actualizar el estado local para que desaparezca de la tabla sin recargar
-      // Asumiendo que tu estado de movimientos se llama 'transactions' y su setter 'setTransactions'
+
+      toast.success('Conversión actualizada correctamente');
+      fetchData(); // Recargamos la tabla para ver el cambio
+    } catch (error) {
+      console.error(error);
+      toast.error('Error al actualizar la moneda');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm("¿Estás seguro de que quieres eliminar este movimiento? Esta acción no se puede deshacer.")) return;
+    try {
+      const { error } = await supabase.from('fin_transactions').delete().eq('id', id);
+      if (error) throw error;
       setTransactions(prev => prev.filter(t => t.id !== id));
-      
       toast.success('Movimiento eliminado correctamente');
-  
     } catch (error) {
       console.error('Error al eliminar:', error);
       toast.error('No se pudo eliminar el movimiento');
     }
   };
+
+  /**
+ * Calcula la tasa de cambio implícita basada en los montos ingresados manualmente.
+ * Regla de negocio:
+ * - Si la moneda es USD, la tasa es siempre 1 y el monto USD es igual al original.
+ * - Si es otra moneda, la tasa es (Monto Original / Monto USD).
+ */
 
   return (
     <AuthGuard>
@@ -390,10 +493,37 @@ const handleDelete = async (id: string) => {
              ))}
              <div className="w-px h-4 bg-gray-300 mx-1"></div>
              <button onClick={() => setIsModalOpen(true)} className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-md hover:bg-blue-100">+ Movimiento</button>
+             <button 
+  onClick={() => setIsConfigOpen(true)}
+  className="p-2 text-gray-500 hover:text-gray-900 bg-white border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+  title="Configurar Categorías y Métricas"
+>
+  ⚙️
+</button>
+<button 
+  onClick={() => setIsMetricsOpen(true)}
+  className="p-2 text-gray-500 hover:text-gray-900 bg-white border border-gray-200 rounded-md hover:bg-gray-50 transition-colors mr-2"
+  title="Ingresar Nuevos Clientes (CAC)"
+>
+  👥
+</button>
+{/* Botón Ver Gráfico Evolución */}
+<button 
+  onClick={() => setIsChartOpen(true)}
+  className="p-2 text-gray-500 hover:text-blue-700 bg-white border border-gray-200 rounded-md hover:bg-blue-50 transition-colors mr-2"
+  title="Ver Evolución Gráfica"
+>
+  📈
+</button>
           </div>
         </header>
 
         {/* --- WIDGETS DE KPI Y CUENTAS --- */}
+        <StrategicKPIs 
+  transactions={transactions} 
+  accounts={accounts} 
+  metrics={monthlyMetrics} 
+/>
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
             
            {/* Widget Cuentas Bancarias */}
@@ -442,7 +572,6 @@ const handleDelete = async (id: string) => {
            /* --- PESTAÑA: GESTIÓN DE MOVIMIENTOS --- */
            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden relative flex flex-col h-[700px]">
              
-             {/* Barra Flotante de Selección Masiva */}
              {selectedIds.length > 0 && (
                 <div className="absolute top-14 left-0 right-0 z-30 bg-blue-50 border-b border-blue-100 px-6 py-2 flex items-center justify-between animate-in slide-in-from-top-2">
                    <span className="text-sm text-blue-800 font-medium">{selectedIds.length} seleccionados</span>
@@ -468,9 +597,10 @@ const handleDelete = async (id: string) => {
                              <input type="checkbox" checked={currentRows.length > 0 && currentRows.every(r => selectedIds.includes(r.id))} onChange={toggleSelectAllPage} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"/>
                           </th>
                           <th className="px-6 py-3 bg-gray-50">Fecha</th>
-                          <th className="px-6 py-3 bg-gray-50">Descripción</th>
+                          <th className="px-6 py-3 bg-gray-50">Descripción IA</th>
+                          <th className="px-6 py-3 bg-gray-50">Descripción Original</th>
                           <th className="px-6 py-3 bg-gray-50">Categoría</th>
-                          <th className="px-6 py-3 text-right bg-gray-50">Monto</th>
+                          <th className="px-6 py-3 text-right bg-gray-50">Monto (USD)</th>                          
                           <th className="px-6 py-3 text-center bg-gray-50">Acción</th>
                       </tr>
                     </thead>
@@ -479,11 +609,36 @@ const handleDelete = async (id: string) => {
                           <tr key={tx.id} className={`hover:bg-gray-50 ${selectedIds.includes(tx.id) ? 'bg-blue-50/30' : ''}`}>
                             <td className="px-4 py-3"><input type="checkbox" checked={selectedIds.includes(tx.id)} onChange={() => toggleSelect(tx.id)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" /></td>
                             <td className="px-6 py-3 text-gray-600 whitespace-nowrap">{tx.transaction_date}</td>
-                            <td className="px-6 py-3">{editingId === tx.id ? <input className="border rounded px-2 py-1 w-full text-sm" value={editForm.description} onChange={e=>setEditForm({...editForm, description: e.target.value})} /> : <div className="max-w-xs truncate" title={tx.raw_description}>{tx.description}</div>}</td>
+                            <td className="px-6 py-3">{editingId === tx.id ? <input className="border rounded px-2 py-1 w-full text-sm" value={editForm.description} onChange={e=>setEditForm({...editForm, description: e.target.value})} /> : <div className="max-w-xs truncate" title={tx.description}>{tx.description}</div>}</td>
+                            <td className="px-6 py-3">{editingId === tx.id ? <input className="border rounded px-2 py-1 w-full text-sm" value={editForm.raw_description} onChange={e=>setEditForm({...editForm, raw_description: e.target.value})} /> : <div className="max-w-xs truncate" title={tx.raw_description || ''}>{tx.raw_description || '-'}</div>}</td>
                             <td className="px-6 py-3">{editingId === tx.id ? (<select className="border rounded px-2 py-1 text-sm w-full" value={editForm.category_id} onChange={e=>setEditForm({...editForm, category_id: e.target.value})}>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>) : <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium tracking-wide border ${tx.fin_categories?.type==='income' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>{tx.fin_categories?.name}</span>}</td>
-                            <td className="px-6 py-3 text-right font-mono text-gray-700">{editingId === tx.id ? <input type="number" className="border rounded px-2 py-1 w-20 text-right" value={editForm.amount_usd} onChange={e=>setEditForm({...editForm, amount_usd: parseFloat(e.target.value)})} /> : fmt(tx.amount_usd)}</td>
+                            <td className="px-6 py-3 text-right font-mono text-gray-700">
+  {editingId === tx.id ? (
+    // Si estamos editando en línea (el lápiz), dejamos el input simple
+    <input 
+      type="number" 
+      step="0.01" 
+      className="border rounded px-2 py-1 w-20 text-right" 
+      value={editForm.amount_usd} 
+      onChange={e=>setEditForm({...editForm, amount_usd: parseFloat(e.target.value)})} 
+    />
+  ) : (
+    // VISTA NORMAL: Monto + Botón de Calculadora
+    <div className="flex items-center justify-end gap-2 group">
+      <span>{fmt(tx.amount_usd)}</span>
+      
+      {/* Botón Disparador del Modal (Solo visible al pasar el mouse o siempre visible si prefieres) */}
+      <button 
+        onClick={() => openCurrencyModal(tx)}
+        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-blue-100 rounded text-xs text-blue-600"
+        title="Corregir Moneda / Tasa de Cambio"
+      >
+        💱
+      </button>
+    </div>
+  )}
+</td>
                             
-                            {/* --- COLUMNA DE ACCIONES --- */}
                             <td className="px-6 py-3 text-center">
                               {editingId === tx.id ? (
                                 <div className="flex justify-center gap-1">
@@ -494,7 +649,6 @@ const handleDelete = async (id: string) => {
                                 <div className="flex justify-center items-center gap-1">
                                   {tx.status === 'pending_review' && <button onClick={()=>verifyTx(tx.id)} className="text-green-600 hover:bg-green-50 p-1 rounded font-bold" title="Aprobar">✓</button>}
                                   <button onClick={()=>startEdit(tx)} className="text-blue-400 hover:bg-blue-50 p-1 rounded" title="Editar">✎</button>
-                                  {/* --- BOTÓN ELIMINAR NUEVO --- */}
                                   <button onClick={()=>handleDelete(tx.id)} className="text-red-500 hover:bg-red-50 p-1 rounded" title="Eliminar">
                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
                                       <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456-1.22L17.56 2.66c-.074-.292-.349-.52-.693-.52H7.132c-.344 0-.619.228-.692.52L4.772 5.79m14.456-1.22h-13.932" />
@@ -527,10 +681,8 @@ const handleDelete = async (id: string) => {
            /* --- PESTAÑA: P&L MATRIX --- */
            <div className="space-y-6">
              
-           {/* 1. Componente de Gráficos */}
            <FinancialCharts data={pnlData} />
 
-           {/* 2. Tu Tabla P&L Original */}
            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col h-[700px]">
                {pnlData.sortedMonths.length === 0 ? (
                   <div className="p-12 text-center text-gray-500">No hay datos en este rango.</div>
@@ -544,67 +696,57 @@ const handleDelete = async (id: string) => {
                            </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100">
-  {/* SECCIÓN REVENUE */}
-  {pnlData.matrix['REVENUE'] && <PnLSection title="Ingresos" data={pnlData.matrix['REVENUE']} details={pnlData.detailMatrix} parentKey="REVENUE" months={pnlData.sortedMonths} totalColor="bg-green-50/50" />}
-  
-  {/* SECCIÓN COGS */}
-  {pnlData.matrix['COGS'] && <PnLSection title="Costo de Venta (COGS)" data={pnlData.matrix['COGS']} details={pnlData.detailMatrix} parentKey="COGS" months={pnlData.sortedMonths} />}
-  
-  {/* --- MARGEN BRUTO ($) --- */}
-  <tr className="bg-blue-50 border-t-2 border-blue-100">
-      <td className="px-6 py-3 font-bold text-gray-900 sticky left-0 bg-blue-50 border-r border-blue-200 z-10">MARGEN BRUTO ($)</td>
-      {pnlData.sortedMonths.map(m => {
-          const gross = getParentTotal('REVENUE', m) - getParentTotal('COGS', m);
-          return <td key={m} className="px-6 py-3 text-right font-bold text-gray-800">{fmt(gross)}</td>
-      })}
-  </tr>
-  {/* --- MARGEN BRUTO (%) [NUEVO] --- */}
-  <tr className="bg-blue-50/50 border-b-2 border-blue-100">
-      <td className="px-6 py-2 text-xs font-semibold text-blue-800 sticky left-0 bg-blue-50/50 border-r border-blue-200 z-10 pl-10">↳ Margen Bruto %</td>
-      {pnlData.sortedMonths.map(m => {
-          const rev = getParentTotal('REVENUE', m);
-          const gross = rev - getParentTotal('COGS', m);
-          // Evitamos división por cero
-          const pct = rev !== 0 ? (gross / rev) : 0;
-          return <td key={m} className="px-6 py-2 text-right text-xs font-bold text-blue-600">
-            {(pct * 100).toFixed(1)}%
-          </td>
-      })}
-  </tr>
+                          {pnlData.matrix['REVENUE'] && <PnLSection title="Ingresos" data={pnlData.matrix['REVENUE']} details={pnlData.detailMatrix} parentKey="REVENUE" months={pnlData.sortedMonths} totalColor="bg-green-50/50" />}
+                          
+                          {pnlData.matrix['COGS'] && <PnLSection title="Costo de Venta (COGS)" data={pnlData.matrix['COGS']} details={pnlData.detailMatrix} parentKey="COGS" months={pnlData.sortedMonths} />}
+                          
+                          <tr className="bg-blue-50 border-t-2 border-blue-100">
+                              <td className="px-6 py-3 font-bold text-gray-900 sticky left-0 bg-blue-50 border-r border-blue-200 z-10">MARGEN BRUTO ($)</td>
+                              {pnlData.sortedMonths.map(m => {
+                                  const gross = getParentTotal('REVENUE', m) - getParentTotal('COGS', m);
+                                  return <td key={m} className="px-6 py-3 text-right font-bold text-gray-800">{fmt(gross)}</td>
+                              })}
+                          </tr>
+                          <tr className="bg-blue-50/50 border-b-2 border-blue-100">
+                              <td className="px-6 py-2 text-xs font-semibold text-blue-800 sticky left-0 bg-blue-50/50 border-r border-blue-200 z-10 pl-10">↳ Margen Bruto %</td>
+                              {pnlData.sortedMonths.map(m => {
+                                  const rev = getParentTotal('REVENUE', m);
+                                  const gross = rev - getParentTotal('COGS', m);
+                                  const pct = rev !== 0 ? (gross / rev) : 0;
+                                  return <td key={m} className="px-6 py-2 text-right text-xs font-bold text-blue-600">
+                                    {(pct * 100).toFixed(1)}%
+                                  </td>
+                              })}
+                          </tr>
 
-  {/* SECCIÓN OPEX */}
-  {pnlData.matrix['OPEX'] && <PnLSection title="Gastos Operativos (OpEx)" data={pnlData.matrix['OPEX']} details={pnlData.detailMatrix} parentKey="OPEX" months={pnlData.sortedMonths} />}
-  
-  {/* SECCIÓN TAX */}
-  {pnlData.matrix['TAX'] && <PnLSection title="Impuestos" data={pnlData.matrix['TAX']} details={pnlData.detailMatrix} parentKey="TAX" months={pnlData.sortedMonths} />}
-  
-  {/* --- UTILIDAD NETA ($) --- */}
-  <tr className="bg-gray-900 text-white font-bold text-base border-t border-gray-700">
-      <td className="px-6 py-4 sticky left-0 bg-gray-900 border-r border-gray-700 z-10">UTILIDAD NETA ($)</td>
-      {pnlData.sortedMonths.map(m => {
-          const net = getParentTotal('REVENUE', m) - getParentTotal('COGS', m) - getParentTotal('OPEX', m) - getParentTotal('TAX', m);
-          return <td key={m} className={`px-6 py-4 text-right ${net < 0 ? 'text-red-300' : 'text-emerald-300'}`}>{fmt(net)}</td>
-      })}
-  </tr>
-  {/* --- UTILIDAD NETA (%) [NUEVO] --- */}
-  <tr className="bg-gray-800 text-gray-300 text-sm font-medium">
-      <td className="px-6 py-2 sticky left-0 bg-gray-800 border-r border-gray-700 z-10 pl-10">↳ Margen Neto %</td>
-      {pnlData.sortedMonths.map(m => {
-          const rev = getParentTotal('REVENUE', m);
-          const net = rev - getParentTotal('COGS', m) - getParentTotal('OPEX', m) - getParentTotal('TAX', m);
-          const pct = rev !== 0 ? (net / rev) : 0;
-          
-          // Color condicional para el porcentaje también
-          let colorClass = "text-gray-300";
-          if (pct > 0.20) colorClass = "text-emerald-400 font-bold"; // Más del 20% es excelente
-          else if (pct < 0) colorClass = "text-red-400";
+                          {pnlData.matrix['OPEX'] && <PnLSection title="Gastos Operativos (OpEx)" data={pnlData.matrix['OPEX']} details={pnlData.detailMatrix} parentKey="OPEX" months={pnlData.sortedMonths} />}
+                          
+                          {pnlData.matrix['TAX'] && <PnLSection title="Impuestos" data={pnlData.matrix['TAX']} details={pnlData.detailMatrix} parentKey="TAX" months={pnlData.sortedMonths} />}
+                          
+                          <tr className="bg-gray-900 text-white font-bold text-base border-t border-gray-700">
+                              <td className="px-6 py-4 sticky left-0 bg-gray-900 border-r border-gray-700 z-10">UTILIDAD NETA ($)</td>
+                              {pnlData.sortedMonths.map(m => {
+                                  const net = getParentTotal('REVENUE', m) - getParentTotal('COGS', m) - getParentTotal('OPEX', m) - getParentTotal('TAX', m);
+                                  return <td key={m} className={`px-6 py-4 text-right ${net < 0 ? 'text-red-300' : 'text-emerald-300'}`}>{fmt(net)}</td>
+                              })}
+                          </tr>
+                          <tr className="bg-gray-800 text-gray-300 text-sm font-medium">
+                              <td className="px-6 py-2 sticky left-0 bg-gray-800 border-r border-gray-700 z-10 pl-10">↳ Margen Neto %</td>
+                              {pnlData.sortedMonths.map(m => {
+                                  const rev = getParentTotal('REVENUE', m);
+                                  const net = rev - getParentTotal('COGS', m) - getParentTotal('OPEX', m) - getParentTotal('TAX', m);
+                                  const pct = rev !== 0 ? (net / rev) : 0;
+                                  
+                                  let colorClass = "text-gray-300";
+                                  if (pct > 0.20) colorClass = "text-emerald-400 font-bold";
+                                  else if (pct < 0) colorClass = "text-red-400";
 
-          return <td key={m} className={`px-6 py-2 text-right ${colorClass}`}>
-            {(pct * 100).toFixed(1)}%
-          </td>
-      })}
-  </tr>
-</tbody>
+                                  return <td key={m} className={`px-6 py-2 text-right ${colorClass}`}>
+                                    {(pct * 100).toFixed(1)}%
+                                  </td>
+                              })}
+                          </tr>
+                        </tbody>
                      </table>
                   </div>
                )}
@@ -612,10 +754,8 @@ const handleDelete = async (id: string) => {
         </div>
      )}
 
-       {/* Modal de Carga */}
        <UploadFinanceModal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setTimeout(fetchData, 2000); }} categories={categories} />
 
-       {/* Modal de Saldos (Small) */}
        {isBalanceModalOpen && (
          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
            <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
@@ -633,5 +773,41 @@ const handleDelete = async (id: string) => {
          </div>
        )}
      </main>
+     <CurrencyEditModal 
+  isOpen={currencyEdit.isOpen}
+  onClose={() => setCurrencyEdit(prev => ({ ...prev, isOpen: false }))}
+  onSave={saveCurrencyData}
+  initialData={currencyEdit.currentData}
+/>
+<CategorySettingsModal 
+  isOpen={isConfigOpen} 
+  onClose={() => setIsConfigOpen(false)}
+  onUpdate={fetchData} // Opcional: si quieres recargar algo al cerrar
+/>
+<OperationalMetricsModal 
+  isOpen={isMetricsOpen}
+  onClose={() => setIsMetricsOpen(false)}
+/>
+{/* MODAL DE GRÁFICO CAC */}
+<Modal isOpen={isChartOpen} onClose={() => setIsChartOpen(false)}>
+  <div className="p-4 h-[500px] flex flex-col">
+    <div className="flex justify-between items-start mb-4">
+      <div>
+        <h2 className="text-xl font-bold text-gray-800">Evolución de Eficiencia de Marketing</h2>
+        <p className="text-sm text-gray-500">Comparativa mensual: Inversión vs Costo por Cliente (CAC)</p>
+      </div>
+      <button onClick={() => setIsChartOpen(false)} className="text-gray-400 hover:text-gray-600">✕</button>
+    </div>
+    
+    {/* Contenedor del Gráfico */}
+    <div className="flex-1 w-full overflow-hidden">
+      <CacEvolutionChart 
+        transactions={transactions} 
+        metrics={monthlyMetrics} 
+      />
+    </div>
+  </div>
+</Modal>
    </AuthGuard>
- )}
+ )
+}

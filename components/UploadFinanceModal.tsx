@@ -206,6 +206,7 @@ export default function UploadFinanceModal({ isOpen, onClose, categories }: Uplo
               onClick={handleZoneClick}
               className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer group ${file ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:bg-gray-50'}`}
             >
+              
               <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform">
                 {file ? <span className="text-xl">📄</span> : <span className="text-xl">☁️</span>}
               </div>
