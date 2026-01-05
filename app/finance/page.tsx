@@ -218,6 +218,7 @@ const [currencyEdit, setCurrencyEdit] = useState<CurrencyEditState>({
   const [loading, setLoading] = useState(true);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [isChartOpen, setIsChartOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // --- DATOS ---
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -232,6 +233,11 @@ const [currencyEdit, setCurrencyEdit] = useState<CurrencyEditState>({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ description: '', amount_usd: 0, category_id: '', raw_description: '' });
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // ... tus otros estados (selectedIds, etc.)
+
+  // --- ESTADOS PARA EDICIÓN MASIVA (HITO 3) ---
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [bulkForm, setBulkForm] = useState({ category_id: '', description: '' });
 
   // --- MODAL DE SALDOS ---
   const [isBalanceModalOpen, setIsBalanceModalOpen] = useState(false);
@@ -321,8 +327,31 @@ if (metricsData) setMonthlyMetrics(metricsData);
     return txDate >= startDate;
   };
 
-  const filteredTransactions = useMemo(() => transactions.filter(filterByDate), [transactions, dateRange]);
-  const viewTransactions = filteredTransactions.filter(t => statusFilter === 'all' || t.status === statusFilter);
+ // 1. filteredTransactions SE MANTIENE IGUAL (Esto asegura que el P&L no cambie con el buscador)
+ const filteredTransactions = useMemo(() => transactions.filter(filterByDate), [transactions, dateRange]);
+
+ // 2. viewTransactions AHORA INCLUYE EL BUSCADOR (Solo afecta la tabla)
+ const viewTransactions = useMemo(() => {
+   // A. Primero aplicamos el filtro de Status (Por revisar / Histórico)
+   let data = filteredTransactions.filter(t => statusFilter === 'all' || t.status === statusFilter);
+
+   // B. Luego aplicamos el Buscador (Si hay texto escrito)
+   // B. Luego aplicamos el Buscador (Si hay texto escrito)
+    if (searchTerm.trim()) {
+      const lowerTerm = searchTerm.toLowerCase(); // 1. Convertimos tu búsqueda a minúsculas
+      
+      data = data.filter(t => {
+        // 2. Obtenemos los valores de forma segura (si es null, usamos texto vacío '')
+        const desc = (t.description || '').toLowerCase();
+        const raw = (t.raw_description || '').toLowerCase();
+        const cat = (t.fin_categories?.name || '').toLowerCase();
+
+        // 3. Verificamos si alguna columna incluye el término buscado
+        return desc.includes(lowerTerm) || raw.includes(lowerTerm) || cat.includes(lowerTerm);
+      });
+    }
+    return data;
+ }, [filteredTransactions, statusFilter, searchTerm]); // Se recalcula si cambia algo de esto
   
   const indexOfLastRow = currentPage * rowsPerPage;
   const indexOfFirstRow = indexOfLastRow - rowsPerPage;
@@ -397,6 +426,53 @@ if (metricsData) setMonthlyMetrics(metricsData);
   const verifyTx = async (id: string) => { 
     const { error } = await supabase.from('fin_transactions').update({ status: 'verified' }).eq('id', id); 
     if(!error) { toast.success('Verificado'); fetchData(); }
+  };
+
+  // --- FUNCIÓN DUMMY PARA HITO 3 (LUEGO LA LLENAREMOS EN EL HITO 4) ---
+  // --- FUNCIÓN DE EDICIÓN MASIVA (LÓGICA HITO 4) ---
+  const handleBulkUpdate = async () => {
+    // 1. Validación básica
+    if (selectedIds.length === 0) return;
+
+    // 2. Construimos el objeto de actualización dinámicamente
+    // Solo agregamos las propiedades si tienen valor, para no borrar datos accidentalmente.
+    const updates: Record<string, any> = {};
+    
+    if (bulkForm.category_id) {
+      updates.category_id = bulkForm.category_id;
+    }
+    
+    if (bulkForm.description && bulkForm.description.trim() !== '') {
+      updates.description = bulkForm.description.trim();
+    }
+
+    // 3. Si el usuario no llenó nada, no gastamos una llamada a la API
+    if (Object.keys(updates).length === 0) {
+      toast.warning('No ingresaste ningún cambio. Selecciona una categoría o escribe una descripción.');
+      return;
+    }
+
+    try {
+      // 4. LA MAGIA: Actualizamos todos los IDs seleccionados de una sola vez
+      const { error } = await supabase
+        .from('fin_transactions')
+        .update(updates)
+        .in('id', selectedIds); // <--- Aquí está el truco: .in() recibe el array
+
+      if (error) throw error;
+
+      // 5. Éxito y Limpieza
+      toast.success(`${selectedIds.length} movimientos actualizados correctamente`);
+      
+      setIsBulkEditOpen(false);        // Cerramos modal
+      setBulkForm({ category_id: '', description: '' }); // Limpiamos formulario
+      setSelectedIds([]);              // Desmarcamos las filas (opcional, pero recomendado)
+      fetchData();                     // Recargamos datos para ver cambios
+      
+    } catch (error) {
+      console.error('Error en bulk update:', error);
+      toast.error('Ocurrió un error al intentar actualizar los movimientos.');
+    }
   };
   
   const toggleSelect = (id: string) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -573,19 +649,79 @@ if (metricsData) setMonthlyMetrics(metricsData);
            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden relative flex flex-col h-[700px]">
              
              {selectedIds.length > 0 && (
-                <div className="absolute top-14 left-0 right-0 z-30 bg-blue-50 border-b border-blue-100 px-6 py-2 flex items-center justify-between animate-in slide-in-from-top-2">
-                   <span className="text-sm text-blue-800 font-medium">{selectedIds.length} seleccionados</span>
-                   <button onClick={verifyBulk} className="px-3 py-1 bg-blue-600 text-white text-xs font-bold rounded shadow-sm hover:bg-blue-700 transition-colors">Validar Todos ✅</button>
-                </div>
-             )}
+  <div className="absolute top-14 left-0 right-0 z-30 bg-blue-50 border-b border-blue-100 px-6 py-2 flex items-center justify-between animate-in slide-in-from-top-2 shadow-sm">
+    <div className="flex items-center gap-2">
+      <span className="text-sm text-blue-900 font-bold bg-blue-100 px-2 py-0.5 rounded-full">
+        {selectedIds.length}
+      </span>
+      <span className="text-sm text-blue-800">seleccionados</span>
+    </div>
+    
+    <div className="flex items-center gap-3">
+      {/* Botón 1: Edición Masiva */}
+      <button 
+        onClick={() => {
+          // Limpiamos el formulario y abrimos el modal
+          setBulkForm({ category_id: '', description: '' });
+          setIsBulkEditOpen(true);
+        }}
+        className="px-3 py-1.5 bg-white border border-blue-200 text-blue-700 text-xs font-bold rounded shadow-sm hover:bg-blue-50 transition-colors flex items-center gap-1"
+      >
+        ✎ Editar Lote
+      </button>
 
-             <div className="flex-none border-b border-gray-100 bg-gray-50/50 px-4">
-               {['pending_review', 'verified', 'all'].map((st) => (
-                 <button key={st} onClick={() => setStatusFilter(st as FilterStatus)} className={`py-3 px-4 text-xs font-medium border-b-2 ${statusFilter === st ? 'border-gray-800 text-gray-900' : 'border-transparent text-gray-500'}`}>
-                    {st === 'pending_review' ? 'Por Revisar' : st === 'verified' ? 'Histórico' : 'Todo'}
-                 </button>
-               ))}
-             </div>
+      {/* Botón 2: Validar (Existente) */}
+      <button 
+        onClick={verifyBulk} 
+        className="px-3 py-1.5 bg-blue-600 text-white text-xs font-bold rounded shadow-sm hover:bg-blue-700 transition-colors flex items-center gap-1"
+      >
+        ✅ Validar Todos
+      </button>
+    </div>
+  </div>
+)}
+
+             {/* --- BARRA DE FILTROS Y BÚSQUEDA --- */}
+<div className="flex-none border-b border-gray-100 bg-gray-50/50 px-4 flex flex-col sm:flex-row justify-between items-center gap-4 py-2">
+  
+  {/* IZQUIERDA: Tabs de Status */}
+  <div className="flex space-x-2">
+    {['pending_review', 'verified', 'all'].map((st) => (
+      <button 
+        key={st} 
+        onClick={() => setStatusFilter(st as FilterStatus)} 
+        className={`py-2 px-3 text-xs font-medium border-b-2 transition-colors ${statusFilter === st ? 'border-gray-800 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+      >
+        {st === 'pending_review' ? 'Por Revisar' : st === 'verified' ? 'Histórico' : 'Todo'}
+      </button>
+    ))}
+  </div>
+
+  {/* DERECHA: Buscador Persistente */}
+  <div className="relative w-full sm:w-64">
+    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+      {/* Icono Lupa */}
+      <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+      </svg>
+    </div>
+    <input
+      type="text"
+      placeholder="Buscar movimiento..."
+      className="block w-full pl-9 pr-8 py-1.5 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-400 focus:outline-none focus:placeholder-gray-300 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-xs transition duration-150 ease-in-out"
+      value={searchTerm}
+      onChange={(e) => setSearchTerm(e.target.value)}
+    />
+    {searchTerm && (
+      <button 
+        onClick={() => setSearchTerm('')}
+        className="absolute inset-y-0 right-0 pr-2 flex items-center text-gray-400 hover:text-gray-600"
+      >
+        <span className="text-xs font-bold p-1 bg-gray-100 rounded-full h-5 w-5 flex items-center justify-center">✕</span>
+      </button>
+    )}
+  </div>
+</div>
              
              {loading ? <div className="p-10 text-center text-sm text-gray-500">Cargando transacciones...</div> : (
               <>
@@ -808,6 +944,75 @@ if (metricsData) setMonthlyMetrics(metricsData);
     </div>
   </div>
 </Modal>
+{/* --- MODAL DE EDICIÓN MASIVA (HITO 3) --- */}
+{isBulkEditOpen && (
+        <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Header */}
+            <div className="px-6 py-4 border-b bg-gray-50 flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-gray-800 text-lg">Edición Masiva</h3>
+                <p className="text-xs text-gray-500">Editando {selectedIds.length} movimientos seleccionados</p>
+              </div>
+              <button onClick={() => setIsBulkEditOpen(false)} className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 p-1 rounded-full transition-colors">✕</button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 space-y-5">
+              <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs text-blue-800">
+                ℹ️ Solo los campos que llenes se actualizarán. Si dejas uno vacío, se mantendrá el valor original.
+              </div>
+
+              {/* Input Categoría */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nueva Categoría</label>
+                <select 
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={bulkForm.category_id}
+                  onChange={e => setBulkForm({...bulkForm, category_id: e.target.value})}
+                >
+                  <option value="">-- No cambiar categoría --</option>
+                  {categories.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Input Descripción */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nueva Descripción</label>
+                <input 
+                  type="text" 
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Ej: Publicidad Facebook Ads (Opcional)"
+                  value={bulkForm.description}
+                  onChange={e => setBulkForm({...bulkForm, description: e.target.value})}
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-gray-50 border-t flex justify-end gap-3">
+              <button 
+                onClick={() => setIsBulkEditOpen(false)} 
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium"
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={() => {
+                    // AQUÍ IRÁ LA LÓGICA DEL HITO 4
+                    console.log("Guardando...", bulkForm);
+                    handleBulkUpdate(); 
+                }} 
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 shadow-md transform active:scale-95 transition-all"
+              >
+                Guardar Cambios
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
    </AuthGuard>
  )
 }
