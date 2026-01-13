@@ -604,23 +604,38 @@ if (metricsData) setMonthlyMetrics(metricsData);
             
            {/* Widget Cuentas Bancarias */}
            <div className="lg:col-span-3 bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
-              <div className="flex justify-between items-center mb-4">
-                 <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">💰 Saldos Disponibles</h3>
-                 <button onClick={() => setIsBalanceModalOpen(true)} className="text-xs text-blue-600 hover:underline">Actualizar Saldos</button>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                 {accounts.map(acc => (
-                    <div key={acc.id} className="p-3 bg-gray-50 rounded-lg border border-gray-100 hover:border-blue-200 transition-colors">
-                       <p className="text-xs text-gray-500 truncate" title={acc.name}>{acc.name}</p>
-                       <p className="text-lg font-bold text-gray-800 mt-1">
-                          <span className="text-xs text-gray-400 mr-1">{acc.currency}</span>
-                          {fmtNum(acc.balance)}
-                       </p>
-                    </div>
-                 ))}
-                 {accounts.length === 0 && <p className="text-xs text-gray-400">No hay cuentas configuradas.</p>}
-              </div>
-           </div>
+  <div className="flex justify-between items-center mb-4">
+    <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">💰 Saldos Disponibles</h3>
+    <button onClick={() => setIsBalanceModalOpen(true)} className="text-xs text-blue-600 hover:underline">Actualizar Saldos</button>
+  </div>
+  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+    {accounts.map(acc => (
+      // Tarjeta de saldo compacta y limpia
+      <div key={acc.id} className="p-3 bg-gray-50 rounded-lg border border-gray-100 hover:border-blue-200 transition-colors">
+        
+        {/* Nombre de la cuenta y equivalente en USD */}
+        <p className="text-xs text-gray-500 truncate" title={acc.name}>
+          {acc.name}
+          
+          {acc.currency === 'PEN' && (
+            // Formato compacto (EQ: USD 11,666.23)
+            <span className="text-[10px] font-semibold text-blue-500 ml-1">
+              (EQ: USD {fmtNum(acc.balance / 3.4)})
+            </span>
+          )}
+        </p>
+
+        {/* Saldo principal en su moneda local */}
+        <p className="text-lg font-bold text-gray-800 mt-1">
+          <span className="text-xs text-gray-400 mr-1">{acc.currency}</span>
+          {fmtNum(acc.balance)}
+        </p>
+        
+      </div>
+    ))}
+    {accounts.length === 0 && <p className="text-xs text-gray-400">No hay cuentas configuradas.</p>}
+  </div>
+</div>
 
            {/* Widget Cash Flow Neto */}
            <div className="bg-gray-900 p-5 rounded-xl border border-gray-800 shadow-sm text-white flex flex-col justify-center">

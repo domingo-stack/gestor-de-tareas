@@ -34,7 +34,15 @@ export default function StrategicKPIs({ transactions, accounts, metrics }: Props
     // A. Total Cash Disponible (Suma simple de balances)
     // Nota: Idealmente deberías normalizar monedas si tienes mezcladas, 
     // pero para MVP sumamos nominalmente si son mayoritariamente USD/Moneda Base.
-    const totalCash = accounts.reduce((sum, acc) => sum + acc.balance, 0);
+    const totalCash = accounts.reduce((sum, acc) => {
+      let balanceInUsd = acc.balance;
+    
+      if (acc.currency === 'PEN') {
+        balanceInUsd = acc.balance / 3.4;
+      }
+    
+      return sum + balanceInUsd;
+    }, 0);
 
     // B. Burn Rate Estructural (Solo Gastos Fijos, últimos 3 meses)
     const now = new Date();
