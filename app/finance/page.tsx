@@ -58,7 +58,7 @@ type MonthlyMetric = {
 };
 
 // Tipos para Filtros
-type DateRange = 'current_month' | 'last_3_months' | 'last_6_months' | 'last_12_months' | 'all';
+type DateRange = 'current_month' | 'last_3_months' | 'last_6_months' | 'last_12_months' | 'all' | 'custom';
 type FilterStatus = 'pending_review' | 'verified' | 'all';
 
 // --- 1.1 NUEVOS TIPOS Y LÓGICA (Hito 1) ---
@@ -214,6 +214,37 @@ const [currencyEdit, setCurrencyEdit] = useState<CurrencyEditState>({
 });
   const [activeTab, setActiveTab] = useState<'gestion' | 'reportes'>('gestion');
   const [dateRange, setDateRange] = useState<DateRange>('last_12_months'); 
+  const [customStart, setCustomStart] = useState('');
+const [customEnd, setCustomEnd] = useState('');
+const [tempStart, setTempStart] = useState('');
+  const [tempEnd, setTempEnd] = useState('');
+
+useEffect(() => {
+  const now = new Date();
+  const end = now.toISOString().split('T')[0]; // Hoy YYYY-MM-DD
+  let start = '';
+
+  if (dateRange === 'current_month') {
+    start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  } else if (dateRange === 'last_3_months') {
+    start = new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString().split('T')[0];
+  } else if (dateRange === 'last_6_months') {
+    start = new Date(now.getFullYear(), now.getMonth() - 5, 1).toISOString().split('T')[0];
+  } else if (dateRange === 'last_12_months') {
+    start = new Date(now.getFullYear(), now.getMonth() - 11, 1).toISOString().split('T')[0];
+  }
+  
+  // Si no es 'all' ni 'custom', actualizamos los inputs visuales
+  if (dateRange !== 'all' && dateRange !== 'custom') {
+    // Si eliges un botón rápido, actualizamos los inputs visuales también
+    setTempStart(start);
+    setTempEnd(end);
+  }
+}, [dateRange]);
+
+// --- LÓGICA AUTOCOMPLETADO (Punto 2) ---
+
+
   const [statusFilter, setStatusFilter] = useState<FilterStatus>('pending_review');
   const [loading, setLoading] = useState(true);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
@@ -243,6 +274,14 @@ const [currencyEdit, setCurrencyEdit] = useState<CurrencyEditState>({
   const [isBalanceModalOpen, setIsBalanceModalOpen] = useState(false);
   const [balancesForm, setBalancesForm] = useState<Record<string, number>>({});
 
+  const descriptionSuggestions = useMemo(() => {
+    // 1. Sacamos todas las descripciones no vacías
+    const all = transactions.map(t => t.description).filter(Boolean);
+    // 2. Eliminamos duplicados con Set
+    const unique = Array.from(new Set(all));
+    // 3. Ordenamos alfabéticamente
+    return unique.sort();
+  }, [transactions]);
   // 1. CARGA INICIAL DE DATOS
   const fetchData = useCallback(async () => {
     if (!user) return;
@@ -314,21 +353,49 @@ if (metricsData) setMonthlyMetrics(metricsData);
   };
 
   const filterByDate = (tx: Transaction) => {
+    // 1. Caso 'Todo'
+    if (dateRange === 'all') return true;
+
+    // 2. Caso 'Custom' (PRIORIDAD ALTA)
+    if (dateRange === 'custom') {
+      // Si el usuario no ha definido rango aun, mostramos todo por seguridad
+      if (!customStart || !customEnd) return true;
+      
+      // COMPARACIÓN DE TEXTO SIMPLE (YYYY-MM-DD)
+      // Esto funciona perfecto pq el formato ISO es ordenable alfabéticamente
+      return tx.transaction_date >= customStart && tx.transaction_date <= customEnd;
+    }
+
+    // 3. Caso Filtros Rápidos (Standard)
     const txDate = new Date(tx.transaction_date);
     const now = new Date();
-    now.setHours(0,0,0,0); 
+    // Ajuste importante: poner 'now' al final del día para no perder datos de hoy
+    now.setHours(23, 59, 59, 999); 
+    
+    let monthsBack = 0;
+    if (dateRange === 'current_month') monthsBack = 0;
+    else if (dateRange === 'last_3_months') monthsBack = 2; // (Mes actual + 2 atrás = 3)
+    else if (dateRange === 'last_6_months') monthsBack = 5;
+    else if (dateRange === 'last_12_months') monthsBack = 11;
 
-    if (dateRange === 'all') return true;
-    
-    const monthsBack = dateRange === 'current_month' ? 0 : dateRange === 'last_3_months' ? 2 : dateRange === 'last_6_months' ? 5 : 11; 
+    // Calculamos el día 1 del mes de inicio
     const startDate = new Date(now.getFullYear(), now.getMonth() - monthsBack, 1);
-    
-    if(dateRange === 'current_month') return txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear();
+    startDate.setHours(0, 0, 0, 0);
+
+    // Si es "current_month", queremos que coincida mes y año exactamente
+    if (dateRange === 'current_month') {
+        return txDate.getMonth() === now.getMonth() && txDate.getFullYear() === now.getFullYear();
+    }
+
+    // Para 3M, 6M, 12M
     return txDate >= startDate;
   };
 
  // 1. filteredTransactions SE MANTIENE IGUAL (Esto asegura que el P&L no cambie con el buscador)
- const filteredTransactions = useMemo(() => transactions.filter(filterByDate), [transactions, dateRange]);
+ // --- CORRECCIÓN: Agregamos customStart y customEnd a las dependencias ---
+ const filteredTransactions = useMemo(() => {
+  return transactions.filter(filterByDate);
+}, [transactions, dateRange, customStart, customEnd]); // <--- ¡AQUÍ ESTÁ LA SOLUCIÓN!
 
  // 2. viewTransactions AHORA INCLUYE EL BUSCADOR (Solo afecta la tabla)
  const viewTransactions = useMemo(() => {
@@ -549,6 +616,8 @@ if (metricsData) setMonthlyMetrics(metricsData);
  * - Si la moneda es USD, la tasa es siempre 1 y el monto USD es igual al original.
  * - Si es otra moneda, la tasa es (Monto Original / Monto USD).
  */
+// --- COMPONENTE REUTILIZABLE DE AUTOCOMPLETADO (Hito 5 - UI Mejorada) ---
+
 
   return (
     <AuthGuard>
@@ -561,14 +630,89 @@ if (metricsData) setMonthlyMetrics(metricsData);
             <h1 className="text-2xl font-bold text-gray-900">Reporte Financiero</h1>
             <p className="text-gray-500 text-sm">Vista CFO & Control de Gestión</p>
           </div>
-          <div className="flex items-center gap-3 bg-white p-1 rounded-lg shadow-sm border border-gray-200">
-             {(['last_3_months', 'last_6_months', 'last_12_months', 'all'] as const).map((r) => (
-                <button key={r} onClick={() => setDateRange(r)} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all ${dateRange === r ? 'bg-gray-900 text-white shadow-sm' : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'}`}>
-                  {r === 'last_3_months' ? '3 Meses' : r === 'last_6_months' ? '6 Meses' : r === 'last_12_months' ? '12 Meses' : 'Todo'}
-                </button>
-             ))}
-             <div className="w-px h-4 bg-gray-300 mx-1"></div>
-             <button onClick={() => setIsModalOpen(true)} className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-md hover:bg-blue-100">+ Movimiento</button>
+          {/* --- FILTROS DE FECHA (V3 FINAL) --- */}
+          <div className="flex items-center gap-2 bg-white p-1 rounded-lg shadow-sm border border-gray-200">
+            
+            {/* 1. Botones Rápidos (Al hacer clic, desactivan el modo Custom) */}
+            {(['current_month', 'last_3_months', 'last_6_months', 'last_12_months', 'all'] as const).map((r) => (
+              <button
+                key={r}
+                onClick={() => setDateRange(r)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap ${
+                  dateRange === r
+                    ? 'bg-gray-900 text-white shadow-sm'
+                    : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                {r === 'current_month' ? 'Este Mes' : r === 'last_3_months' ? '3M' : r === 'last_6_months' ? '6M' : r === 'last_12_months' ? '12M' : 'Todo'}
+              </button>
+            ))}
+
+            <div className="w-px h-4 bg-gray-300 mx-1"></div>
+
+            {/* 2. Botón Custom (Interruptor) */}
+            <div className="flex items-center">
+              <button
+                onClick={() => {
+                   // Si ya estaba en custom, no hacemos nada o lo reiniciamos.
+                   // Si no estaba, lo activamos visualmente para mostrar los inputs.
+                   if (dateRange !== 'custom') {
+                      setDateRange('custom'); // Esto muestra los inputs
+                      // Opcional: Precargar fechas de hoy en los inputs temporales
+                      const today = new Date().toISOString().split('T')[0];
+                      setTempStart(today);
+                      setTempEnd(today);
+                   }
+                }}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap flex items-center gap-2 ${
+                  dateRange === 'custom'
+                    ? 'bg-blue-50 text-blue-700 border border-blue-200 font-bold' 
+                    : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'
+                }`}
+              >
+                📅 Custom
+              </button>
+
+              {/* 3. Inputs Desplegables (Solo visibles si dateRange es 'custom') */}
+              {dateRange === 'custom' && (
+                <div className="flex items-center gap-2 ml-2 animate-in slide-in-from-left-2 fade-in duration-200 bg-white border border-gray-200 rounded-md p-1 shadow-sm absolute sm:static sm:shadow-none sm:border-0 z-50 mt-10 sm:mt-0">
+                  <div className="flex items-center gap-1">
+                      <input 
+                          type="date" 
+                          value={tempStart} 
+                          onChange={(e) => setTempStart(e.target.value)}
+                          className="text-[10px] border border-gray-300 rounded px-2 py-1 text-gray-600 focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                      />
+                      <span className="text-gray-400 text-[10px]">-</span>
+                      <input 
+                          type="date" 
+                          value={tempEnd}
+                          onChange={(e) => setTempEnd(e.target.value)}
+                          className="text-[10px] border border-gray-300 rounded px-2 py-1 text-gray-600 focus:ring-2 focus:ring-blue-500 outline-none font-mono"
+                      />
+                  </div>
+                  
+                  <button
+                      onClick={() => {
+                        if(!tempStart || !tempEnd) {
+                            toast.error("Ingresa ambas fechas");
+                            return;
+                        }
+                        // Actualizamos las variables REALES que usa el filtro
+                        setCustomStart(tempStart);
+                        setCustomEnd(tempEnd);
+                        // No necesitamos setDateRange('custom') porque ya es custom,
+                        // PERO al cambiar customStart/End, el useMemo (corregido en Paso 1) se disparará.
+                        toast.success("Rango aplicado");
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold px-2 py-1 rounded transition-colors shadow-sm"
+                  >
+                      APLICAR
+                  </button>
+                </div>
+              )}
+            </div>
+            <button onClick={() => setIsModalOpen(true)} className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-50 rounded-md hover:bg-blue-100">+ Movimiento</button>
              <button 
   onClick={() => setIsConfigOpen(true)}
   className="p-2 text-gray-500 hover:text-gray-900 bg-white border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
@@ -596,7 +740,8 @@ if (metricsData) setMonthlyMetrics(metricsData);
 
         {/* --- WIDGETS DE KPI Y CUENTAS --- */}
         <StrategicKPIs 
-  transactions={transactions} 
+  transactions={filteredTransactions} 
+  allTransactions={transactions}
   accounts={accounts} 
   metrics={monthlyMetrics} 
 />
@@ -760,7 +905,21 @@ if (metricsData) setMonthlyMetrics(metricsData);
                           <tr key={tx.id} className={`hover:bg-gray-50 ${selectedIds.includes(tx.id) ? 'bg-blue-50/30' : ''}`}>
                             <td className="px-4 py-3"><input type="checkbox" checked={selectedIds.includes(tx.id)} onChange={() => toggleSelect(tx.id)} className="rounded border-gray-300 text-blue-600 focus:ring-blue-500" /></td>
                             <td className="px-6 py-3 text-gray-600 whitespace-nowrap">{tx.transaction_date}</td>
-                            <td className="px-6 py-3">{editingId === tx.id ? <input className="border rounded px-2 py-1 w-full text-sm" value={editForm.description} onChange={e=>setEditForm({...editForm, description: e.target.value})} /> : <div className="max-w-xs truncate" title={tx.description}>{tx.description}</div>}</td>
+                            <td className="px-6 py-3">
+  {editingId === tx.id ? (
+    <AutocompleteInput
+      className="border rounded px-2 py-1 w-full text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+      value={editForm.description}
+      onChange={(val) => setEditForm({ ...editForm, description: val })}
+      suggestions={descriptionSuggestions}
+      placeholder="Descripción..."
+    />
+  ) : (
+    <div className="max-w-xs truncate" title={tx.description}>
+      {tx.description}
+    </div>
+  )}
+</td>
                             <td className="px-6 py-3">{editingId === tx.id ? <input className="border rounded px-2 py-1 w-full text-sm" value={editForm.raw_description} onChange={e=>setEditForm({...editForm, raw_description: e.target.value})} /> : <div className="max-w-xs truncate" title={tx.raw_description || ''}>{tx.raw_description || '-'}</div>}</td>
                             <td className="px-6 py-3">{editingId === tx.id ? (<select className="border rounded px-2 py-1 text-sm w-full" value={editForm.category_id} onChange={e=>setEditForm({...editForm, category_id: e.target.value})}>{categories.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>) : <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium tracking-wide border ${tx.fin_categories?.type==='income' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>{tx.fin_categories?.name}</span>}</td>
                             <td className="px-6 py-3 text-right font-mono text-gray-700">
@@ -996,13 +1155,16 @@ if (metricsData) setMonthlyMetrics(metricsData);
               {/* Input Descripción */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Nueva Descripción</label>
-                <input 
-                  type="text" 
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Ej: Publicidad Facebook Ads (Opcional)"
+                {/* Input Descripción MEJORADO */}
+              <div>
+              <AutocompleteInput
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                   value={bulkForm.description}
-                  onChange={e => setBulkForm({...bulkForm, description: e.target.value})}
+                  onChange={(val) => setBulkForm({ ...bulkForm, description: val })}
+                  suggestions={descriptionSuggestions}
+                  placeholder="Ej: Publicidad Facebook Ads (Opcional)"
                 />
+              </div>
               </div>
             </div>
 
@@ -1028,6 +1190,64 @@ if (metricsData) setMonthlyMetrics(metricsData);
           </div>
         </div>
       )}
-   </AuthGuard>
+      {/* --- DATALIST PARA SUGERENCIAS (Invisible) --- */}
+      </AuthGuard>
  )
 }
+const AutocompleteInput = ({ 
+  value, 
+  onChange, 
+  suggestions, 
+  placeholder,
+  className 
+}: { 
+  value: string, 
+  onChange: (val: string) => void, 
+  suggestions: string[], 
+  placeholder?: string,
+  className?: string
+}) => {
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  
+  // Filtramos las sugerencias según lo que el usuario escribe
+  const filtered = suggestions.filter(s => 
+    s.toLowerCase().includes(value.toLowerCase()) && s !== value
+  );
+
+  return (
+    <div className="relative w-full">
+      <input
+        type="text"
+        className={className} // Heredamos tus estilos de borde, padding, etc.
+        value={value}
+        onChange={(e) => {
+            onChange(e.target.value);
+            setShowSuggestions(true);
+        }}
+        onFocus={() => setShowSuggestions(true)}
+        // Retrasamos el blur para permitir el clic en la lista
+        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)} 
+        placeholder={placeholder}
+        autoComplete="off"
+      />
+      
+      {/* La Lista Desplegable Personalizada */}
+      {showSuggestions && value.trim() !== '' && filtered.length > 0 && (
+        <ul className="absolute z-50 w-full bg-white border border-gray-200 rounded-lg shadow-xl max-h-48 overflow-y-auto mt-1 animate-in fade-in zoom-in-95 duration-100">
+          {filtered.map((suggestion, index) => (
+            <li
+              key={index}
+              onClick={() => {
+                onChange(suggestion);
+                setShowSuggestions(false);
+              }}
+              className="px-3 py-2 text-xs text-gray-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer transition-colors border-b border-gray-50 last:border-0"
+            >
+              {suggestion}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};

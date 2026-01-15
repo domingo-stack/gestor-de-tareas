@@ -27,132 +27,136 @@ interface Props {
   metrics: MonthlyMetric[];
 }
 
-export default function StrategicKPIs({ transactions, accounts, metrics }: Props) {
+// Recibimos 'allTransactions' además de las props normales
+// CAMBIO CLAVE: Agregamos " = []" para poner un valor por defecto si viene vacío
+export default function StrategicKPIs({ transactions, allTransactions = [], accounts, metrics }: any) {
 
-  // --- 1. CÁLCULO DE RUNWAY (Supervivencia) ---
-  const runwayData = useMemo(() => {
-    // A. Total Cash Disponible (Suma simple de balances)
-    // Nota: Idealmente deberías normalizar monedas si tienes mezcladas, 
-    // pero para MVP sumamos nominalmente si son mayoritariamente USD/Moneda Base.
-    const totalCash = accounts.reduce((sum, acc) => {
-      let balanceInUsd = acc.balance;
-    
-      if (acc.currency === 'PEN') {
-        balanceInUsd = acc.balance / 3.4;
-      }
-    
-      return sum + balanceInUsd;
+  // ---------------------------------------------------------
+  // 1. CÁLCULO DE RUNWAY (Usa allTransactions - SIEMPRE FIJO)
+  // ---------------------------------------------------------
+  const { runway, monthlyBurn, totalCash } = useMemo(() => {
+    // A. Calculamos la Caja Total (Sumando USD y PEN/3.75)
+    const cash = accounts.reduce((acc: number, curr: any) => {
+        // Ajusta tu tasa de cambio si es distinta a 3.75
+        const val = curr.currency === 'USD' ? Number(curr.balance) : Number(curr.balance) / 3.75;
+        return acc + (val || 0);
     }, 0);
 
-    // B. Burn Rate Estructural (Solo Gastos Fijos, últimos 3 meses)
+    // B. Definimos el rango de "Últimos 3 Meses" respecto a HOY
     const now = new Date();
     const threeMonthsAgo = new Date();
     threeMonthsAgo.setMonth(now.getMonth() - 3);
 
-    const fixedExpensesLast3Months = transactions.filter(t => {
+    // C. Filtramos gastos fijos de los últimos 3 meses REALES
+    const recentFixedExpenses = (allTransactions || []).filter((t: any) => {
       const tDate = new Date(t.transaction_date);
-      // Validar que sea Gasto, que sea Fijo y esté en fecha
-      const isExpense = t.fin_categories?.type === 'expense' || t.amount_usd < 0; // Ajusta según tu lógica de gasto
-      return isExpense && t.is_fixed_expense && tDate >= threeMonthsAgo && tDate <= now;
+        
+        // Criterios:
+        // 1. Que sea gasto (type expense)
+        // 2. Que sea "Fixed Expense" (usamos tu columna is_fixed_expense)
+        //    (Si no usas esa columna aún, quita esa parte del if y usa solo 'expense')
+        // 3. Que haya ocurrido en los últimos 90 días
+        return (
+            t.fin_categories?.type === 'expense' &&
+            t.is_fixed_expense === true && // <--- IMPORTANTE: Solo gastos fijos estructurales
+            tDate >= threeMonthsAgo &&
+            tDate <= now
+        );
     });
 
-    const totalFixedBurn3Months = fixedExpensesLast3Months.reduce((sum, t) => sum + Number(t.amount_usd), 0);
-    const monthlyFixedBurn = totalFixedBurn3Months / 3;
+    // D. Sumamos todo y dividimos por 3 para el promedio mensual
+    const totalBurn3Months = recentFixedExpenses.reduce((sum: number, t: any) => sum + Number(t.amount_usd), 0);
+    const burn = totalBurn3Months / 3; // Promedio mensual
 
-    // C. El Cálculo Final
-    const monthsLeft = monthlyFixedBurn > 0 ? totalCash / monthlyFixedBurn : 99; // 99 = Infinito/Indefinido
+    // E. Resultado
+    return {
+        totalCash: cash,
+        monthlyBurn: burn,
+        runway: burn > 0 ? cash / burn : 999 // 999 si no hay gastos (infinito)
+    };
+  }, [allTransactions, accounts]); // Depende de TODA la historia, no del filtro
 
-    return { totalCash, monthlyFixedBurn, monthsLeft };
-  }, [transactions, accounts]);
 
+  // ---------------------------------------------------------
+  // 2. CÁLCULO DE CAC (Usa transactions - OBEDECE AL FILTRO)
+  // ---------------------------------------------------------
+  const { cac, marketingSpend, newCustomers } = useMemo(() => {
+    // A. Inversión MKT (Del periodo filtrado)
+    const spend = transactions
+      .filter((t: any) => t.is_cac_related === true)
+      .reduce((sum: number, t: any) => sum + (Number(t.amount_usd) || 0), 0);
 
-  // --- 2. CÁLCULO DE CAC (Eficiencia) ---
-  const cacData = useMemo(() => {
-    // Usamos YTD (Year to Date) para suavizar estacionalidad
-    const currentYear = new Date().getFullYear();
+    // B. Clientes Nuevos (Del periodo filtrado)
+    if (transactions.length === 0) return { cac: 0, marketingSpend: 0, newCustomers: 0 };
 
-    // A. Total Inversión Marketing (YTD)
-    const marketingSpendYTD = transactions
-      .filter(t => {
-        const tYear = new Date(t.transaction_date).getFullYear();
-        const isExpense = t.fin_categories?.type === 'expense';
-        return isExpense && t.is_cac_related && tYear === currentYear;
+    const dates = transactions.map((t: any) => new Date(t.transaction_date).getTime());
+    const minDate = new Date(Math.min(...dates));
+    const maxDate = new Date(Math.max(...dates));
+
+    const customers = metrics
+      .filter((m: any) => {
+        const mDate = new Date(m.month_date);
+        return mDate >= minDate && mDate <= maxDate;
       })
-      .reduce((sum, t) => sum + Number(t.amount_usd), 0);
+      .reduce((sum: number, m: any) => sum + (Number(m.new_customers_count) || 0), 0);
 
-    // B. Total Nuevos Clientes (YTD)
-    const newCustomersYTD = metrics
-      .filter(m => new Date(m.month_date).getFullYear() === currentYear)
-      .reduce((sum, m) => sum + m.new_customers_count, 0);
-
-    // C. El Cálculo Final
-    const cac = newCustomersYTD > 0 ? marketingSpendYTD / newCustomersYTD : 0;
-
-    return { marketingSpendYTD, newCustomersYTD, cac };
-  }, [transactions, metrics]);
+    return {
+        marketingSpend: spend,
+        newCustomers: customers,
+        cac: customers > 0 ? spend / customers : 0
+    };
+  }, [transactions, metrics]); // Depende del FILTRO actual
 
 
-  // --- FORMATTERS ---
-  const fmtUSD = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n);
-  const fmtNum = (n: number) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(n);
-
+  // ---------------------------------------------------------
+  // 3. RENDERIZADO
+  // ---------------------------------------------------------
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
       
-      {/* WIDGET 1: RUNWAY */}
-      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden group hover:border-orange-300 transition-colors">
-        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20">
-          <span className="text-6xl">🛡️</span>
+      {/* CARD RUNWAY */}
+      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+        <div className="flex justify-between items-start">
+            <div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Runway (Vida Estructural)</h3>
+                <div className="flex items-baseline gap-2">
+                    <span className={`text-4xl font-extrabold ${runway < 3 ? 'text-red-500' : 'text-gray-900'}`}>
+                        {runway >= 99 ? '∞' : runway.toFixed(1)}
+                    </span>
+                    <span className="text-sm text-gray-500 font-medium">meses</span>
+                </div>
+            </div>
+            <div className={`p-3 rounded-full ${runway > 6 ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'}`}>
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+            </div>
         </div>
-        
-        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-2">Runway (Vida Estructural)</h3>
-        
-        <div className="flex items-baseline gap-2">
-          <span className={`text-4xl font-bold ${runwayData.monthsLeft < 6 ? 'text-red-500' : 'text-gray-800'}`}>
-            {runwayData.monthsLeft >= 99 ? '∞' : fmtNum(runwayData.monthsLeft)}
-          </span>
-          <span className="text-gray-500 font-medium">meses</span>
-        </div>
-
-        <div className="mt-4 pt-4 border-t border-gray-100 flex justify-between text-xs text-gray-500">
-          <div>
-            <span className="block font-bold text-gray-700">{fmtUSD(runwayData.totalCash)}</span>
-            Caja Total
-          </div>
-          <div className="text-right">
-            <span className="block font-bold text-orange-600">{fmtUSD(runwayData.monthlyFixedBurn)}/mes</span>
-            Burn Fijo (Prom. 3m)
-          </div>
+        <div className="mt-4 flex justify-between text-xs text-gray-500 border-t pt-3">
+             <span>Caja Total: <strong>${new Intl.NumberFormat('en-US').format(totalCash)}</strong></span>
+             <span className="text-red-500">Burn Fijo (3m): <strong>${new Intl.NumberFormat('en-US').format(monthlyBurn)}/mes</strong></span>
         </div>
       </div>
 
-      {/* WIDGET 2: CAC */}
-      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden group hover:border-blue-300 transition-colors">
-        <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20">
-          <span className="text-6xl">🎯</span>
+      {/* CARD CAC */}
+      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm relative overflow-hidden">
+        <div className="flex justify-between items-start">
+            <div>
+                <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">CAC (Costo Adquisición)</h3>
+                <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-extrabold text-gray-900">
+                        ${cac.toFixed(2)}
+                    </span>
+                    <span className="text-sm text-gray-500 font-medium">/ cliente</span>
+                </div>
+            </div>
+            <div className="p-3 rounded-full bg-indigo-50 text-indigo-600">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+            </div>
         </div>
-
-        <h3 className="text-sm font-bold text-gray-500 uppercase tracking-wide mb-2">CAC (Costo Adquisición YTD)</h3>
-        
-        <div className="flex items-baseline gap-2">
-          <span className="text-4xl font-bold text-gray-800">
-            {fmtUSD(cacData.cac)}
-          </span>
-          <span className="text-gray-400 text-sm">/ cliente</span>
-        </div>
-
-        <div className="mt-4 pt-4 border-t border-gray-100 flex justify-between text-xs text-gray-500">
-          <div>
-            <span className="block font-bold text-blue-600">{fmtUSD(cacData.marketingSpendYTD)}</span>
-            Inv. Marketing (YTD)
-          </div>
-          <div className="text-right">
-            <span className="block font-bold text-gray-700">{cacData.newCustomersYTD}</span>
-            Nuevos Clientes
-          </div>
+        <div className="mt-4 flex justify-between text-xs text-gray-500 border-t pt-3">
+             <span className="text-blue-600">Inv. Marketing: <strong>${new Intl.NumberFormat('en-US').format(marketingSpend)}</strong></span>
+             <span>Nuevos Clientes: <strong>{newCustomers}</strong></span>
         </div>
       </div>
-
     </div>
-  )
+  );
 }
