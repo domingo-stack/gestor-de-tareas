@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { 
   BanknotesIcon, 
@@ -14,7 +14,20 @@ import {
   ChevronRightIcon,
   ArrowTrendingUpIcon
 } from '@heroicons/react/24/outline';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { 
+  ComposedChart, 
+  Line, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer, 
+  PieChart, 
+  Pie, 
+  Cell, 
+  Legend 
+} from 'recharts';
 
 // --- TIPOS DE DATOS ---
 interface RevenueOrder {
@@ -35,7 +48,6 @@ interface Metrics {
   totalRevenue: number;
   totalTransactions: number;
   averageTicket: number;
-  prevRevenue?: number;
   growth?: {
     percent: number;
     isPositive: boolean;
@@ -49,24 +61,19 @@ const DATE_RANGES = [
   { label: '30 Días', value: '30d' },
   { label: 'Este Mes', value: 'this_month' },
   { label: 'Personalizado', value: 'custom' }
-  ];
+];
 
-  // --- UTILIDAD DE FORMATO (Hito A) ---
-// Esta función convierte cualquier número en formato dinero: $ 1,234.56
 const formatCurrency = (value: number | undefined) => {
   if (value === undefined || value === null) return '$ 0.00';
   return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2,
   }).format(value).replace('USD', '$').trim(); 
-  // El .replace es un truco para asegurar que quede "$ 1,234.56" y no "USD 1,234.56"
 };
 
-// Lista maestra de países (Asegúrate de que coincidan con cómo están escritos en tu DB)
 const COUNTRIES_LIST = ['Chile', 'Perú', 'México', 'Colombia', 'Argentina', 'Ecuador', 'Costa Rica', 'Panamá','El Salvador', 'Honduras', 'Guatemala', 'Venezuela', 'Bolivia', 'Uruguay', 'Paraguay', 'República Dominicana', 'Puerto Rico', 'Nicaragua', 'España'];
 const PLANS = ['Mensual', 'Anual'];
+const PROVIDERS_LIST = ['Stripe', 'Dlocal', 'MercadoPago', 'Paypal', 'Manual'];
+const TYPES_LIST = ['Nuevo', 'Renovación']; 
 const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#6366F1'];
 
 export default function RevenuePage() {
@@ -78,208 +85,175 @@ export default function RevenuePage() {
   const [customEnd, setCustomEnd] = useState('');
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   
-  // NUEVO: Array de países seleccionados (vacío = todos)
+  // Filtros Avanzados
   const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
-  const [isCountryDropdownOpen, setIsCountryDropdownOpen] = useState(false); // Para abrir/cerrar el menú
-
+  const [isCountryDropdownOpen, setIsCountryDropdownOpen] = useState(false);
+  const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
+  const [isProviderDropdownOpen, setIsProviderDropdownOpen] = useState(false);
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
+  const [isTypeDropdownOpen, setIsTypeDropdownOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Refs para cerrar dropdowns
+  const countryRef = useRef<HTMLDivElement>(null);
+  const providerRef = useRef<HTMLDivElement>(null);
+  const typeRef = useRef<HTMLDivElement>(null);
+
   // --- ESTADOS (DATA) ---
   const [orders, setOrders] = useState<RevenueOrder[]>([]);
+  const [chartData, setChartData] = useState<any[]>([]);
+  const [distributionData, setDistributionData] = useState<{
+    countryChart: any[], 
+    planChart: any[], 
+    providerChart: any[] 
+  }>({ countryChart: [], planChart: [], providerChart: [] });
+  
   const [metrics, setMetrics] = useState<Metrics>({ totalRevenue: 0, totalTransactions: 0, averageTicket: 0 });
   const [loading, setLoading] = useState(true);
+  
+  // Paginación Servidor
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [totalRecords, setTotalRecords] = useState(0);
 
-  // Referencia para detectar clics fuera del dropdown
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Cerrar dropdown si clickeo fuera
+  // Cerrar dropdowns al hacer click fuera
   useEffect(() => {
     function handleClickOutside(event: any) {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
-        setIsCountryDropdownOpen(false);
-      }
+      if (countryRef.current && !countryRef.current.contains(event.target)) setIsCountryDropdownOpen(false);
+      if (providerRef.current && !providerRef.current.contains(event.target)) setIsProviderDropdownOpen(false);
+      if (typeRef.current && !typeRef.current.contains(event.target)) setIsTypeDropdownOpen(false);
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // --- LÓGICA DE SELECCIÓN MÚLTIPLE ---
-  const toggleCountry = (country: string) => {
-    if (selectedCountries.includes(country)) {
-      // Si ya está, lo sacamos
-      setSelectedCountries(selectedCountries.filter(c => c !== country));
-    } else {
-      // Si no está, lo agregamos
-      setSelectedCountries([...selectedCountries, country]);
-    }
+  const toggleFilter = (item: string, list: string[], setList: any) => {
+    if (list.includes(item)) setList(list.filter(c => c !== item));
+    else setList([...list, item]);
+    setCurrentPage(1); // Reset pagina al filtrar
   };
 
-  // --- LÓGICA DE FECHAS (Igual que antes) ---
-  // --- LÓGICA DE FECHAS (TIMEZONE FIX 🌎) ---
-  const getDateRangeParams = (range: string) => {
-    const now = new Date();
-    let start: Date;
-    let end: Date = now; 
-
-    // Helper para poner horas al inicio/fin del día local
-    const setStartOfDay = (d: Date) => { d.setHours(0,0,0,0); return d; };
-    const setEndOfDay = (d: Date) => { d.setHours(23,59,59,999); return d; };
-
-    switch (range) {
-      case 'today':
-        start = setStartOfDay(new Date());
-        break;
-      case '7d':
-        start = new Date();
-        start.setDate(now.getDate() - 7);
-        start = setStartOfDay(start);
-        break;
-      case '30d':
-        start = new Date();
-        start.setDate(now.getDate() - 30);
-        start = setStartOfDay(start);
-        break;
-      case 'this_month':
-        start = new Date(now.getFullYear(), now.getMonth(), 1); 
-        start = setStartOfDay(start);
-        break;
-      case 'custom':
-        if (!customStart || !customEnd) return { start: '', end: '' }; // Retornamos vacíos si falta data
-        // Creamos fechas locales explícitas "YYYY-MM-DD" + "T00:00:00"
-        start = new Date(`${customStart}T00:00:00`);
-        end = new Date(`${customEnd}T23:59:59`);
-        break;
-      default:
-        start = new Date(0); // 1970
-    }
-
-    // Retornamos ISO Strings que es lo que pide Supabase
-    return { 
-      start: start.toISOString(), 
-      end: end.toISOString() 
-    };
-  };
-
-  // --- FETCH PRINCIPAL ---
-  // --- FETCH PRINCIPAL (CON LÓGICA DE FECHAS ADENTRO) ---
-  // --- FETCH PRINCIPAL (CON DOBLE CONSULTA: PRESENTE Y PASADO) ---
+  // --- FETCH PRINCIPAL (Optimizado y Limpio) ---
   useEffect(() => {
     if (!supabase) return;
-    
-    // 1. Validar Custom
-    if (dateRange === 'custom' && (!customStart || !customEnd)) {
-         setLoading(false);
-         return;
-    }
+    if (dateRange === 'custom' && (!customStart || !customEnd)) { setLoading(false); return; }
 
     const fetchData = async () => {
       try {
         setLoading(true);
 
-        // 2. OBTENER LAS FECHAS (Lógica 2.0)
+        // 1. CALCULO DE FECHAS
         const getDates = () => {
-            const now = new Date();
-            let start: Date;
-            let end: Date = now; 
-            const setStartOfDay = (d: Date) => { d.setHours(0,0,0,0); return d; };
+          const now = new Date();
+          let start: Date; let end: Date = now; 
+          const setStartOfDay = (d: Date) => { d.setHours(0,0,0,0); return d; };
 
-            // A. Periodo ACTUAL
-            switch (dateRange) {
-              case 'today':
-                start = setStartOfDay(new Date());
-                break;
-              case '7d':
-                start = new Date();
-                start.setDate(now.getDate() - 7);
-                start = setStartOfDay(start);
-                break;
-              case '30d':
-                start = new Date();
-                start.setDate(now.getDate() - 30);
-                start = setStartOfDay(start);
-                break;
-              case 'this_month':
-                start = new Date(now.getFullYear(), now.getMonth(), 1); 
-                start = setStartOfDay(start);
-                break;
-              case 'custom':
-                start = new Date(`${customStart}T00:00:00`);
-                end = new Date(`${customEnd}T23:59:59`);
-                break;
-              default:
-                start = new Date(0);
-            }
-
-            // B. Periodo ANTERIOR (Mes pasado)
-            const prevStart = new Date(start);
-            prevStart.setMonth(prevStart.getMonth() - 1);
-            
-            const prevEnd = new Date(end);
-            prevEnd.setMonth(prevEnd.getMonth() - 1);
-
-            return { 
-              startIso: start.toISOString(), 
-              endIso: end.toISOString(),
-              prevStartIso: prevStart.toISOString(),
-              prevEndIso: prevEnd.toISOString()
-            };
-        };
-
-        const { startIso, endIso, prevStartIso, prevEndIso } = getDates();
-
-        // 3. CONSTRUIR QUERIES
-        const buildQuery = (startDate: string, endDate: string) => {
-          let q = supabase.from('rev_orders').select('*')
-            .gte('created_at', startDate)
-            .lte('created_at', endDate);
-            
-          if (selectedCountries.length > 0) q = q.in('country', selectedCountries);
-          if (selectedPlan !== 'all') q = q.ilike('product_name', `%${selectedPlan}%`);
-          if (searchTerm) q = q.or(`external_id.ilike.%${searchTerm}%,user_bubble_id.ilike.%${searchTerm}%`);
+          switch (dateRange) {
+            case 'today': start = setStartOfDay(new Date()); break;
+            case '7d': start = new Date(); start.setDate(now.getDate() - 7); start = setStartOfDay(start); break;
+            case '30d': start = new Date(); start.setDate(now.getDate() - 30); start = setStartOfDay(start); break;
+            case 'this_month': start = new Date(now.getFullYear(), now.getMonth(), 1); start = setStartOfDay(start); break;
+            case 'custom': start = new Date(`${customStart}T00:00:00`); end = new Date(`${customEnd}T23:59:59`); break;
+            default: start = new Date(0);
+          }
           
-          return q;
+          const duration = end.getTime() - start.getTime();
+          const prevStart = new Date(start.getTime() - duration);
+          const prevEnd = new Date(end.getTime() - duration);
+          
+          const lastYearStart = new Date(start); lastYearStart.setFullYear(start.getFullYear() - 1);
+          const lastYearEnd = new Date(end); lastYearEnd.setFullYear(end.getFullYear() - 1);
+
+          return { startIso: start.toISOString(), endIso: end.toISOString(), prevStartIso: prevStart.toISOString(), prevEndIso: prevEnd.toISOString(), lastYearStartIso: lastYearStart.toISOString(), lastYearEndIso: lastYearEnd.toISOString() };
+        };
+        const { startIso, endIso, prevStartIso, prevEndIso, lastYearStartIso, lastYearEndIso } = getDates();
+
+        // 2. CONSTRUCTOR DE QUERIES
+        const buildQuery = (s: string, e: string) => {
+           let q = supabase.from('rev_orders').select('*', { count: 'exact' }).gte('created_at', s).lte('created_at', e);
+           if (selectedCountries.length > 0) q = q.in('country', selectedCountries);
+           if (selectedPlan !== 'all') q = q.ilike('product_name', `%${selectedPlan}%`);
+           if (selectedProviders.length > 0) q = q.in('provider', selectedProviders);
+           if (selectedTypes.length > 0) q = q.in('plan_type', selectedTypes);
+           if (searchTerm) q = q.or(`external_id.ilike.%${searchTerm}%,user_bubble_id.ilike.%${searchTerm}%`);
+           return q;
         };
 
-        // 4. EJECUTAR (PARALELO)
-        const [currentRes, prevRes] = await Promise.all([
-          buildQuery(startIso, endIso).order('created_at', { ascending: false }),
-          buildQuery(prevStartIso, prevEndIso)
+        // 3. EJECUCIÓN (UN SOLO PROMISE.ALL)
+        const from = (currentPage - 1) * itemsPerPage;
+        const to = from + itemsPerPage - 1;
+
+        const [allDataRes, prevDataRes, lastYearRes, tableDataRes] = await Promise.all([
+            // A. Todo el periodo (para KPIs y Gráficos) - SIN paginar
+            buildQuery(startIso, endIso).order('created_at', { ascending: true }),
+            // B. Periodo anterior (Growth)
+            buildQuery(prevStartIso, prevEndIso),
+            // C. Año pasado (Gráfico Comparativo)
+            buildQuery(lastYearStartIso, lastYearEndIso),
+            // D. Tabla (Paginada)
+            buildQuery(startIso, endIso).order('created_at', { ascending: false }).range(from, to)
         ]);
 
-        if (currentRes.error) throw currentRes.error;
+        if (allDataRes.error) throw allDataRes.error;
+        if (tableDataRes.error) throw tableDataRes.error;
 
-        const currentData = currentRes.data || [];
-        const prevData = prevRes.data || [];
+        const data = allDataRes.data || [];
+        const prevData = prevDataRes.data || [];
+        const tableData = tableDataRes.data || [];
 
-        // 5. CALCULAR MÉTRICAS
-        const calcTotal = (dataset: any[]) => dataset.reduce((sum, item) => sum + (item.amount_usd || 0), 0);
+        // 4. CÁLCULO DE MÉTRICAS (Usando data completa)
+        const totalRev = data.reduce((sum, item) => sum + (item.amount_usd || 0), 0);
+        const prevTotal = prevData.reduce((sum, item) => sum + (item.amount_usd || 0), 0);
         
-        const currentTotal = calcTotal(currentData);
-        const prevTotal = calcTotal(prevData);
-        
-        // Calcular Delta %
         let growthParams = { percent: 0, isPositive: true };
         if (prevTotal > 0) {
-            const growth = ((currentTotal - prevTotal) / prevTotal) * 100;
+            const growth = ((totalRev - prevTotal) / prevTotal) * 100;
             growthParams = { percent: Math.abs(growth), isPositive: growth >= 0 };
-        } else if (currentTotal > 0) {
-            growthParams = { percent: 100, isPositive: true };
-        }
+        } else if (totalRev > 0) growthParams = { percent: 100, isPositive: true };
 
-        // 6. GUARDAR ESTADO
-        setMetrics({ 
-          totalRevenue: currentTotal, 
-          totalTransactions: currentData.length, 
-          averageTicket: currentData.length > 0 ? currentTotal / currentData.length : 0,
-          growth: growthParams, 
-          prevRevenue: prevTotal 
+        setMetrics({ totalRevenue: totalRev, totalTransactions: data.length, averageTicket: data.length > 0 ? totalRev / data.length : 0, growth: growthParams });
+
+        // 5. PREPARAR GRÁFICO TENDENCIA (YoY)
+        const lastYearMap = new Map();
+        (lastYearRes.data || []).forEach(item => {
+            const d = new Date(item.created_at);
+            const key = `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; 
+            lastYearMap.set(key, (lastYearMap.get(key) || 0) + (item.amount_usd || 0));
         });
 
-        setOrders(currentData);
-        setCurrentPage(1);
+        const chartMap = new Map();
+        data.forEach(order => {
+            const d = new Date(order.created_at);
+            const dateKey = d.toISOString().split('T')[0];
+            const matchKey = `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            if (!chartMap.has(dateKey)) chartMap.set(dateKey, { date: dateKey, total: 0, lastYear: lastYearMap.get(matchKey) || 0 });
+            chartMap.get(dateKey).total += (order.amount_usd || 0);
+        });
+        setChartData(Array.from(chartMap.values()).sort((a: any, b: any) => a.date.localeCompare(b.date)));
+
+        // 6. PREPARAR DISTRIBUCIONES
+        const byCountry: any = {}, byPlan: any = {}, byProvider: any = {};
+        data.forEach(item => {
+            const amt = item.amount_usd || 0;
+            byCountry[item.country || 'Unknown'] = (byCountry[item.country || 'Unknown'] || 0) + amt;
+            byPlan[item.product_name || 'Unknown'] = (byPlan[item.product_name || 'Unknown'] || 0) + amt;
+            byProvider[item.provider || 'Unknown'] = (byProvider[item.provider || 'Unknown'] || 0) + amt;
+        });
+
+        const toArray = (obj: any) => Object.keys(obj).map(k => ({ name: k, value: obj[k] })).sort((a,b) => b.value - a.value);
+        let countryArr = toArray(byCountry);
+        if (countryArr.length > 5) {
+             const top5 = countryArr.slice(0,5);
+             const rest = countryArr.slice(5).reduce((s, i) => s + i.value, 0);
+             if (rest > 0) countryArr = [...top5, { name: 'Otros', value: rest }];
+        }
+        
+        setDistributionData({ countryChart: countryArr, planChart: toArray(byPlan), providerChart: toArray(byProvider) });
+
+        // 7. ACTUALIZAR TABLA Y TOTALES
+        setOrders(tableData); // Usamos los datos YA paginados del backend
+        setTotalRecords(allDataRes.count || 0);
 
       } catch (err) {
         console.error('Error fetching data:', err);
@@ -290,479 +264,208 @@ export default function RevenuePage() {
 
     fetchData();
   
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dateRange, refreshTrigger, selectedPlan, searchTerm, selectedCountries]); 
-  // Nota: Quitamos 'supabase' de dependencias pq a veces useAuth lo recrea y causa loop.
+  }, [dateRange, refreshTrigger, selectedPlan, searchTerm, selectedCountries, selectedProviders, selectedTypes, currentPage, itemsPerPage]);
 
-  // --- COMPONENTES VISUALES ---
-  // --- COMPONENTES VISUALES ---
+  // --- HELPERS VISUALES ---
+  const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+    if (percent < 0.05) return null;
+    const RADIAN = Math.PI / 180;
+    const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+    const x = cx + radius * Math.cos(-midAngle * RADIAN);
+    const y = cy + radius * Math.sin(-midAngle * RADIAN);
+    return <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize="10" fontWeight="bold">{`${(percent * 100).toFixed(0)}%`}</text>;
+  };
+
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      const current = payload[0].value;
+      const lastYear = payload.find((p: any) => p.dataKey === 'lastYear')?.value || 0;
+      let growth = 0; let isPos = true;
+      if (lastYear > 0) { growth = ((current - lastYear) / lastYear) * 100; isPos = growth >= 0; }
+      else if (current > 0) growth = 100;
+      
+      return (
+        <div className="bg-white p-3 border border-gray-100 shadow-lg rounded-lg text-xs">
+          <p className="font-bold text-gray-700 mb-2">{new Date(label).toLocaleDateString()}</p>
+          <div className="flex justify-between gap-4 mb-1"><span className="text-blue-600 font-medium">Este año:</span><span className="font-bold">{formatCurrency(current)}</span></div>
+          <div className="flex justify-between gap-4 mb-2"><span className="text-gray-400 font-medium">Año pasado:</span><span className="text-gray-500">{formatCurrency(lastYear)}</span></div>
+          <div className={`pt-2 border-t flex justify-end font-bold ${isPos ? 'text-green-600' : 'text-red-500'}`}>{Math.abs(growth).toFixed(1)}% {isPos ? '▲' : '▼'}</div>
+        </div>
+      );
+    }
+    return null;
+  };
+
   const KpiCard = ({ title, value, subtext, icon: Icon, colorClass, growth }: any) => (
     <div className="bg-white rounded-xl p-6 border border-gray-100 shadow-sm flex items-start justify-between">
       <div>
         <p className="text-sm font-medium text-gray-500 mb-1">{title}</p>
         <h3 className="text-3xl font-bold text-gray-900 tracking-tight">{value}</h3>
-        
-        {/* Lógica de Crecimiento (Delta) */}
-        {growth && (
+        {growth ? (
           <div className={`flex items-center mt-2 text-xs font-medium ${growth.isPositive ? 'text-green-600' : 'text-red-600'}`}>
-            {growth.isPositive ? (
-              <ArrowTrendingUpIcon className="w-3 h-3 mr-1" />
-            ) : (
-              <ArrowTrendingUpIcon className="w-3 h-3 mr-1 transform rotate-180" />
-            )}
-            <span>{growth.percent.toFixed(1)}%</span>
-            <span className="text-gray-400 ml-1 font-normal">vs periodo anterior</span>
+            <ArrowTrendingUpIcon className={`w-3 h-3 mr-1 ${!growth.isPositive && 'rotate-180'}`} /><span>{growth.percent.toFixed(1)}%</span><span className="text-gray-400 ml-1 font-normal">vs periodo anterior</span>
           </div>
-        )}
-        
-        {!growth && <p className="text-xs text-gray-400 mt-2">{subtext}</p>}
+        ) : <p className="text-xs text-gray-400 mt-2">{subtext}</p>}
       </div>
-      
-      <div className={`p-3 rounded-lg ${colorClass} bg-opacity-10`}>
-        <Icon className={`w-6 h-6 ${colorClass.replace('bg-', 'text-')}`} />
-      </div>
+      <div className={`p-3 rounded-lg ${colorClass} bg-opacity-10`}><Icon className={`w-6 h-6 ${colorClass.replace('bg-', 'text-')}`} /></div>
     </div>
   );
 
-  // 1. PREPARAR DATOS DEL GRÁFICO (Agrupar por fecha)
-  // --- PREPARAR DATOS GRÁFICO (OPTIMIZADO CON USEMEMO) ---
-  const chartData = useMemo(() => {
-    return orders.reduce((acc: any[], order) => {
-      // Protección contra fechas inválidas
-      if (!order.created_at) return acc;
-      
-      try {
-        // Usamos fecha local YYYY-MM-DD
-        const date = new Date(order.created_at).toLocaleDateString('en-CA'); 
-        
-        const existing = acc.find(item => item.date === date);
-        if (existing) {
-          existing.total += order.amount_usd || 0;
-        } else {
-          acc.push({ date, total: order.amount_usd || 0 });
-        }
-      } catch (e) {
-        // Si falla la fecha, ignoramos esa fila para no romper el gráfico
-      }
-      return acc;
-    }, []).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [orders]); // <--- Solo se recalcula si 'orders' cambia // Ordenar cronológicamente
-
-  // --- PREPARAR DATOS DISTRIBUCIÓN (PAÍS Y PLAN) ---
-  // --- PREPARAR DATOS DISTRIBUCIÓN (TOP 5 + OTROS) ---
-  const distributionData = useMemo(() => {
-    
-    // 1. Agrupar por País
-    const byCountry = orders.reduce((acc: any, order) => {
-      const country = order.country || 'Unknown';
-      acc[country] = (acc[country] || 0) + (order.amount_usd || 0);
-      return acc;
-    }, {});
-
-    // 2. Agrupar por Plan
-    const byPlan = orders.reduce((acc: any, order) => {
-      const plan = order.product_name || 'Unknown'; 
-      acc[plan] = (acc[plan] || 0) + (order.amount_usd || 0);
-      return acc;
-    }, {});
-
-    // Helper: Objeto -> Array ordenado
-    const toArray = (obj: any) => Object.keys(obj)
-      .map(key => ({ name: key, value: obj[key] }))
-      .sort((a, b) => b.value - a.value);
-
-    // LÓGICA DE AGRUPACIÓN (TOP 5)
-    let countryArray = toArray(byCountry);
-    
-    // Si tenemos más de 5 países, cortamos y sumamos el resto
-    if (countryArray.length > 5) {
-      const top5 = countryArray.slice(0, 5);
-      const rest = countryArray.slice(5);
-      const otherTotal = rest.reduce((sum, item) => sum + item.value, 0);
-      
-      // Solo agregamos "Otros" si el monto es mayor a 0
-      if (otherTotal > 0) {
-        countryArray = [...top5, { name: 'Otros', value: otherTotal }];
-      }
-    }
-
-    return {
-      countryChart: countryArray,
-      planChart: toArray(byPlan) // Los planes suelen ser pocos, los dejamos todos
-    };
-  }, [orders]);
-
-
-  // 2. LÓGICA DE PAGINACIÓN (Recortar la tabla)
-  const indexOfLastItem = currentPage * itemsPerPage;
-  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const currentOrders = orders.slice(indexOfFirstItem, indexOfLastItem);
-  const totalPages = Math.ceil(orders.length / itemsPerPage);
-
-  // Función para cambiar de página
-  const paginate = (pageNumber: number) => setCurrentPage(pageNumber);
+  const totalPages = Math.ceil(totalRecords / itemsPerPage);
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-8">
-      
-      {/* 1. HEADER & BARRA DE FECHAS */}
+      {/* 1. HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            Revenue Explorer 🚀
-          </h1>
-          <p className="text-gray-500 text-sm">Analiza tus ingresos en detalle</p>
-        </div>
-
+        <div><h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">Revenue Explorer 🚀</h1><p className="text-gray-500 text-sm">Analiza tus ingresos en detalle</p></div>
         <div className="bg-white p-1 rounded-lg border border-gray-200 flex flex-wrap gap-1 shadow-sm">
-          {DATE_RANGES.map((range) => (
-            <button
-              key={range.value}
-              onClick={() => setDateRange(range.value)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                dateRange === range.value
-                  ? 'bg-blue-100 text-blue-700'
-                  : 'text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              {range.label}
-            </button>
+          {DATE_RANGES.map((r) => (
+            <button key={r.value} onClick={() => { setDateRange(r.value); setCurrentPage(1); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${dateRange === r.value ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`}>{r.label}</button>
           ))}
         </div>
-        {/* --- NUEVO: INPUTS PARA FILTRO CUSTOM --- */}
         {dateRange === 'custom' && (
           <div className="mt-4 bg-blue-50 p-3 rounded-lg border border-blue-100 flex flex-wrap items-end gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Desde</label>
-              <input 
-                type="date" 
-                value={customStart}
-                onChange={(e) => setCustomStart(e.target.value)}
-                className="block w-36 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Hasta</label>
-              <input 
-                type="date" 
-                value={customEnd}
-                onChange={(e) => setCustomEnd(e.target.value)}
-                className="block w-36 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm px-3 py-2 border"
-              />
-            </div>
-            <button
-              onClick={() => setRefreshTrigger(prev => prev + 1)} // Esto dispara el useEffect
-              className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm h-[38px]"
-            >
-              Aplicar
-            </button>
+            <div><label className="block text-xs font-medium text-gray-700 mb-1">Desde</label><input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)} className="block w-36 rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border" /></div>
+            <div><label className="block text-xs font-medium text-gray-700 mb-1">Hasta</label><input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} className="block w-36 rounded-md border-gray-300 shadow-sm sm:text-sm px-3 py-2 border" /></div>
+            <button onClick={() => { setRefreshTrigger(p => p+1); setCurrentPage(1); }} className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium shadow-sm h-[38px]">Aplicar</button>
           </div>
         )}
       </div>
 
-      {/* 2. BARRA DE FILTROS AVANZADOS */}
+      {/* 2. FILTROS AVANZADOS */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row gap-4 items-center z-20 relative">
-        <div className="flex items-center gap-2 text-gray-400">
-           <FunnelIcon className="w-5 h-5" />
-           <span className="text-xs font-semibold uppercase tracking-wide">Filtros:</span>
-        </div>
-
-        {/* --- NUEVO FILTRO DE PAÍSES MULTI-SELECT --- */}
-        <div className="relative w-full md:w-auto" ref={dropdownRef}>
-          <button
-            onClick={() => setIsCountryDropdownOpen(!isCountryDropdownOpen)}
-            className="w-full md:w-48 bg-gray-50 border border-gray-300 text-gray-700 text-sm rounded-md px-3 py-2 text-left flex justify-between items-center hover:bg-gray-100 transition-colors"
-          >
-            <span className="truncate">
-              {selectedCountries.length === 0 
-                ? "🌍 Todos los Países" 
-                : `${selectedCountries.length} Países seleccionados`}
-            </span>
-            <ChevronDownIcon className="w-4 h-4 text-gray-500" />
+        <div className="flex items-center gap-2 text-gray-400"><FunnelIcon className="w-5 h-5" /><span className="text-xs font-semibold uppercase tracking-wide">Filtros:</span></div>
+        
+        {/* Country Filter */}
+        <div className="relative w-full md:w-auto" ref={countryRef}>
+          <button onClick={() => setIsCountryDropdownOpen(!isCountryDropdownOpen)} className="w-full md:w-48 bg-gray-50 border border-gray-300 text-gray-700 text-sm rounded-md px-3 py-2 text-left flex justify-between items-center hover:bg-gray-100 transition-colors">
+            <span className="truncate">{selectedCountries.length === 0 ? "🌍 Todos los Países" : `${selectedCountries.length} Países`}</span><ChevronDownIcon className="w-4 h-4 text-gray-500" />
           </button>
-
-          {/* Menú Dropdown */}
           {isCountryDropdownOpen && (
             <div className="absolute top-full left-0 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2 max-h-60 overflow-y-auto">
-              <div className="space-y-1">
-                {COUNTRIES_LIST.map((country) => (
-                  <label key={country} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded text-blue-600 focus:ring-blue-500 border-gray-300"
-                      checked={selectedCountries.includes(country)}
-                      onChange={() => toggleCountry(country)}
-                    />
-                    <span className="text-sm text-gray-700">{country}</span>
-                  </label>
-                ))}
-              </div>
-              
-              {/* Botón limpiar */}
-              {selectedCountries.length > 0 && (
-                 <button 
-                   onClick={() => setSelectedCountries([])}
-                   className="w-full mt-2 text-xs text-center text-red-500 hover:text-red-700 py-1 border-t border-gray-100"
-                 >
-                   Limpiar selección
-                 </button>
-              )}
+              <div className="space-y-1">{COUNTRIES_LIST.map((c) => (<label key={c} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer"><input type="checkbox" className="rounded text-blue-600 border-gray-300" checked={selectedCountries.includes(c)} onChange={() => toggleFilter(c, selectedCountries, setSelectedCountries)} /><span className="text-sm text-gray-700">{c}</span></label>))}</div>
+              {selectedCountries.length > 0 && (<button onClick={() => { setSelectedCountries([]); setCurrentPage(1); }} className="w-full mt-2 text-xs text-center text-red-500 hover:text-red-700 py-1 border-t border-gray-100">Limpiar</button>)}
             </div>
           )}
         </div>
 
-        {/* Filtro Plan */}
-        <select 
-          className="block w-full md:w-40 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm py-2 px-3 border bg-gray-50"
-          value={selectedPlan}
-          onChange={(e) => setSelectedPlan(e.target.value)}
-        >
-          <option value="all">📦 Todos los Planes</option>
-          {PLANS.map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
-
-        {/* Buscador */}
-        <div className="relative flex-grow w-full md:w-auto">
-          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-            <MagnifyingGlassIcon className="h-4 w-4 text-gray-400" aria-hidden="true" />
-          </div>
-          <input
-            type="text"
-            className="block w-full rounded-md border-gray-300 pl-10 focus:border-blue-500 focus:ring-blue-500 sm:text-sm py-2 border"
-            placeholder="Buscar por ID, usuario..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+        {/* Provider Filter */}
+        <div className="relative w-full md:w-auto" ref={providerRef}>
+          <button onClick={() => setIsProviderDropdownOpen(!isProviderDropdownOpen)} className="w-full md:w-40 bg-gray-50 border border-gray-300 text-gray-700 text-sm rounded-md px-3 py-2 text-left flex justify-between items-center hover:bg-gray-100 transition-colors">
+            <span className="truncate">{selectedProviders.length === 0 ? "💳 Medio de Pago" : `${selectedProviders.length} Proveedores`}</span><ChevronDownIcon className="w-4 h-4 text-gray-500" />
+          </button>
+          {isProviderDropdownOpen && (
+            <div className="absolute top-full left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2">
+              <div className="space-y-1">{PROVIDERS_LIST.map((p) => (<label key={p} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer"><input type="checkbox" className="rounded text-blue-600 border-gray-300" checked={selectedProviders.includes(p)} onChange={() => toggleFilter(p, selectedProviders, setSelectedProviders)} /><span className="text-sm text-gray-700">{p}</span></label>))}</div>
+              {selectedProviders.length > 0 && (<button onClick={() => { setSelectedProviders([]); setCurrentPage(1); }} className="w-full mt-2 text-xs text-center text-red-500 hover:text-red-700 py-1 border-t border-gray-100">Limpiar</button>)}
+            </div>
+          )}
         </div>
+
+        {/* Type Filter */}
+        <div className="relative w-full md:w-auto" ref={typeRef}>
+          <button onClick={() => setIsTypeDropdownOpen(!isTypeDropdownOpen)} className="w-full md:w-40 bg-gray-50 border border-gray-300 text-gray-700 text-sm rounded-md px-3 py-2 text-left flex justify-between items-center hover:bg-gray-100 transition-colors">
+            <span className="truncate">{selectedTypes.length === 0 ? "🔄 Tipo Cliente" : `${selectedTypes.length} Tipos`}</span><ChevronDownIcon className="w-4 h-4 text-gray-500" />
+          </button>
+          {isTypeDropdownOpen && (
+            <div className="absolute top-full left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-2">
+              <div className="space-y-1">{TYPES_LIST.map((t) => (<label key={t} className="flex items-center space-x-2 p-2 hover:bg-gray-50 rounded cursor-pointer"><input type="checkbox" className="rounded text-blue-600 border-gray-300" checked={selectedTypes.includes(t)} onChange={() => toggleFilter(t, selectedTypes, setSelectedTypes)} /><span className="text-sm text-gray-700">{t}</span></label>))}</div>
+              {selectedTypes.length > 0 && (<button onClick={() => { setSelectedTypes([]); setCurrentPage(1); }} className="w-full mt-2 text-xs text-center text-red-500 hover:text-red-700 py-1 border-t border-gray-100">Limpiar</button>)}
+            </div>
+          )}
+        </div>
+
+        <select className="block w-full md:w-40 rounded-md border-gray-300 shadow-sm sm:text-sm py-2 px-3 border bg-gray-50" value={selectedPlan} onChange={(e) => { setSelectedPlan(e.target.value); setCurrentPage(1); }}>
+          <option value="all">📦 Planes</option>{PLANS.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <div className="relative flex-grow w-full md:w-auto"><div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3"><MagnifyingGlassIcon className="h-4 w-4 text-gray-400" /></div><input type="text" className="block w-full rounded-md border-gray-300 pl-10 sm:text-sm py-2 border" placeholder="Buscar..." value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }} /></div>
       </div>
 
-      {/* 3. KPIS REACTIVOS */}
-      {/* 3. KPIS REACTIVOS */}
+      {/* 3. KPIS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
-        {/* Tarjeta de Ingresos (Con Comparativa) */}
-        <KpiCard 
-          title="Ingresos Totales" 
-          value={loading ? "..." : formatCurrency(metrics.totalRevenue)}
-          growth={metrics.growth} // <--- AQUÍ PASAMOS LA MAGIA 🪄
-          icon={BanknotesIcon}
-          colorClass="bg-green-500 text-green-600"
-        />
-
-        {/* Tarjeta de Transacciones */}
-        <KpiCard 
-          title="Transacciones" 
-          value={loading ? "..." : metrics.totalTransactions}
-          subtext="Total procesado en el periodo"
-          icon={CreditCardIcon}
-          colorClass="bg-blue-500 text-blue-600"
-        />
-
-        {/* Tarjeta de Ticket Promedio */}
-        <KpiCard 
-          title="Ticket Promedio" 
-          value={loading ? "..." : formatCurrency(metrics.averageTicket)}
-          subtext="Ingreso por cada venta"
-          icon={ChartBarIcon}
-          colorClass="bg-purple-500 text-purple-600"
-        />
+        <KpiCard title="Ingresos Totales" value={loading ? "..." : formatCurrency(metrics.totalRevenue)} growth={metrics.growth} icon={BanknotesIcon} colorClass="bg-green-500 text-green-600" />
+        <KpiCard title="Transacciones" value={loading ? "..." : metrics.totalTransactions} subtext="Total procesado" icon={CreditCardIcon} colorClass="bg-blue-500 text-blue-600" />
+        <KpiCard title="Ticket Promedio" value={loading ? "..." : formatCurrency(metrics.averageTicket)} subtext="Ingreso por venta" icon={ChartBarIcon} colorClass="bg-purple-500 text-purple-600" />
       </div>
 
-      {/* --- NUEVA SECCIÓN: GRÁFICO DE TENDENCIA --- */}
+      {/* 4. TENDENCIA YoY */}
       <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
         <h3 className="font-semibold text-gray-700 mb-6">Tendencia de Ingresos</h3>
         <div className="h-64 w-full">
+        {loading ? <div className="h-full flex items-center justify-center text-gray-400">Cargando...</div> : chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData}>
+            <ComposedChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-              <XAxis 
-                dataKey="date" 
-                tickFormatter={(str) => new Date(str).toLocaleDateString(undefined, {day:'2-digit', month:'2-digit'})}
-                stroke="#9CA3AF"
-                fontSize={12}
-              />
+              <XAxis dataKey="date" tickFormatter={(str) => new Date(str).toLocaleDateString(undefined, {day:'2-digit', month:'2-digit'})} stroke="#9CA3AF" fontSize={12} />
               <YAxis stroke="#9CA3AF" fontSize={12} tickFormatter={(val) => `$${val}`}/>
-              <Tooltip 
-  cursor={{ fill: '#F3F4F6' }}
-  formatter={(value: any) => [`$${Number(value).toFixed(2)}`, 'Venta Total']}
-  labelFormatter={(label) => new Date(label).toLocaleDateString()}
-/>
-              <Bar dataKey="total" fill="#3B82F6" radius={[4, 4, 0, 0]} />
-            </BarChart>
+              <Tooltip content={<CustomTooltip />} cursor={{ fill: '#F3F4F6' }} />
+              <Bar dataKey="total" fill="#3B82F6" radius={[4, 4, 0, 0]} barSize={30} />
+              <Line type="monotone" dataKey="lastYear" stroke="#9CA3AF" strokeWidth={2} strokeDasharray="5 5" dot={false} activeDot={{ r: 6 }} />
+            </ComposedChart>
           </ResponsiveContainer>
+        ) : <div className="h-full flex items-center justify-center text-gray-400">Sin datos</div>}
         </div>
       </div>
 
-      {/* 5. SECCIÓN DISTRIBUCIÓN (DOS COLUMNAS) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        
-        {/* GRÁFICO POR PAÍS */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-          <h3 className="font-semibold text-gray-700 mb-4">Ingresos por País 🌍</h3>
-          <div className="h-64 w-full text-xs">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={distributionData.countryChart}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60} // Hace que sea una DONA (hueco al medio)
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {distributionData.countryChart.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: number | undefined) => value !== undefined ? `$${value.toFixed(2)}` : ''} />
-                <Legend layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{fontSize: '11px'}}/>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* GRÁFICO POR PLAN */}
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-          <h3 className="font-semibold text-gray-700 mb-4">Ingresos por Plan 📦</h3>
-          <div className="h-64 w-full text-xs">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={distributionData.planChart}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {distributionData.planChart.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: number | undefined) => value !== undefined ? `$${value.toFixed(2)}` : ''} />
-                <Legend layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{fontSize: '11px'}}/>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
+      {/* 5. DISTRIBUCIONES */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {[
+            { title: 'País 🌍', data: distributionData.countryChart, offset: 0 },
+            { title: 'Plan 📦', data: distributionData.planChart, offset: 0 },
+            { title: 'Medio de Pago 💳', data: distributionData.providerChart, offset: 2 }
+        ].map((chart, idx) => (
+            <div key={idx} className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
+                <h3 className="font-semibold text-gray-700 mb-4">{chart.title}</h3>
+                <div className="h-64 w-full text-xs">
+                    {chart.data.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                        <Pie data={chart.data} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={5} dataKey="value" label={renderCustomizedLabel} labelLine={false}>
+                            {chart.data.map((e, i) => (
+                              <Cell key={`cell-${i}`} fill={COLORS[(i + chart.offset) % COLORS.length]} />
+                            ))}
+                        </Pie>
+                        <Tooltip formatter={(value: number | string | undefined) => formatCurrency(typeof value === 'number' ? value : Number(value))} />
+                        <Legend layout="horizontal" verticalAlign="bottom" align="center" wrapperStyle={{fontSize: '10px'}}/>
+                    </PieChart>
+                    </ResponsiveContainer>
+                    ) : <div className="h-full flex items-center justify-center text-gray-400">Sin datos</div>}
+                </div>
+            </div>
+        ))}
       </div>
 
-      {/* 4. TABLA DE RESULTADOS */}
+      {/* 6. TABLA DETALLADA */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden z-0">
         <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-          <h3 className="font-semibold text-gray-700 flex items-center gap-2">
-            <CalendarDaysIcon className="w-4 h-4 text-gray-400"/>
-            Detalle de Operaciones
-          </h3>
-          <span className="text-xs text-gray-400">
-            Mostrando {orders.length} resultados recientes
-          </span>
+          <h3 className="font-semibold text-gray-700 flex items-center gap-2"><CalendarDaysIcon className="w-4 h-4 text-gray-400"/> Detalle de Operaciones</h3>
+          <span className="text-xs text-gray-400">Total: {totalRecords}</span>
         </div>
         
-        {loading ? (
-          <div className="p-12 text-center">
-             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-             <p className="text-gray-500">Filtrando datos...</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-gray-50 text-gray-500 font-medium border-b">
-                <tr>
-                  <th className="px-6 py-3">Fecha</th>
-                  <th className="px-6 py-3">ID / Usuario</th>
-                  <th className="px-6 py-3">País</th>
-                  <th className="px-6 py-3">Plan</th>
-                  <th className="px-6 py-3 text-right">Monto (USD)</th>
-                  <th className="px-6 py-3 text-right">Original</th>
+        {loading ? <div className="p-12 text-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div><p className="text-gray-500">Cargando...</p></div> : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-gray-50 text-gray-500 font-medium border-b">
+              <tr><th className="px-6 py-3">Fecha</th><th className="px-6 py-3">ID / Usuario</th><th className="px-6 py-3">País</th><th className="px-6 py-3">Plan</th><th className="px-6 py-3 text-right">Monto</th><th className="px-6 py-3 text-right">Original</th></tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {orders.length > 0 ? orders.map((o) => (
+                <tr key={o.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-6 py-3 text-gray-600 whitespace-nowrap">{new Date(o.created_at).toLocaleDateString()}<span className="block text-xs text-gray-400">{new Date(o.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span></td>
+                  <td className="px-6 py-3 font-medium text-gray-900 truncate max-w-[150px]" title={o.external_id}>{o.user_bubble_id || 'Anon'}<span className="block text-xs text-gray-400 font-normal truncate">{o.external_id}</span></td>
+                  <td className="px-6 py-3"><span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">{o.country}</span></td>
+                  <td className="px-6 py-3 text-gray-600"><div className="font-medium text-gray-900">{o.product_name}</div><div className="text-xs text-gray-400">{o.provider}</div></td>
+                  <td className="px-6 py-3 text-right font-bold text-gray-900">${o.amount_usd?.toFixed(2)}</td>
+                  <td className="px-6 py-3 text-right text-gray-400 text-xs whitespace-nowrap">{new Intl.NumberFormat('es-CL').format(o.amount_nominal)} {o.currency_nominal}</td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {orders.length > 0 ? (
-                  currentOrders.map((order) => (
-                    <tr key={order.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-3 text-gray-600 whitespace-nowrap">
-                        {new Date(order.created_at).toLocaleDateString()}
-                        <span className="block text-xs text-gray-400">{new Date(order.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                      </td>
-                      <td className="px-6 py-3 font-medium text-gray-900 truncate max-w-[150px]" title={order.external_id}>
-                        {order.user_bubble_id || 'Anon'}
-                        <span className="block text-xs text-gray-400 font-normal truncate">{order.external_id}</span>
-                      </td>
-                      <td className="px-6 py-3">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                          {order.country}
-                        </span>
-                      </td>
-                      <td className="px-6 py-3 text-gray-600">
-                        <div className="font-medium text-gray-900">{order.product_name}</div>
-                        <div className="text-xs text-gray-400">{order.provider}</div>
-                      </td>
-                      <td className="px-6 py-3 text-right font-bold text-gray-900">
-                        ${order.amount_usd?.toFixed(2)}
-                      </td>
-                      <td className="px-6 py-3 text-right text-gray-400 text-xs whitespace-nowrap">
-                        {new Intl.NumberFormat('es-CL').format(order.amount_nominal)} {order.currency_nominal}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
-                      No se encontraron ventas con estos filtros. 🕵️‍♂️
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-            {/* --- FOOTER DE PAGINACIÓN --- */}
-        <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex flex-col sm:flex-row items-center justify-between gap-4">
-          
-          {/* Selector de Items por página */}
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            <span>Mostrar:</span>
-            <select 
-              value={itemsPerPage} 
-              onChange={(e) => {
-                setItemsPerPage(Number(e.target.value));
-                setCurrentPage(1); // Volver al inicio si cambiamos esto
-              }}
-              className="border-gray-300 rounded text-sm py-1 px-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value={25}>25</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-            <span>de {orders.length} resultados</span>
-          </div>
-
-          {/* Botones de Navegación */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => paginate(currentPage - 1)}
-              disabled={currentPage === 1}
-              className={`p-2 rounded-md border ${currentPage === 1 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white text-gray-600 hover:bg-gray-100'}`}
-            >
-              <ChevronLeftIcon className="w-4 h-4" />
-            </button>
-            
-            <span className="text-sm text-gray-600 font-medium">
-              Página {currentPage} de {totalPages || 1}
-            </span>
-
-            <button
-              onClick={() => paginate(currentPage + 1)}
-              disabled={currentPage === totalPages || totalPages === 0}
-              className={`p-2 rounded-md border ${currentPage === totalPages || totalPages === 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white text-gray-600 hover:bg-gray-100'}`}
-            >
-              <ChevronRightIcon className="w-4 h-4" />
-            </button>
+              )) : <tr><td colSpan={6} className="px-6 py-12 text-center text-gray-400">No se encontraron ventas.</td></tr>}
+            </tbody>
+          </table>
+          <div className="px-6 py-4 border-t border-gray-100 bg-gray-50 flex flex-col sm:flex-row items-center justify-between gap-4">
+             <div className="flex items-center gap-2 text-sm text-gray-600"><span>Mostrar:</span><select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }} className="border-gray-300 rounded text-sm py-1 px-2"><option value={25}>25</option><option value={50}>50</option><option value={100}>100</option></select><span>de {totalRecords}</span></div>
+             <div className="flex items-center gap-2"><button onClick={() => setCurrentPage(currentPage - 1)} disabled={currentPage === 1} className={`p-2 rounded-md border ${currentPage === 1 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white text-gray-600 hover:bg-gray-100'}`}><ChevronLeftIcon className="w-4 h-4" /></button><span className="text-sm text-gray-600 font-medium">Página {currentPage} de {totalPages || 1}</span><button onClick={() => setCurrentPage(currentPage + 1)} disabled={currentPage === totalPages || totalPages === 0} className={`p-2 rounded-md border ${currentPage === totalPages || totalPages === 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-white text-gray-600 hover:bg-gray-100'}`}><ChevronRightIcon className="w-4 h-4" /></button></div>
           </div>
         </div>
-          </div>
         )}
       </div>
     </div>
