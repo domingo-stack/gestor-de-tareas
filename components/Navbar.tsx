@@ -75,6 +75,16 @@ export default function Navbar() {
                   >
                     <span>Kali-Finanzas💰</span>
                   </Link>
+                  
+                )}
+                {(role === 'superadmin' || role === 'Dueño') && (
+                  <Link 
+                    href="/revenue" 
+                    className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 flex items-center gap-2"
+                  >
+                    <span>💸 Revenue</span>
+                  </Link>
+                  
                 )}
 
                 {/* Mantuve la lógica original del botón Invitar */}
@@ -110,8 +120,10 @@ export default function Navbar() {
                   className="px-3 py-2 text-sm font-medium text-white bg-primary rounded-md hover:opacity-90"
                 >
                   Registrarse
-                </Link>
+                </Link>  
+
               </>
+              
             )}
           </div>
         </div>
