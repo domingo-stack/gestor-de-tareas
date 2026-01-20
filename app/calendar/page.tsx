@@ -17,10 +17,9 @@ import EditableCell from '@/components/EditableCell';
 import { ColumnDef } from '@tanstack/react-table';
 import SelectCell from '@/components/SelectCell';
 console.log('Inspeccionando EditableCell:', EditableCell);
-console.log('Inspeccionando SelectCell:', SelectCell);
 import EditableDateCell from '@/components/EditableDateCell';
 import { EventClickArg, EventContentArg, DatesSetArg, EventDropArg } from '@fullcalendar/core';
-// Removed conflicting import of TeamMember from '@/lib/types'
+import { Toaster, toast } from 'sonner';
 
 type TeamMember = {
   user_id: string;
@@ -90,53 +89,7 @@ const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
 
   // --- PLANTILLA PARA DISEÑAR CADA EVENTO EN EL CALENDARIO ---
   // --- PLANTILLA PARA DISEÑAR CADA EVENTO EN EL CALENDARIO ---
-  function renderEventContent(eventInfo: EventContentArg) {
-    // 1. Extraemos las propiedades que calculamos en fetchEvents
-    const { custom_data, has_task, is_completed } = eventInfo.event.extendedProps;
-    
-    // Debug rápido: Si abres la consola y pasas el mouse, verás que aquí también llega TRUE
-    // console.log("Renderizando:", eventInfo.event.title, "Completado:", is_completed);
-
-    const estado = custom_data?.Estado;
-    const formato = custom_data?.Formato;
-    const pilar = custom_data?.['Pilar de Contenido'];
   
-    return (
-      <div className="p-1 overflow-hidden text-xs w-full relative">
-        
-        {/* --- LÓGICA VISUAL DE ESTADO --- */}
-        {has_task && (
-            is_completed ? (
-                /* CASO A: TAREA COMPLETADA (Doble Check Verde) ✅✅ */
-                <div className="absolute top-0 right-0 bg-green-50 rounded-full p-0.5 shadow-sm border border-green-200 flex -space-x-1 z-10" title="Tarea Completada">
-                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-green-600">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-green-600">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                </div>
-            ) : (
-                /* CASO B: TAREA PENDIENTE (Check Simple Morado) ☑️ */
-                <div className="absolute top-0 right-0 bg-white rounded-full p-0.5 shadow-sm border border-gray-200 z-10" title="Tarea Pendiente">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-purple-600">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-                    </svg>
-                </div>
-            )
-        )}
-
-        {/* Título y Etiquetas (Sin cambios) */}
-        <b className="truncate block pr-6">{eventInfo.event.title}</b>
-        
-        <div className="flex flex-wrap gap-1 mt-1">
-          {estado && <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded-full font-medium">{estado}</span>}
-          {formato && <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full font-medium">{formato}</span>}
-          {pilar && <span className="bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full font-medium">{pilar}</span>}
-        </div>
-      </div>
-    );
-  }
   
   // Justo debajo de esta función debería estar tu línea:
   // export default function CalendarPage() { ... }
@@ -147,6 +100,8 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<CompanyEvent | null>(null);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [selectedEventIds, setSelectedEventIds] = useState<string[]>([]);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   useEffect(() => {
     const fetchMembers = async () => {
@@ -283,6 +238,21 @@ const tableEvents = useMemo(() => {
 
   const handleEventClick = (eventInfo: EventClickArg | CompanyEvent) => {
     // Primero, determinamos si recibimos el objeto del calendario o el de la tabla
+
+    if (isSelectionMode) {
+      // Obtenemos el ID del evento clickeado
+      const eventObject = 'event' in eventInfo ? eventInfo.event : eventInfo;
+      const clickedId = String(eventObject.id);
+      
+      // Si ya estaba seleccionado, lo sacamos. Si no, lo metemos.
+      if (selectedEventIds.includes(clickedId)) {
+          setSelectedEventIds(prev => prev.filter(id => id !== clickedId));
+      } else {
+          setSelectedEventIds(prev => [...prev, clickedId]);
+      }
+      return; // ⛔ ¡ALTO AQUÍ! No dejamos que se abra el modal.
+  }
+
     const eventObject = 'event' in eventInfo ? eventInfo.event : eventInfo;
     const eventId = String(eventObject.id); // Nos aseguramos de que el ID sea un string
   
@@ -330,6 +300,143 @@ const tableEvents = useMemo(() => {
   };
   
   // app/calendar/page.tsx
+
+  // --- PEGAR DEBAJO DE handleDeleteEvent ---
+
+  const handleDuplicateCompletion = async (newEventFromDB: any) => {
+    // 1. Refrescamos la data de fondo para que el calendario sepa que hay algo nuevo
+    await fetchEvents();
+
+    toast.success("Copia creada. Ahora puedes editarla.");
+
+    // 2. Necesitamos "disfrazar" el dato crudo de la DB para que el Modal lo entienda
+    // (Esto es necesario porque el Modal espera un formato específico de FullCalendar)
+    const teamColor = TEAM_COLORS[newEventFromDB.team] || TEAM_COLORS['General'];
+
+    const formattedNewEvent: CompanyEvent = {
+        id: String(newEventFromDB.id),
+        title: newEventFromDB.title,
+        start: newEventFromDB.start_date,
+        end: newEventFromDB.end_date || undefined,
+        backgroundColor: teamColor.background,
+        textColor: teamColor.text,
+        borderColor: teamColor.text,
+        is_draft: newEventFromDB.is_draft,
+        task_id: newEventFromDB.task_id,
+        extendedProps: {
+            description: newEventFromDB.description,
+            video_link: newEventFromDB.video_link,
+            team: newEventFromDB.team,
+            custom_data: newEventFromDB.custom_data,
+            // Importante: Al abrirlo de inmediato, task_id es suficiente 
+            // para que el modal sepa si se creó tarea o no.
+        }
+    };
+
+    // 3. ¡Magia! Cambiamos el evento seleccionado por el nuevo.
+    // Esto cerrará el modal viejo (porque cambió el ID) y abrirá el nuevo con los datos cargados.
+    setSelectedEvent(formattedNewEvent);
+  };
+
+  // --- FUNCIÓN DE DUPLICADO MASIVO ---
+  // --- FUNCIÓN DE DUPLICADO MASIVO (VERSIÓN SONNER) ---
+  const handleBulkDuplicate = () => {
+    if (selectedEventIds.length === 0) return;
+
+    // 1. Lanzamos el Toast de Confirmación
+    toast(`¿Duplicar ${selectedEventIds.length} eventos?`, {
+        description: "Se crearán copias para la próxima semana (+7 días).",
+        action: {
+            label: "Sí, Duplicar",
+            onClick: async () => {
+                // 2. Definimos la promesa (la acción que tarda tiempo)
+                const duplicationPromise = new Promise(async (resolve, reject) => {
+                    if (!supabase) return reject("No hay conexión a Supabase");
+
+                    try {
+                        const { error } = await supabase.rpc('duplicate_events_bulk', {
+                            p_event_ids: selectedEventIds.map(Number),
+                            p_offset_days: 7
+                        });
+
+                        if (error) throw error;
+
+                        // Éxito: Limpiamos todo
+                        setSelectedEventIds([]);
+                        setIsSelectionMode(false);
+                        await fetchEvents();
+                        
+                        resolve("¡Eventos creados correctamente! 🚀");
+                    } catch (error: any) {
+                        reject(error.message);
+                    }
+                });
+
+                // 3. Ejecutamos la promesa con feedback visual
+                toast.promise(duplicationPromise, {
+                    loading: 'Clonando eventos...',
+                    success: (data) => `${data}`,
+                    error: (err) => `Error: ${err}`,
+                });
+            }
+        },
+        cancel: {
+            label: "Cancelar",
+            onClick: () => console.log("Cancelado por usuario")
+        },
+        duration: 5000, // Damos tiempo para pensar
+    });
+  };
+
+  // --- FUNCIÓN DE ELIMINACIÓN MASIVA ---
+  const handleBulkDelete = () => {
+    if (selectedEventIds.length === 0) return;
+
+    // 1. Toast de Confirmación (Estilo Peligro)
+    toast(`¿Eliminar ${selectedEventIds.length} eventos de forma permanente?`, {
+        description: "Esta acción no se puede deshacer.",
+        action: {
+            label: "Sí, Eliminar Todo",
+            onClick: async () => {
+                // 2. Promesa de Eliminación
+                const deletePromise = new Promise(async (resolve, reject) => {
+                    if (!supabase) return reject("No hay conexión");
+
+                    try {
+                        // Usamos .in() para borrar todos los IDs que coincidan con la lista
+                        const { error } = await supabase
+                            .from('company_events')
+                            .delete()
+                            .in('id', selectedEventIds.map(Number));
+
+                        if (error) throw error;
+
+                        // Limpieza
+                        setSelectedEventIds([]);
+                        setIsSelectionMode(false);
+                        await fetchEvents();
+                        
+                        resolve("Eventos eliminados correctamente 🗑️");
+                    } catch (error: any) {
+                        reject(error.message);
+                    }
+                });
+
+                // 3. Feedback visual
+                toast.promise(deletePromise, {
+                    loading: 'Eliminando...',
+                    success: (data) => `${data}`,
+                    error: (err) => `Error: ${err}`,
+                });
+            }
+        },
+        cancel: {
+            label: "Cancelar",
+            onClick: () => console.log("Cancelado por usuario"),
+        },
+        duration: 5000,
+    });
+  };
 
   const handleUpdateEvent = async (eventId: string, updatedData: EventUpdatePayload) => {
     if (!supabase) return;
@@ -676,56 +783,208 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
     }
   };
 
+  // Esta función ahora vive DENTRO de CalendarPage
+  const renderEventContent = (eventInfo: EventContentArg) => { // Cambié 'function' por 'const' para que sea más moderno
+    const { custom_data, has_task, is_completed } = eventInfo.event.extendedProps;
+    const estado = custom_data?.Estado;
+    const formato = custom_data?.Formato;
+    const pilar = custom_data?.['Pilar de Contenido'];
+    
+    // 👇 1. Averiguamos si este evento está seleccionado
+    const isSelected = selectedEventIds.includes(eventInfo.event.id);
+
+    return (
+      // 👇 2. Cambiamos el cursor si estamos seleccionando
+      <div className={`p-1 overflow-hidden text-xs w-full relative ${isSelectionMode ? 'cursor-pointer' : 'cursor-pointer'}`}>
+        
+        {/* 👇 3. LÓGICA DEL CHECKBOX DE SELECCIÓN (ESTILO CORREGIDO) */}
+        {isSelectionMode && (
+           <div className="absolute top-0 left-0 bottom-0 right-0 z-50 bg-white/30 flex items-end justify-end p-1.5 transition-all">
+              {/* 1. bg-white/30: Aclara un poco la tarjeta para indicar que está seleccionable.
+                 2. items-end justify-end: Empuja el contenido (el checkbox) abajo a la derecha.
+                 3. p-1.5: Le da un pequeño margen para que no quede pegado al borde.
+              */}
+              <input 
+                type="checkbox" 
+                checked={isSelected}
+                onChange={() => {}} 
+                className="w-4 h-4 text-indigo-600 rounded border-gray-300 bg-white shadow-md ring-1 ring-black/5"
+                style={{ cursor: 'pointer' }}
+              />
+           </div>
+        )}
+
+        {/* --- LÓGICA VISUAL DE ESTADO (TU CÓDIGO ORIGINAL) --- */}
+        {has_task && (
+            is_completed ? (
+                <div className="absolute top-0 right-0 bg-green-50 rounded-full p-0.5 shadow-sm border border-green-200 flex -space-x-1 z-10">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-green-600">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-green-600">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
+                </div>
+            ) : (
+                <div className="absolute top-0 right-0 bg-white rounded-full p-0.5 shadow-sm border border-gray-200 z-10">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-purple-600">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
+                    </svg>
+                </div>
+            )
+        )}
+
+        <b className="truncate block pr-6">{eventInfo.event.title}</b>
+        
+        <div className="flex flex-wrap gap-1 mt-1">
+          {estado && <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded-full font-medium">{estado}</span>}
+          {formato && <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full font-medium">{formato}</span>}
+          {pilar && <span className="bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full font-medium">{pilar}</span>}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <AuthGuard>
       <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-        <div className="flex justify-between items-center mb-8">
-            <h1 className="text-3xl font-bold" style={{ color: '#383838' }}>
-              Calendario de Compañía
-            </h1>
-            <div className="flex flex-wrap gap-x-6 gap-y-2 mb-6">
-  {Object.entries(TEAM_COLORS).map(([team, colors]) => (
-    <div key={team} className="flex items-center gap-2">
-      <div 
-        className="w-4 h-4 rounded-full" 
-        style={{ backgroundColor: colors.background, border: `2px solid ${colors.text}` }}
-      ></div>
-      <span className="text-sm font-medium" style={{ color: '#383838' }}>{team}</span>
-    </div>
-  ))}
-</div>
-<div>
-    <select
-      value={teamFilter}
-      onChange={(e) => setTeamFilter(e.target.value)}
-      className="rounded-md border-gray-300 shadow-sm"
-    >
-      <option value="Todos">Todos los Equipos</option>
-      {Object.keys(TEAM_COLORS).map(team => (
-        <option key={team} value={team}>{team}</option>
-      ))}
-    </select>
-  </div>
-            <button
-                onClick={() => setIsModalOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-md transition-opacity"
-                style={{ backgroundColor: '#ff8080' }}
-                onMouseEnter={(e) => e.currentTarget.style.opacity = '0.9'}
-                onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
-              >
-                <UserPlusIcon className="h-5 w-5" />
-                Crear Evento
-              </button>
-        </div>
         
-        <div className="bg-white p-4 rounded-lg shadow-sm border">
+        {/* --- ENCABEZADO Y CONTROLES --- */}
+        <div className="flex flex-col gap-6 mb-8">
+            
+            {/* 1. Fila Superior: Título y Acciones Principales */}
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-900 tracking-tight">
+                        Calendario de Compañía
+                    </h1>
+                    <p className="text-sm text-gray-500 mt-1">
+                        Gestiona y planifica el contenido de tus equipos.
+                    </p>
+                </div>
+
+                {/* Bloque de Botones (Lógica de Selección) */}
+                <div className="flex items-center gap-3">
+                    {isSelectionMode ? (
+                        <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-4 duration-300">
+                             <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 px-3 py-2 rounded-full border border-indigo-100">
+                                {selectedEventIds.length} seleccionados
+                            </span>
+                            
+                            <button
+                                onClick={() => {
+                                    setIsSelectionMode(false);
+                                    setSelectedEventIds([]);
+                                }}
+                                className="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-all shadow-sm"
+                            >
+                                Cancelar
+                            </button>
+
+                            {/* Botón Eliminar (NUEVO) */}
+                            <button
+                                onClick={handleBulkDelete}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-600 bg-red-50 border border-red-100 rounded-lg hover:bg-red-100 hover:border-red-200 transition-all shadow-sm active:scale-95"
+                                title="Eliminar seleccionados"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                                Eliminar ({selectedEventIds.length})
+                            </button>
+
+                            <button
+                                onClick={handleBulkDuplicate}
+                                disabled={selectedEventIds.length === 0}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all active:scale-95"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                                </svg>
+                                Duplicar ({selectedEventIds.length})
+                            </button>
+                        </div>
+                    ) : (
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={() => setIsSelectionMode(true)}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-gray-300 transition-all shadow-sm group"
+                                title="Seleccionar varios eventos"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400 group-hover:text-indigo-500 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                Seleccionar
+                            </button>
+
+                            <button
+                                onClick={() => setIsModalOpen(true)}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white rounded-lg shadow-md transition-all active:scale-95 hover:brightness-110"
+                                style={{ backgroundColor: '#ff8080' }}
+                            >
+                                <UserPlusIcon className="h-5 w-5" />
+                                Crear Evento
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* 2. Fila Inferior: Barra de Herramientas (Filtros y Leyenda) */}
+            <div className="bg-white p-3 rounded-xl border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+                
+                {/* Zona Izquierda: Filtro */}
+                <div className="flex items-center gap-3">
+                    <div className="relative">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                        </svg>
+                        <select
+                            value={teamFilter}
+                            onChange={(e) => setTeamFilter(e.target.value)}
+                            className="pl-10 pr-8 py-2 text-sm border-gray-200 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 hover:bg-white transition-colors cursor-pointer outline-none"
+                        >
+                            <option value="Todos">Todos los Equipos</option>
+                            {Object.keys(TEAM_COLORS).map(team => (
+                                <option key={team} value={team}>{team}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="h-6 w-px bg-gray-200 hidden md:block"></div>
+                </div>
+
+                {/* Zona Derecha: Leyenda de Colores (Estilo Badge) */}
+                <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-medium text-gray-400 uppercase tracking-wider mr-1">Equipos:</span>
+                    {Object.entries(TEAM_COLORS).map(([team, colors]) => (
+                        <div 
+                            key={team} 
+                            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-opacity ${teamFilter !== 'Todos' && teamFilter !== team ? 'opacity-40 grayscale' : 'opacity-100'}`}
+                            style={{ 
+                                backgroundColor: colors.background, 
+                                color: colors.text,
+                                border: `1px solid ${colors.background === '#ffffff' ? '#e5e7eb' : 'transparent'}` // Borde sutil si es blanco
+                            }}
+                        >
+                            {team}
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+
+        {/* --- CALENDARIO Y TABLA --- */}
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
             {loading ? (
-                <p>Cargando calendario...</p>
+                <div className="flex justify-center items-center h-64">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+                </div>
             ) : (
                 <FullCalendar
                     plugins={[dayGridPlugin, interactionPlugin]}
                     initialView="dayGridMonth"
                     locale="es"
+                    firstDay={1}
                     headerToolbar={{
                         left: 'prev,next today',
                         center: 'title',
@@ -738,23 +997,26 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
                     }}
                     height="auto"
                     eventClick={handleEventClick}
-                    events={filteredEvents} 
-                    eventContent={renderEventContent} 
+                    events={filteredEvents}
+                    eventContent={renderEventContent}
                     datesSet={handleDatesSet}
-                    editable={true}              // Permite arrastrar
-    eventDrop={handleEventDrop}
+                    editable={true}
+                    eventDrop={handleEventDrop}
                 />
             )}
-            <TableView onUpdateEvent={handleUpdateEventField} columns={marketingColumns} events={tableEvents} />
-            <div className="mt-2">
-    <button 
-        onClick={handleAddNewRow}
-        className="flex items-center gap-1.5 px-2 py-1 text-sm text-gray-500 hover:bg-gray-100 rounded-md"
-    >
-        <PlusIcon className="h-4 w-4" />
-        Añadir evento
-    </button>
-</div>
+            
+            <div className="mt-8 pt-8 border-t border-gray-100">
+                 <TableView onUpdateEvent={handleUpdateEventField} columns={marketingColumns} events={tableEvents} />
+                 <div className="mt-4">
+                    <button 
+                        onClick={handleAddNewRow}
+                        className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-900 hover:bg-gray-50 rounded-lg transition-colors border border-dashed border-gray-300 hover:border-gray-400 w-full justify-center"
+                    >
+                        <PlusIcon className="h-4 w-4" />
+                        Añadir nueva fila vacía
+                    </button>
+                </div>
+            </div>
         </div>
       </main>
 
@@ -771,6 +1033,8 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
         onDelete={handleDeleteEvent}
         onUpdate={handleUpdateEvent}
         teamMembers={teamMembers}
+        onDuplicate={handleDuplicateCompletion}
       />
+      <Toaster position="bottom-right" richColors />
     </AuthGuard>
   );}
