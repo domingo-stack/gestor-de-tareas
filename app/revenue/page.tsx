@@ -227,8 +227,38 @@ export default function RevenuePage() {
             const d = new Date(order.created_at);
             const dateKey = d.toISOString().split('T')[0];
             const matchKey = `${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-            if (!chartMap.has(dateKey)) chartMap.set(dateKey, { date: dateKey, total: 0, lastYear: lastYearMap.get(matchKey) || 0 });
-            chartMap.get(dateKey).total += (order.amount_usd || 0);
+            if (!chartMap.has(dateKey)) {
+              chartMap.set(dateKey, { 
+                  date: dateKey, 
+                  total: 0, // Mantenemos total para cálculos rápidos
+                  nuevo: 0,      // <--- Bolsa 1
+                  renovacion: 0, // <--- Bolsa 2
+                  otros: 0,      // <--- Bolsa de errores
+                  lastYear: lastYearMap.get(matchKey) || 0 
+              });
+          }
+          const entry = chartMap.get(dateKey);
+          const amount = order.amount_usd || 0;
+          
+          // 1. Suma al total general (para la línea de crecimiento)
+          entry.total += amount;
+
+          // 2. Clasificación por Tipo (A PRUEBA DE ERRORES) 🛡️
+          // Convertimos a minúsculas y quitamos espacios para comparar seguro
+          // OJO: Si esto sigue saliendo 0, cambia 'plan_type' por 'product_name' aquí abajo 👇
+          const tipoRaw = (order.plan_type || '').toLowerCase().trim(); 
+
+          if (tipoRaw.includes('nuevo')) {
+              entry.nuevo += amount;
+          } else if (tipoRaw.includes('renova')) { 
+              // El .includes('renova') atrapa: 'Renovación', 'renovacion', 'Renovacion', etc.
+              entry.renovacion += amount;
+          } else {
+              // Si cae aquí, es porque el texto no coincide o está en otra columna
+              // Descomenta la linea de abajo para ver en la consola qué texto está llegando realmente:
+              // console.log("Cayó en otros:", order.plan_type, order.product_name);
+              entry.otros += amount; 
+          }
         });
         setChartData(Array.from(chartMap.values()).sort((a: any, b: any) => a.date.localeCompare(b.date)));
 
@@ -276,25 +306,88 @@ export default function RevenuePage() {
     return <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize="10" fontWeight="bold">{`${(percent * 100).toFixed(0)}%`}</text>;
   };
 
+  // --- CUSTOM TOOLTIP (Comparativa YoY + Desglose Stacked) ---
+  // --- CUSTOM TOOLTIP (Con cuadrados de color) ---
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
-      const current = payload[0].value;
-      const lastYear = payload.find((p: any) => p.dataKey === 'lastYear')?.value || 0;
+      // Datos brutos
+      const data = payload[0].payload; 
+      const current = data.total;     
+      const lastYear = data.lastYear; 
+      
+      const nuevo = data.nuevo || 0;
+      const renovacion = data.renovacion || 0;
+      const otros = data.otros || 0;
+
+      // Crecimiento
       let growth = 0; let isPos = true;
       if (lastYear > 0) { growth = ((current - lastYear) / lastYear) * 100; isPos = growth >= 0; }
       else if (current > 0) growth = 100;
       
       return (
-        <div className="bg-white p-3 border border-gray-100 shadow-lg rounded-lg text-xs">
-          <p className="font-bold text-gray-700 mb-2">{new Date(label).toLocaleDateString()}</p>
-          <div className="flex justify-between gap-4 mb-1"><span className="text-blue-600 font-medium">Este año:</span><span className="font-bold">{formatCurrency(current)}</span></div>
-          <div className="flex justify-between gap-4 mb-2"><span className="text-gray-400 font-medium">Año pasado:</span><span className="text-gray-500">{formatCurrency(lastYear)}</span></div>
-          <div className={`pt-2 border-t flex justify-end font-bold ${isPos ? 'text-green-600' : 'text-red-500'}`}>{Math.abs(growth).toFixed(1)}% {isPos ? '▲' : '▼'}</div>
+        <div className="bg-white p-3 border border-gray-100 shadow-xl rounded-lg text-xs min-w-[200px] z-50">
+          <p className="font-bold text-gray-800 mb-2 border-b border-gray-100 pb-2">
+            {new Date(label).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' })}
+          </p>
+          
+          {/* SECCIÓN 1: Desglose por Colores */}
+          <div className="space-y-1.5 mb-3">
+             {/* Total General */}
+             <div className="flex justify-between items-center mb-2">
+                <span className="font-bold text-gray-700">Total:</span>
+                <span className="font-bold text-gray-900 text-sm">{formatCurrency(current)}</span>
+             </div>
+
+             {/* Fila Azul: Nuevo */}
+             <div className="flex justify-between items-center">
+                <div className="flex items-center">
+                    {/* Cuadradito Azul */}
+                    <span className="w-3 h-3 rounded-sm bg-[#3B82F6] mr-2"></span>
+                    <span className="text-gray-500">Nuevo</span>
+                </div>
+                <span className="font-medium text-gray-700">{formatCurrency(nuevo)}</span>
+             </div>
+
+             {/* Fila Verde: Renovación */}
+             <div className="flex justify-between items-center">
+                <div className="flex items-center">
+                    {/* Cuadradito Verde */}
+                    <span className="w-3 h-3 rounded-sm bg-[#10B981] mr-2"></span>
+                    <span className="text-gray-500">Renovación</span>
+                </div>
+                <span className="font-medium text-gray-700">{formatCurrency(renovacion)}</span>
+             </div>
+
+             {/* Fila Roja: Otros (Solo si existe) */}
+             {otros > 0 && (
+                 <div className="flex justify-between items-center">
+                    <div className="flex items-center">
+                        <span className="w-3 h-3 rounded-sm bg-[#EF4444] mr-2"></span>
+                        <span className="text-gray-500">Otros</span>
+                    </div>
+                    <span className="font-medium text-gray-700">{formatCurrency(otros)}</span>
+                 </div>
+             )}
+          </div>
+
+          {/* SECCIÓN 2: Comparativa Año Pasado */}
+          <div className="bg-gray-50 -mx-3 -mb-3 p-3 border-t border-gray-100 flex items-center justify-between">
+             <div className="flex flex-col">
+                <span className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Año Pasado</span>
+                <span className="text-gray-600 font-medium">{formatCurrency(lastYear)}</span>
+             </div>
+             
+             <div className={`text-right font-bold ${isPos ? 'text-green-600' : 'text-red-500'}`}>
+                 <span className="text-lg block leading-none">{isPos ? '▲' : '▼'}</span>
+                 <span>{Math.abs(growth).toFixed(1)}%</span>
+             </div>
+          </div>
         </div>
       );
     }
     return null;
-  };
+  };// <--- ¡Y ESTA LLAVE TAMBIÉN FALTABA! (Cierra la función)
+    
 
   const KpiCard = ({ title, value, subtext, icon: Icon, colorClass, growth }: any) => (
     <div className="bg-white rounded-xl p-6 border border-gray-100 shadow-sm flex items-start justify-between">
@@ -399,7 +492,14 @@ export default function RevenuePage() {
               <XAxis dataKey="date" tickFormatter={(str) => new Date(str).toLocaleDateString(undefined, {day:'2-digit', month:'2-digit'})} stroke="#9CA3AF" fontSize={12} />
               <YAxis stroke="#9CA3AF" fontSize={12} tickFormatter={(val) => `$${val}`}/>
               <Tooltip content={<CustomTooltip />} cursor={{ fill: '#F3F4F6' }} />
-              <Bar dataKey="total" fill="#3B82F6" radius={[4, 4, 0, 0]} barSize={30} />
+              {/* Barra 1: Nuevo (Azul) */}
+              <Bar dataKey="nuevo" stackId="a" fill="#3B82F6" barSize={30} />
+              
+              {/* Barra 2: Renovación (Verde Esmeralda) */}
+              <Bar dataKey="renovacion" stackId="a" fill="#10B981" barSize={30} />
+              
+              {/* Barra 3: Otros (Rojo para alertar) - Radius solo en la punta superior */}
+              <Bar dataKey="otros" stackId="a" fill="#EF4444" radius={[4, 4, 0, 0]} barSize={30} />
               <Line type="monotone" dataKey="lastYear" stroke="#9CA3AF" strokeWidth={2} strokeDasharray="5 5" dot={false} activeDot={{ r: 6 }} />
             </ComposedChart>
           </ResponsiveContainer>
@@ -470,4 +570,4 @@ export default function RevenuePage() {
       </div>
     </div>
   );
-}
+};
