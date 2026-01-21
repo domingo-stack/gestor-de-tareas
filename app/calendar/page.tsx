@@ -982,7 +982,7 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
             ) : (
                 <FullCalendar
                     plugins={[dayGridPlugin, interactionPlugin]}
-                    initialView="dayGridMonth"
+                    initialView="dayGridWeek"
                     locale="es"
                     firstDay={1}
                     headerToolbar={{

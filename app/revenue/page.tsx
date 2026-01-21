@@ -12,7 +12,8 @@ import {
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  ArrowTrendingUpIcon
+  ArrowTrendingUpIcon,
+  ArrowPathIcon
 } from '@heroicons/react/24/outline';
 import { 
   ComposedChart, 
@@ -111,6 +112,8 @@ export default function RevenuePage() {
   
   const [metrics, setMetrics] = useState<Metrics>({ totalRevenue: 0, totalTransactions: 0, averageTicket: 0 });
   const [loading, setLoading] = useState(true);
+  // --- ESTADO PARA STATUS DE SINCRONIZACIÓN (NUEVO) ---
+  const [syncStatus, setSyncStatus] = useState<{ date: string, count: number } | null>(null);
   
   // Paginación Servidor
   const [currentPage, setCurrentPage] = useState(1);
@@ -296,6 +299,32 @@ export default function RevenuePage() {
   
   }, [dateRange, refreshTrigger, selectedPlan, searchTerm, selectedCountries, selectedProviders, selectedTypes, currentPage, itemsPerPage]);
 
+  // --- MINI-FETCH: OBTENER ÚLTIMA ACTUALIZACIÓN (DESDE SYNC_LOGS) ---
+  useEffect(() => {
+    if (!supabase) return;
+    const fetchSyncStatus = async () => {
+      try {
+        // Consultamos la tabla de logs, ordenamos por fecha y traemos el último
+        const { data, error } = await supabase
+          .from('sync_logs')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (data && !error) {
+          setSyncStatus({ 
+            date: data.created_at, 
+            count: data.records_processed // ¡Este es el número real de n8n!
+          });
+        }
+      } catch (e) {
+        console.error("Error fetching sync logs", e);
+      }
+    };
+    fetchSyncStatus();
+  }, []);
+
   // --- HELPERS VISUALES ---
   const renderCustomizedLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
     if (percent < 0.05) return null;
@@ -410,7 +439,20 @@ export default function RevenuePage() {
     <div className="p-6 max-w-7xl mx-auto space-y-8">
       {/* 1. HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div><h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">Revenue Explorer 🚀</h1><p className="text-gray-500 text-sm">Analiza tus ingresos en detalle</p></div>
+        <div><h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">Revenue Explorer 🚀</h1><p className="text-gray-500 text-sm">Analiza tus ingresos en detalle</p>
+        {syncStatus && (
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 border border-blue-100 rounded-full text-xs text-blue-700 animate-fade-in">
+              <ArrowPathIcon className="w-3 h-3 text-blue-500" />
+              <span className="font-medium">
+                Última carga: {new Date(syncStatus.date).toLocaleDateString()} {new Date(syncStatus.date).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+              </span>
+              <span className="w-1 h-1 rounded-full bg-blue-300"></span>
+              <span>
+              +{syncStatus.count} procesados
+              </span>
+            </div>
+          )}
+        </div>
         <div className="bg-white p-1 rounded-lg border border-gray-200 flex flex-wrap gap-1 shadow-sm">
           {DATE_RANGES.map((r) => (
             <button key={r.value} onClick={() => { setDateRange(r.value); setCurrentPage(1); }} className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${dateRange === r.value ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`}>{r.label}</button>
