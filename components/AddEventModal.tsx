@@ -27,6 +27,15 @@ type ContentProject = {
 };
 
 const TEAMS = ['Marketing', 'Producto', 'Customer Success', 'General', 'Kali Te Enseña'];
+
+// --- CONSTANTES DE OPCIONES (NUEVAS) ---
+const ESTADO_OPTIONS = ['Sin estado', 'Sin empezar', 'Escribiendo Guión', 'Creando', 'Grabando', 'Editando', 'Programando', 'Publicado'];
+const FORMATO_OPTIONS = ['Sin formato', 'Post', 'Blog', 'Story', 'Reel', 'In-app Notification', 'Correo'];
+const PILAR_OPTIONS = ['Sin pilar', 'Educativo', 'Venta', 'Divertido'];
+
+const PAIS_OPTIONS = ['Chile', 'México', 'Perú', 'Colombia', 'Ecuador', 'Todos'];
+const CASO_OPTIONS = ['Caso I: Sesión', 'Caso I: Clases', 'Caso II: Unidad','Caso II: Proyecto NEM', 'Caso III: Juegos', 'Caso IV: KaliChat', 'Caso V: PCA', 'Caso VI: Proyecto ABP']; // Puedes cambiar estos nombres
+
 const DUE_DATE_PRESETS = [
     { label: 'Mismo día', value: 'same_day' },
     { label: '1 día antes', value: 'one_day_before' },
@@ -41,8 +50,15 @@ export default function AddEventModal({ isOpen, onClose, onEventAdded, user, sup
   const [team, setTeam] = useState('General');
   const [videoLink, setVideoLink] = useState('');
   
+  // --- ESTADOS ESPECÍFICOS POR EQUIPO (NUEVOS) ---
+  const [estado, setEstado] = useState('');
+  const [formato, setFormato] = useState('');
+  const [pilar, setPilar] = useState('');
+  const [pais, setPais] = useState('');
+  const [casoUso, setCasoUso] = useState('');
+
   const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false); // Estado de subida
+  const [uploading, setUploading] = useState(false); 
   const [error, setError] = useState('');
 
   // --- ESTADOS PARA TAREA VINCULADA ---
@@ -70,13 +86,18 @@ export default function AddEventModal({ isOpen, onClose, onEventAdded, user, sup
         };
         fetchData();
         
-        // Resetear formulario
+        // Resetear formulario completo
         setWantTask(false);
         setTaskAssignee('');
         setTaskProject('');
         setDatePreset('one_day_before');
         setTitle(''); setDescription(''); setStartDate(''); setEndDate('');
         setTeam('General'); setVideoLink('');
+        
+        // Resetear campos específicos
+        setEstado(''); setFormato(''); setPilar('');
+        setPais(''); setCasoUso('');
+
         setUploading(false);
         setError('');
     }
@@ -92,14 +113,11 @@ export default function AddEventModal({ isOpen, onClose, onEventAdded, user, sup
       return evtDate.toISOString().split('T')[0];
   };
 
-  // --- LÓGICA PASTE-TO-UPLOAD ---
   const handlePaste = async (e: React.ClipboardEvent) => {
     if (e.clipboardData.files.length > 0) {
         e.preventDefault();
-        
         const file = e.clipboardData.files[0];
         
-        // Validación básica de tipo
         if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
             alert('Solo se admiten imágenes o videos.');
             return;
@@ -149,7 +167,23 @@ export default function AddEventModal({ isOpen, onClose, onEventAdded, user, sup
     setLoading(true);
     setError('');
     
-    // Usamos la RPC que creamos en el Hito 2
+    // --- CONSTRUIMOS EL OBJETO CUSTOM_DATA SEGÚN EL EQUIPO ---
+    let customDataPayload: any = {};
+
+    if (team === 'Marketing') {
+        customDataPayload = {
+            Estado: estado,
+            Formato: formato,
+            'Pilar de Contenido': pilar
+        };
+    } else if (team === 'Kali Te Enseña') {
+        customDataPayload = {
+            Pais: pais,
+            CasoUso: casoUso
+        };
+    }
+
+    // Usamos la RPC que creamos
     const rpcParams = {
         p_title: title, 
         p_description: description || null, 
@@ -158,7 +192,7 @@ export default function AddEventModal({ isOpen, onClose, onEventAdded, user, sup
         p_team: team, 
         p_video_link: videoLink || null, 
         p_user_id: user.id,
-        p_custom_data: {}, 
+        p_custom_data: customDataPayload, // <--- AQUÍ PASAMOS LOS DATOS NUEVOS
         
         p_create_task: wantTask,
         p_task_assignee_id: wantTask && taskAssignee ? taskAssignee : null,
@@ -208,7 +242,16 @@ export default function AddEventModal({ isOpen, onClose, onEventAdded, user, sup
               </div>
               <div className="col-span-12 sm:col-span-4">
                   <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Equipo</label>
-                  <select value={team} onChange={(e) => setTeam(e.target.value)} className="block w-full border-gray-300 rounded-md shadow-sm text-sm p-2 border">
+                  <select 
+                    value={team} 
+                    onChange={(e) => {
+                        setTeam(e.target.value);
+                        // Limpiamos los estados al cambiar de equipo para evitar mezclas
+                        setEstado(''); setFormato(''); setPilar('');
+                        setPais(''); setCasoUso('');
+                    }} 
+                    className="block w-full border-gray-300 rounded-md shadow-sm text-sm p-2 border"
+                  >
                       {TEAMS.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
               </div>
@@ -236,19 +279,66 @@ export default function AddEventModal({ isOpen, onClose, onEventAdded, user, sup
                         className={`block w-full border-gray-300 rounded-md shadow-sm text-sm p-2 border pr-8 ${uploading ? 'bg-gray-100 cursor-wait' : ''}`}
                         placeholder="Pega enlace o archivo (Ctrl+V)..." 
                     />
-                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-gray-400">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                            <path fillRule="evenodd" d="M15.621 4.379a3 3 0 00-4.242 0l-7 7a3 3 0 004.241 4.243h.001l.497-.5a.75.75 0 011.064 1.057l-.498.501-.002.002a4.5 4.5 0 01-6.364-6.364l7-7a4.5 4.5 0 016.368 6.36l-3.455 3.553A2.625 2.625 0 119.52 9.52l3.45-3.451a.75.75 0 111.061 1.06l-3.45 3.451a1.125 1.125 0 001.587 1.595l3.454-3.553a3 3 0 000-4.242z" clipRule="evenodd" />
-                        </svg>
-                    </div>
+                    <UrlPreview url={videoLink} onClear={() => setVideoLink('')} />
                 </div>
-                {/* 👇 AQUÍ VA EL PREVIEW NUEVO 👇 */}
-                <UrlPreview url={videoLink} onClear={() => setVideoLink('')} />
-                
                 <p className="text-[10px] text-gray-400 mt-1">Tip: Puedes pegar (Ctrl+V) una imagen o video directamente aquí.</p>
             </div>
           </div>
 
+          {/* --- BLOQUE CONDICIONAL: MARKETING --- */}
+          {team === 'Marketing' && (
+            <div className="bg-pink-50 p-3 rounded-lg border border-pink-100 animate-in fade-in slide-in-from-top-2">
+                <h3 className="text-xs font-bold text-pink-800 uppercase mb-2">Detalles de Marketing</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                        <label className="block text-[10px] font-semibold text-gray-500 mb-1">Estado</label>
+                        <select value={estado} onChange={(e) => setEstado(e.target.value)} className="block w-full text-sm border-gray-300 rounded p-1.5 border bg-white">
+                            <option value="">Ninguno</option>
+                            {ESTADO_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-[10px] font-semibold text-gray-500 mb-1">Formato</label>
+                        <select value={formato} onChange={(e) => setFormato(e.target.value)} className="block w-full text-sm border-gray-300 rounded p-1.5 border bg-white">
+                            <option value="">Ninguno</option>
+                            {FORMATO_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-[10px] font-semibold text-gray-500 mb-1">Pilar</label>
+                        <select value={pilar} onChange={(e) => setPilar(e.target.value)} className="block w-full text-sm border-gray-300 rounded p-1.5 border bg-white">
+                            <option value="">Ninguno</option>
+                            {PILAR_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
+                    </div>
+                </div>
+            </div>
+          )}
+
+          {/* --- BLOQUE CONDICIONAL: KALI TE ENSEÑA --- */}
+          {team === 'Kali Te Enseña' && (
+            <div className="bg-yellow-50 p-3 rounded-lg border border-yellow-100 animate-in fade-in slide-in-from-top-2">
+                <h3 className="text-xs font-bold text-yellow-800 uppercase mb-2">Detalles del Caso</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                        <label className="block text-[10px] font-semibold text-gray-500 mb-1">País Objetivo</label>
+                        <select value={pais} onChange={(e) => setPais(e.target.value)} className="block w-full text-sm border-gray-300 rounded p-1.5 border bg-white">
+                            <option value="">Seleccionar...</option>
+                            {PAIS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-[10px] font-semibold text-gray-500 mb-1">Caso de Uso</label>
+                        <select value={casoUso} onChange={(e) => setCasoUso(e.target.value)} className="block w-full text-sm border-gray-300 rounded p-1.5 border bg-white">
+                            <option value="">Seleccionar...</option>
+                            {CASO_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                        </select>
+                    </div>
+                </div>
+            </div>
+          )}
+
+          {/* --- TAREA VINCULADA --- */}
           <div className="border-t border-gray-100 pt-4 mt-2">
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">

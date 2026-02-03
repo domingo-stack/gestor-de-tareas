@@ -75,7 +75,7 @@ const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
 };
 
 const PAIS_OPTIONS = ['Chile', 'México', 'Perú', 'Colombia', 'Ecuador', 'Todos'];
-const CASO_OPTIONS = ['Caso I: Sesión', 'Caso II: Unidad', 'Caso III: Juegos', 'Caso IV: KaliChat', 'Caso V: PCA', 'Caso VI: Proyecto ABP', 'Caso II: Proyecto NEM', 'Caso I: Clases']; // Puedes cambiar estos nombres
+const CASO_OPTIONS = ['Caso I: Sesión', 'Caso I: Clases', 'Caso II: Unidad','Caso II: Proyecto NEM', 'Caso III: Juegos', 'Caso IV: KaliChat', 'Caso V: PCA', 'Caso VI: Proyecto ABP']; // Puedes cambiar estos nombres
 
 const ESTADO_OPTIONS = ['Sin estado', 'Sin empezar', 'Escribiendo Guión', 'Creando', 'Grabando', 'Editando', 'Programando', 'Publicado'];
 const FORMATO_OPTIONS = ['Sin formato', 'Post', 'Blog', 'Story', 'Reel', 'In-app Notification', 'Correo'];
