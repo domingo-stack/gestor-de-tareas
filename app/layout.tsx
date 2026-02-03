@@ -14,6 +14,9 @@ const nunito = Nunito({
 export const metadata: Metadata = {
   title: 'Gestor de Tareas',
   description: 'Una aplicación para gestionar tus proyectos y tareas.',
+  icons: {
+    icon: '/icon.png', // <--- Pon aquí el nombre EXACTO de tu archivo en public
+  },
 }
 
 export default function RootLayout({

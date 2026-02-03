@@ -26,7 +26,7 @@ type ContentProject = {
     name: string;
 };
 
-const TEAMS = ['Marketing', 'Producto', 'Customer Success', 'General'];
+const TEAMS = ['Marketing', 'Producto', 'Customer Success', 'General', 'Kali Te Enseña'];
 const DUE_DATE_PRESETS = [
     { label: 'Mismo día', value: 'same_day' },
     { label: '1 día antes', value: 'one_day_before' },

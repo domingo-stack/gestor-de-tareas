@@ -23,6 +23,8 @@ type EventData = {
             Formato?: string;
             'Pilar de Contenido'?: string;
             task_data?: any; 
+            Pais?: string;
+            CasoUso?: string;
         };
     }
 };
@@ -69,7 +71,11 @@ const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
     Producto: { background: '#f0fdf4', text: '#166534' },
     'Customer Success': { background: '#ecfeff', text: '#0e7490' },
     General: { background: '#f3f4f6', text: '#4b5563' },
+    'Kali Te Enseña': { background: '#f2f75e', text: '#92961a' },
 };
+
+const PAIS_OPTIONS = ['Chile', 'México', 'Perú', 'Colombia', 'Ecuador', 'Todos'];
+const CASO_OPTIONS = ['Caso I: Sesión', 'Caso II: Unidad', 'Caso III: Juegos', 'Caso IV: KaliChat', 'Caso V: PCA', 'Caso VI: Proyecto ABP', 'Caso II: Proyecto NEM', 'Caso I: Clases']; // Puedes cambiar estos nombres
 
 const ESTADO_OPTIONS = ['Sin estado', 'Sin empezar', 'Escribiendo Guión', 'Creando', 'Grabando', 'Editando', 'Programando', 'Publicado'];
 const FORMATO_OPTIONS = ['Sin formato', 'Post', 'Blog', 'Story', 'Reel', 'In-app Notification', 'Correo'];
@@ -119,6 +125,13 @@ export default function EventDetailModal({
             setFormato('');
             setPilar('');
         }
+
+        if (team === 'Kali Te Enseña' && newTeam !== 'Kali Te Enseña') {
+            const confirm = window.confirm("⚠️ Vas a cambiar de equipo. Se perderán los datos de País y Caso de Uso. ¿Seguir?");
+            if (!confirm) return;
+            setPais('');
+            setCasoUso('');
+        }
         
         // Aplicamos el cambio de equipo
         setTeam(newTeam);
@@ -131,6 +144,8 @@ export default function EventDetailModal({
     const [estado, setEstado] = useState('');
     const [formato, setFormato] = useState('');
     const [pilar, setPilar] = useState('');
+    const [pais, setPais] = useState('');
+    const [casoUso, setCasoUso] = useState('');
 
     const [marketingProjects, setMarketingProjects] = useState<ContentProject[]>([]);
 
@@ -176,6 +191,8 @@ export default function EventDetailModal({
             setEstado(event.extendedProps.custom_data?.Estado || '');
             setFormato(event.extendedProps.custom_data?.Formato || '');
             setPilar(event.extendedProps.custom_data?.['Pilar de Contenido'] || '');
+            setPais(event.extendedProps.custom_data?.Pais || '');
+            setCasoUso(event.extendedProps.custom_data?.CasoUso || '');
 
             // Resetear estados auxiliares
             setWantTask(false);
@@ -282,6 +299,8 @@ export default function EventDetailModal({
                 Estado: estado,
                 Formato: formato,
                 'Pilar de Contenido': pilar,
+                Pais: pais,
+                CasoUso: casoUso,
             },
             create_task: wantTask,
             task_assignee_id: wantTask ? taskAssignee : undefined,
@@ -581,6 +600,24 @@ export default function EventDetailModal({
                                         </div>
                                     </div>
                                 )}
+                                {team === 'Kali Te Enseña' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t mt-4">
+            <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">País Objetivo</label>
+                <select value={pais} onChange={(e) => setPais(e.target.value)} className="block w-full border-gray-300 rounded-md shadow-sm text-sm p-2 border">
+                    <option value="">Seleccionar...</option>
+                    {PAIS_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+            </div>
+            <div>
+                <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Caso de Uso</label>
+                <select value={casoUso} onChange={(e) => setCasoUso(e.target.value)} className="block w-full border-gray-300 rounded-md shadow-sm text-sm p-2 border">
+                    <option value="">Seleccionar...</option>
+                    {CASO_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                </select>
+            </div>
+        </div>
+    )}
 
                                 {/* Sección Tarea Vinculada */}
                                 {hasLinkedTask ? (

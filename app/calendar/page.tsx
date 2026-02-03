@@ -20,6 +20,7 @@ console.log('Inspeccionando EditableCell:', EditableCell);
 import EditableDateCell from '@/components/EditableDateCell';
 import { EventClickArg, EventContentArg, DatesSetArg, EventDropArg } from '@fullcalendar/core';
 import { Toaster, toast } from 'sonner';
+import * as Flags from 'country-flag-icons/react/3x2';
 
 type TeamMember = {
   user_id: string;
@@ -32,7 +33,18 @@ const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
     Producto:         { background: '#f0fdf4', text: '#166534' }, // Verde
     'Customer Success': { background: '#ecfeff', text: '#0e7490' }, // Cian
     General:          { background: '#f3f4f6', text: '#4b5563' }, // Gris
+    'Kali Te Enseña':  { background: '#f2f75e', text: '#92961a' }, 
   };
+
+  const COUNTRY_FLAGS: { [key: string]: string } = {
+    'Chile': '🇨🇱',
+    'México': '🇲🇽',
+    'Perú': '🇵🇪',
+    'Colombia': '🇨🇴',
+    'Ecuador': '🇪🇨',
+    'Todos': '🌎', // Un mundo para "Todos"
+  };
+
   const TeamBadge = ({ team }: { team: string }) => {
     const teamColor = TEAM_COLORS[team] || TEAM_COLORS['General'];
     return (
@@ -783,12 +795,26 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
     }
   };
 
+  const getCountryCode = (countryName: string): string | undefined => {
+    const countryMap: { [key: string]: string } = {
+      'Chile': 'CL',
+      'México': 'MX',
+      'Perú': 'PE',
+      'Colombia': 'CO',
+      'Ecuador': 'EC',
+      'Todos': 'UN', // 'UN' (United Nations) puede servir para 'Todos', o podrías usar un icono global
+    };
+    return countryMap[countryName];
+  };
+
   // Esta función ahora vive DENTRO de CalendarPage
   const renderEventContent = (eventInfo: EventContentArg) => { // Cambié 'function' por 'const' para que sea más moderno
     const { custom_data, has_task, is_completed } = eventInfo.event.extendedProps;
     const estado = custom_data?.Estado;
     const formato = custom_data?.Formato;
     const pilar = custom_data?.['Pilar de Contenido'];
+    const pais = custom_data?.Pais;     // Ej: 'Chile'
+    const casoUso = custom_data?.CasoUso;
     
     // 👇 1. Averiguamos si este evento está seleccionado
     const isSelected = selectedEventIds.includes(eventInfo.event.id);
@@ -840,6 +866,49 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
           {estado && <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded-full font-medium">{estado}</span>}
           {formato && <span className="bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded-full font-medium">{formato}</span>}
           {pilar && <span className="bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full font-medium">{pilar}</span>}
+          {pais && (() => {
+  const countryCode = getCountryCode(pais);
+  const FlagComponent = countryCode ? Flags[countryCode as keyof typeof Flags] : null;
+
+  return (
+    <span className="bg-white border border-gray-200 text-gray-700 px-1.5 py-0.5 rounded-full font-medium flex items-center gap-1 shadorenderEventContentw-sm">
+      {/* Si es 'Todos', usamos el emoji del mundo. Si no, intentamos usar la bandera SVG */}
+      {/* ETIQUETA SOLO BANDERA (Versión Minimalista) */}
+      {/* ETIQUETA SOLO BANDERA (Versión "Clean") */}
+      {pais && (() => {
+             const countryCode = getCountryCode(pais);
+             const FlagComponent = countryCode ? Flags[countryCode as keyof typeof Flags] : null;
+
+             let iconContent;
+             if (pais === 'Todos') {
+                 iconContent = <span className="text-base leading-none filter drop-shadow-sm">🌎</span>;
+             } else if (FlagComponent) {
+                 // Aumenté un poquito el tamaño (w-6) ya que le quitamos el marco blanco
+                 // 'rounded-[2px]' le da un borde apenas suavizado, más elegante que el rounded-md
+                 iconContent = <FlagComponent className="w-6 h-auto rounded-[2px] shadow-sm object-cover" />;
+             } else {
+                 iconContent = <span className="text-sm leading-none">🏳️</span>;
+             }
+
+             return (
+                // 1. Quitamos 'bg-white', 'border', 'p-1'.
+                // 2. Dejamos 'flex' para alinear y 'hover:scale-110' para un efecto bonito al pasar el mouse
+                <span 
+                  className="flex items-center justify-center h-fit transition-transform hover:scale-110 cursor-help" 
+                  title={pais} // El tooltip sigue funcionando
+                >
+                   {iconContent}
+                </span>
+             );
+          })()}
+          </span>
+  );
+})()}
+          {casoUso && (
+            <span className="bg-yellow-100 text-yellow-800 px-1.5 py-0.5 rounded-full font-medium border border-yellow-200">
+               {casoUso}
+            </span>
+          )}
         </div>
       </div>
     );
