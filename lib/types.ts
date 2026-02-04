@@ -24,6 +24,8 @@ export type TeamMember = {
     owner_id: string;
     google_drive_url?: string | null;
     is_favorited: boolean; 
+    archived_at?: string | null;
+    team_name?: string;
   };
 
   // Se elimina el tipo 'Subtask'

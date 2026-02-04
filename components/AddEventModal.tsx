@@ -24,6 +24,7 @@ type TeamMember = {
 type ContentProject = {
     id: number;
     name: string;
+    team_name: string;
 };
 
 const TEAMS = ['Marketing', 'Producto', 'Customer Success', 'General', 'Kali Te Enseña'];
@@ -78,11 +79,14 @@ export default function AddEventModal({ isOpen, onClose, onEventAdded, user, sup
             const { data: members } = await supabase.rpc('get_team_members');
             if (members) setTeamMembers(members);
 
+            // ✅ Traemos todos los proyectos que tengan un equipo asignado
             const { data: projects } = await supabase
-                .from('projects')
-                .select('id, name')
-                .eq('is_content_project', true);
-            if (projects) setMarketingProjects(projects);
+            .from('projects')
+            .select('id, name, team_name') // <--- Traemos el equipo
+            // Quitamos el filtro .eq(...) para traer TODO
+            .order('name'); 
+        
+        if (projects) setMarketingProjects(projects as any);
         };
         fetchData();
         
@@ -375,15 +379,22 @@ export default function AddEventModal({ isOpen, onClose, onEventAdded, user, sup
                         <div className="col-span-12 sm:col-span-4">
                             <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Proyecto</label>
                             <select 
-                                value={taskProject} 
-                                onChange={(e) => setTaskProject(Number(e.target.value))}
-                                className="block w-full text-sm border-gray-300 rounded bg-gray-50 focus:bg-white p-1.5 border"
-                            >
-                                <option value="">Seleccionar...</option>
-                                {marketingProjects.map(p => (
+                            value={taskProject} 
+                            onChange={(e) => setTaskProject(Number(e.target.value))}
+                            className="block w-full text-sm border-gray-300 rounded bg-gray-50 focus:bg-white p-1.5 border"
+                        >
+                            <option value="">Seleccionar...</option>
+                            {marketingProjects
+                                .filter(p => p.team_name === team) // <--- ¡AQUÍ ESTÁ LA MAGIA!
+                                .map(p => (
                                     <option key={p.id} value={p.id}>{p.name}</option>
-                                ))}
-                            </select>
+                                ))
+                            }
+                        </select>
+                        {/* Mensaje de ayuda si no hay proyectos para ese equipo */}
+                        {marketingProjects.filter(p => p.team_name === team).length === 0 && (
+                            <p className="text-[10px] text-red-400 mt-1">No hay proyectos para el equipo {team}</p>
+                        )}
                         </div>
                         <div className="col-span-12 sm:col-span-4">
                              <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Entrega</label>

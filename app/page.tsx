@@ -156,7 +156,16 @@ const fetchData = useCallback(async () => {
   }
   
   // ...el resto de la función para procesar los datos se queda igual...
-  setProjects(projectsData as ProjectWithMembers[] || []);
+  const allProjects = projectsData as ProjectWithMembers[] || [];
+  const activeProjects = allProjects.filter(p => p.archived_at === null);
+  
+  // Ordenamos: Favoritos primero, luego el resto
+  activeProjects.sort((a, b) => {
+      if (a.is_favorited === b.is_favorited) return 0;
+      return a.is_favorited ? -1 : 1;
+  });
+
+  setProjects(activeProjects);
   setTeamMembers(membersData || []);
   let tasksToDisplay: Task[] = allMyTasks || [];
   const today = new Date().toISOString().split('T')[0];
@@ -188,16 +197,28 @@ useEffect(() => {
   }, [user, fetchData]);
 
   const handleToggleFavorite = async (projectId: number) => {
-    const updatedProjects = projects.map(p => 
-      p.id === projectId ? { ...p, is_favorited: !p.is_favorited } : p
-    );
-    updatedProjects.sort((a, b) => {
-      if (a.is_favorited && !b.is_favorited) return -1;
-      if (!a.is_favorited && b.is_favorited) return 1;
-      return 0;
+    // 1. Actualización Optimista (UI Instantánea)
+    setProjects(currentProjects => {
+      // Creamos una copia profunda modificando el proyecto clickeado
+      const updated = currentProjects.map(p => 
+        p.id === projectId ? { ...p, is_favorited: !p.is_favorited } : p
+      );
+
+      // Reordenamos inmediatamente: Favoritos arriba
+      return updated.sort((a, b) => {
+        // Si ambos son favoritos o ambos no lo son, mantenemos orden (o podrías ordenar por nombre)
+        if (a.is_favorited === b.is_favorited) {
+           return a.name.localeCompare(b.name); 
+        }
+        // Si a es favorito, va antes (-1)
+        return a.is_favorited ? -1 : 1;
+      });
     });
-    setProjects(updatedProjects);
+
+    // 2. Llamada a la Base de Datos
     const { error } = await supabase.rpc('toggle_project_favorite', { p_project_id: projectId });
+    
+    // 3. Si falla, revertimos silenciosamente recargando los datos reales
     if (error) {
       console.error('Error toggling favorite:', error);
       fetchData();

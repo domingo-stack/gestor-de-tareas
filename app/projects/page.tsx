@@ -96,11 +96,14 @@ const fetchData = useCallback(async () => {
     fetchData();
   }, [fetchData]);
 
-const handleAddProject = async (projectData: { name: string; description: string | null }) => {
-  // 1. Verificamos que tenemos el usuario y el cliente de Supabase.
+// Esta función reemplaza a tu handleAddProject actual en app/projects/page.tsx
+
+const handleAddProject = async (projectData: { name: string; description: string | null; team_name: string }) => {
+  // 1. Validaciones de seguridad
   if (!user || !supabase) return;
 
-  // 2. Obtenemos el equipo activo desde el perfil del usuario.
+  // 2. Obtenemos el equipo activo (Organización) como hacías antes
+  // Esto es necesario porque tu función SQL espera recibir este parámetro aunque luego lo verifique
   const { data: profileData, error: profileError } = await supabase
     .from('profiles')
     .select('active_team_id')
@@ -109,28 +112,36 @@ const handleAddProject = async (projectData: { name: string; description: string
 
   if (profileError || !profileData || !profileData.active_team_id) {
     console.error('Error fetching active team id:', profileError);
-    alert('Error: No se pudo encontrar tu equipo activo para crear el proyecto.');
+    alert('Error: No se pudo encontrar tu organización activa.');
     return;
   }
 
-  // 3. Llamamos a la función RPC, pasando el ID del equipo activo.
-  const { data: newProject, error: rpcError } = await supabase.rpc('create_project', {
+  // 3. Llamamos a la RPC (Ahora acepta p_team_name)
+  const { data: newProjectData, error: rpcError } = await supabase.rpc('create_project', {
     p_name: projectData.name,
     p_description: projectData.description,
-    p_team_id: profileData.active_team_id
+    p_team_id: profileData.active_team_id, // Organización (Seguridad)
+    p_team_name: projectData.team_name     // 👇 Departamento (Marketing, Kali, etc.)
   });
 
   if (rpcError) {
     console.error('Error adding project via RPC:', rpcError);
     alert('Error al crear el proyecto: ' + rpcError.message);
   } else {
-    // 4. Actualizamos el estado local para ver el proyecto nuevo al instante.
-    if (newProject) {
-      setProjects([...projects, newProject]);
+    // 4. Actualizamos el estado local
+    // La RPC ahora devuelve un array (setof projects), tomamos el primero
+    if (newProjectData && newProjectData.length > 0) {
+       // newProjectData es un array porque la función retorna 'setof projects'
+       setProjects([newProjectData[0], ...projects]);
+    } else if (newProjectData && !Array.isArray(newProjectData)) {
+       // Por si acaso Supabase lo devuelve como objeto único
+       setProjects([newProjectData, ...projects]);
     }
+    
     setIsCreateModalOpen(false);
   }
 };
+
 const handleUnarchiveProject = async (projectId: number) => {
   if (!supabase) return;
   const { error } = await supabase

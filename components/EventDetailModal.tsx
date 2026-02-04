@@ -53,6 +53,7 @@ type TeamMember = {
 type ContentProject = {
     id: number;
     name: string;
+    team_name: string;
 };
 
 type EventDetailModalProps = {
@@ -86,6 +87,7 @@ const DUE_DATE_PRESETS = [
     { label: '1 día antes', value: 'one_day_before' },
     { label: 'Personalizado', value: 'custom' }
 ];
+
 
 // --- COMPONENTE PRINCIPAL ---
 export default function EventDetailModal({ 
@@ -171,9 +173,11 @@ export default function EventDetailModal({
             const fetchAuxData = async () => {
                 const { data: projects } = await supabase
                     .from('projects')
-                    .select('id, name')
-                    .eq('is_content_project', true);
-                if (projects) setMarketingProjects(projects);
+                    .select('id, name, team_name') // <--- Traemos el equipo
+                    // Quitamos el filtro .eq(...) para que traiga TODO
+                    .order('name'); 
+                    
+                if (projects) setMarketingProjects(projects as any);
             };
             fetchAuxData();
         }
@@ -652,10 +656,23 @@ export default function EventDetailModal({
                                                     </div>
                                                     <div className="col-span-12 sm:col-span-6">
                                                         <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Proyecto</label>
-                                                        <select value={taskProject} onChange={(e) => setTaskProject(Number(e.target.value))} className="block w-full text-sm border-gray-300 rounded bg-gray-50 p-1.5 border">
-                                                            <option value="">Seleccionar...</option>
-                                                            {marketingProjects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                                                        </select>
+                                                        <select 
+    value={taskProject} 
+    onChange={(e) => setTaskProject(Number(e.target.value))}
+    className="block w-full text-sm border-gray-300 rounded bg-gray-50 p-1.5 border"
+>
+    <option value="">Seleccionar...</option>
+    {marketingProjects
+        .filter(p => p.team_name === team) // <--- FILTRO MÁGICO
+        .map(p => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+        ))
+    }
+</select>
+{/* Mensaje de ayuda */}
+{marketingProjects.filter(p => p.team_name === team).length === 0 && (
+    <p className="text-[10px] text-gray-400 mt-1">No hay proyectos visibles para {team}</p>
+)}
                                                     </div>
                                                     <div className="col-span-12">
                                                         <label className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Entrega</label>

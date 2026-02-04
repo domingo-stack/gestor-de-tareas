@@ -23,6 +23,7 @@ import Dropdown from '@/components/Dropdown'
 
 
 const KANBAN_COLUMNS = ['Por Hacer', 'En Progreso', 'Hecho'];
+const TEAMS = ['Marketing', 'Producto', 'Customer Success', 'General', 'Kali Te Enseña'];
 
 type StatusFilterValue = 'all' | 'due' | 'overdue' | 'completed';
 
@@ -617,6 +618,32 @@ const handleUpdateTask = async (updatedData: TaskUpdatePayload) => {
     throw new Error('Function not implemented.')
   }
 
+  const handleUpdateTeam = async (newTeam: string) => {
+    if (!project || !supabase) return;
+
+    // 1. Confirmación de seguridad
+    const confirmChange = window.confirm(
+      `¿Estás seguro de que quieres mover el proyecto "${project.name}" del equipo "${project.team_name || 'Sin equipo'}" al equipo "${newTeam}"?`
+    );
+
+    if (!confirmChange) return;
+
+    // 2. Actualización en Base de Datos
+    const { error } = await supabase
+      .from('projects')
+      .update({ team_name: newTeam })
+      .eq('id', project.id);
+
+    if (error) {
+      console.error('Error updating team:', error);
+      alert('Error al cambiar de equipo: ' + error.message);
+    } else {
+      // 3. Recargar datos para ver el cambio reflejado (y actualizar permisos si fuera el caso)
+      alert(`El proyecto se ha movido exitosamente a ${newTeam}.`);
+      fetchData();
+    }
+  };
+
 
 
   return (
@@ -643,6 +670,24 @@ const handleUpdateTask = async (updatedData: TaskUpdatePayload) => {
                     {project.name}
                   </h1>
                   <p className="text-gray-600 mt-1">{project.description}</p>
+                  <div className="mt-3 flex items-center gap-2">
+                    <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Equipo:</span>
+                    <div className="relative group">
+                        <select
+                            value={project.team_name || 'General'}
+                            onChange={(e) => handleUpdateTeam(e.target.value)}
+                            className="appearance-none bg-white border border-gray-300 text-gray-700 py-1 pl-3 pr-8 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-pink-500 focus:border-transparent cursor-pointer hover:border-gray-400 transition-colors"
+                        >
+                            {TEAMS.map(team => (
+                                <option key={team} value={team}>{team}</option>
+                            ))}
+                        </select>
+                        {/* Icono de flechita para que se vea bonito */}
+                        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </div>
+                    </div>
+                  </div>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 max-w-lg">
                     {/* Grupo de Filtros */}
