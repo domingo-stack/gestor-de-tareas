@@ -13,6 +13,7 @@ import CreateButton from '@/components/CreateButton'
 import AddProjectForm from '@/components/AddProjectForm'
 import MyProjects from '@/components/MyProjects'
 import ActivityFeed from '@/components/ActivityFeed'
+import DOMPurify from 'dompurify';
 import InviteProjectMembersModal from '@/components/InviteProjectMembersModal'
 import { TaskUpdatePayload } from '@/lib/types';
 import { CollaboratorRecord } from '@/lib/types'; // O la ruta correcta a tu archivo
@@ -436,10 +437,10 @@ useEffect(() => {
         .from('comments')
         .insert({
             task_id: editingTask.id,
-            content: content,
+            content: DOMPurify.sanitize(content),
             user_id: user.id,
             // Agregamos el nombre para que se vea bonito en la UI de inmediato
-            user_name: user.user_metadata?.full_name || user.email 
+            user_name: user.user_metadata?.full_name || user.email
         })
         .select()
         .single(); // ¡Clave! Esto nos devuelve el objeto creado

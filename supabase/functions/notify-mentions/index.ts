@@ -4,12 +4,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Resend } from 'https://esm.sh/resend';
+import { escapeHtml } from '../_shared/escapeHtml.ts';
 
-// 1. DEFINIMOS LAS CABECERAS DE PERMISO (CORS)
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { corsHeaders } from '../_shared/cors.ts';
 
 serve(async (req: Request) => {
   // 2. MANEJAR LA PETICIÓN "PREFLIGHT" (El navegador pregunta antes de enviar)
@@ -78,11 +75,11 @@ serve(async (req: Request) => {
             await resend.emails.send({
                 from: 'tareas@califica.ai',
                 to: [email], 
-                subject: `💬 Te mencionaron en: ${taskTitle}`,
+                subject: `💬 Te mencionaron en: ${escapeHtml(taskTitle)}`,
                 html: `
-                  <p><strong>${authorEmail}</strong> te mencionó en un comentario:</p>
+                  <p><strong>${escapeHtml(authorEmail)}</strong> te mencionó en un comentario:</p>
                   <blockquote style="background: #f9f9f9; border-left: 4px solid #ccc; margin: 1.5em 10px; padding: 0.5em 10px;">
-                    "${content}"
+                    "${escapeHtml(content)}"
                   </blockquote>
                   <a href="https://gestor.califica.ai${linkUrl}" style="background:#ff8080; color:white; padding:10px 20px; text-decoration:none; border-radius:5px;">Ir a la tarea</a>
                 `

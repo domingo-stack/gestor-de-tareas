@@ -1,11 +1,9 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { Resend } from 'https://esm.sh/resend'
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
+import { escapeHtml } from '../_shared/escapeHtml.ts';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { corsHeaders } from '../_shared/cors.ts';
 
 interface TaskPayload {
   record: {
@@ -73,14 +71,14 @@ serve(async (req: Request) => {
             await resend.emails.send({
                 from: 'tareas@califica.ai',
                 to: [recipientEmail], // Solo al asignado
-                subject: `📋 ${assignerEmail} te asignó una tarea`,
+                subject: `📋 ${escapeHtml(assignerEmail)} te asignó una tarea`,
                 html: `
                   <div style="font-family: sans-serif; color: #333;">
                     <h2 style="color: #3c527a;">Nueva Asignación</h2>
-                    <p><strong>${assignerEmail}</strong> te ha asignado:</p>
+                    <p><strong>${escapeHtml(assignerEmail)}</strong> te ha asignado:</p>
                     <div style="background: #f9f9f9; padding: 15px; border-left: 4px solid #ff8080; margin: 20px 0;">
-                        <p style="margin: 5px 0;"><strong>Tarea:</strong> ${record.title}</p>
-                        <p style="margin: 5px 0;"><strong>Proyecto:</strong> ${projectName}</p>
+                        <p style="margin: 5px 0;"><strong>Tarea:</strong> ${escapeHtml(record.title)}</p>
+                        <p style="margin: 5px 0;"><strong>Proyecto:</strong> ${escapeHtml(projectName)}</p>
                     </div>
                     <a href="https://gestor.califica.ai/projects/${record.project_id}?task=${record.id}" style="background:#3c527a; color:white; padding:10px 20px; text-decoration:none; border-radius:5px;">Ver Tarea</a>
                   </div>
@@ -101,12 +99,12 @@ serve(async (req: Request) => {
                 await resend.emails.send({
                     from: 'tareas@califica.ai',
                     to: [ownerEmail],
-                    subject: `✅ Tarea completada por ${assignerEmail}`,
+                    subject: `✅ Tarea completada por ${escapeHtml(assignerEmail)}`,
                     html: `
                       <div style="font-family: sans-serif; color: #333;">
                         <h2 style="color: #166534;">¡Tarea Finalizada!</h2>
-                        <p><strong>${assignerEmail}</strong> ha marcado como completada la tarea:</p>
-                        <p style="font-size: 18px; font-weight: bold;">"${record.title}"</p>
+                        <p><strong>${escapeHtml(assignerEmail)}</strong> ha marcado como completada la tarea:</p>
+                        <p style="font-size: 18px; font-weight: bold;">"${escapeHtml(record.title)}"</p>
                         <a href="https://gestor.califica.ai/projects/${record.project_id}?task=${record.id}" style="color: #3c527a;">Ver tarea</a>
                       </div>
                     `

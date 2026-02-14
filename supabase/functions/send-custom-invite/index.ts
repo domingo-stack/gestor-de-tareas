@@ -2,9 +2,9 @@
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders } from '../_shared/cors.ts';
+import { escapeHtml } from '../_shared/escapeHtml.ts';
 
-// ¡IMPORTANTE! Necesitaremos una nueva variable de entorno para Resend.
-const RESEND_API_KEY = Deno.env.get('re_Qzh46H88_PPVzfPmMKy1NFhtfgiAXXuxm');
+const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
         from: 'Kali - Tareas <tareas@califica.ai>', // O tu email verificado en Resend
         to: [emailToInvite],
         subject: 'Invitación a unirte a un equipo',
-        html: `<h1>¡Has sido invitado!</h1><p>Para unirte al equipo, por favor regístrate en el siguiente enlace:</p><a href="${registrationLink}">Aceptar Invitación</a>`,
+        html: `<h1>¡Has sido invitado!</h1><p>Para unirte al equipo, por favor regístrate en el siguiente enlace:</p><a href="${escapeHtml(registrationLink)}">Aceptar Invitación</a>`,
       }),
     });
 

@@ -10,6 +10,7 @@ import { User } from '@supabase/supabase-js'
 import { TaskUpdatePayload } from '@/lib/types';
 import MediaTextarea from '@/components/MediaTextarea';
 import { stripHtml } from '@/lib/textUtils';
+import DOMPurify from 'dompurify';
 
 type EditTaskFormProps = {
   task: Task;
@@ -296,7 +297,7 @@ export default function EditTaskForm({
                   <span className="font-semibold">{comment.user_name || 'Anónimo'}</span>
                   <span className="text-gray-500 ml-2 text-xs">{new Date(comment.created_at).toLocaleString()}</span>
                 </p>
-                <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: comment.content }} />
+                <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.content) }} />
               </div>
             </div>
           ))}

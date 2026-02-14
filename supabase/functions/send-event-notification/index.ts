@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { Resend } from 'https://esm.sh/resend';
+import { escapeHtml } from '../_shared/escapeHtml.ts';
 
 serve(async (req: Request) => {
   const executionId = req.headers.get('x-supabase-edge-execution-id');
@@ -56,7 +57,7 @@ if (recipientEmails.length === 0) {
 
     // --- PASO 2: USAR LA NUEVA PLANTILLA HTML ---
 
-    const subject = `${creatorIdentifier} creó un nuevo evento: ${newEvent.title}`;
+    const subject = `${escapeHtml(creatorIdentifier)} creó un nuevo evento: ${escapeHtml(newEvent.title)}`;
 
     await resend.emails.send({
       from: 'tareas@califica.ai',
@@ -85,10 +86,10 @@ if (recipientEmails.length === 0) {
               <h2>Nuevo Evento en el Calendario</h2>
             </div>
             <div class="content">
-              <h1>${creatorIdentifier} ha creado un nuevo evento:</h1>
-              <p class="item"><strong>Evento:</strong> ${newEvent.title}</p>
-              <p class="item"><strong>Equipo:</strong> ${newEvent.team}</p>
-              <p class="item"><strong>Equipo:</strong> ${newEvent.description}</p>
+              <h1>${escapeHtml(creatorIdentifier)} ha creado un nuevo evento:</h1>
+              <p class="item"><strong>Evento:</strong> ${escapeHtml(newEvent.title)}</p>
+              <p class="item"><strong>Equipo:</strong> ${escapeHtml(newEvent.team || '')}</p>
+              <p class="item"><strong>Descripción:</strong> ${escapeHtml(newEvent.description || '')}</p>
               <p class="item"><strong>Fecha:</strong> ${new Date(newEvent.start_date).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
               <a href="https://gestor.califica.ai/calendar" class="button">Ver en el Calendario</a>
             </div>

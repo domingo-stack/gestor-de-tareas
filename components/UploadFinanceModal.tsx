@@ -84,7 +84,7 @@ export default function UploadFinanceModal({ isOpen, onClose, categories }: Uplo
 
       // C. AVISAR A N8N Y ESPERAR RESPUESTA (AWAIT REAL)
       // Nota: Esto puede tardar 10-30 segundos mientras la IA piensa.
-      const N8N_WEBHOOK_URL = 'https://calificaarturo.app.n8n.cloud/webhook/3181b9d1-0dd4-41da-9b49-f00c529070a1'; 
+      const N8N_WEBHOOK_URL = process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL;
 
       const response = await fetch(N8N_WEBHOOK_URL, {
         method: 'POST',

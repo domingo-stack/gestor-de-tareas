@@ -18,6 +18,7 @@ import InviteProjectMembersModal from '@/components/InviteProjectMembersModal'
 import TaskCard from '@/components/TaskCard'
 import DeleteProjectModal from '@/components/DeleteProjectModal'
 import { TrashIcon } from '@/components/icons/TrashIcon'
+import DOMPurify from 'dompurify';
 import ProjectDriveLink from '@/components/ProjectDriveLink'
 import Dropdown from '@/components/Dropdown'
 
@@ -522,9 +523,10 @@ const handleUpdateTask = async (updatedData: TaskUpdatePayload) => {
         .map(email => membersMap.get(email))
         .filter((id): id is string => id !== undefined); 
   
+      const sanitizedContent = DOMPurify.sanitize(content);
       const { data, error } = await supabase.rpc('add_comment_and_notify', {
           p_task_id: editingTask.id,
-          p_content: content,
+          p_content: sanitizedContent,
           p_mentioned_user_ids: mentionedUserIds
       });
   
