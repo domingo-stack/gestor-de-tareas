@@ -9,6 +9,7 @@ import Modal from '@/components/Modal'
 import EditTaskForm from '@/components/EditTaskForm'
 import KanbanColumn from '@/components/KanbanColumn'
 import AuthGuard from '@/components/AuthGuard'
+import ModuleGuard from '@/components/ModuleGuard'
 import { DndContext, DragEndEvent, DragOverlay, rectIntersection, useSensor, useSensors, PointerSensor } from '@dnd-kit/core'
 import { useAuth } from '@/context/AuthContext'
 import ProjectMembers from '@/components/ProjectMembers'
@@ -102,7 +103,7 @@ const fetchData = useCallback(async () => {
     supabase.rpc('get_project_members', { p_project_id: projectId }),
     tasksQuery,
     supabase.from('projects').select('*'),
-    supabase.rpc('get_team_members_by_active_team') // Pedimos todos los miembros del equipo
+    supabase.rpc('get_all_members')
   ]);
   
   // Procesamos los resultados
@@ -198,24 +199,15 @@ useEffect(() => {
 
   const handleAddTask = async (taskData: { title: string; description: string; projectId: number | null; dueDate: string | null; assigneeId: string | null; }) => {
     if (!user) return;
-  
-    const { data: profileData } = await supabase.from('profiles').select('active_team_id').eq('id', user.id).single();
-    if (!profileData?.active_team_id) { 
-      alert('Error: No tienes un equipo activo seleccionado.');
-      return; 
-    }
 
-    // 1. MANTENEMOS TU LÓGICA ACTUAL (RPC)
-    // Forzamos el projectId de la URL si no viene en el formulario
-    const finalProjectId = taskData.projectId || projectId; 
+    const finalProjectId = taskData.projectId || projectId;
 
-    const { error } = await supabase.rpc('create_task_v2', { 
-      p_title: taskData.title, 
-      p_description: taskData.description, 
-      p_project_id: finalProjectId, 
-      p_due_date: taskData.dueDate, 
-      p_assignee_id: taskData.assigneeId, 
-      p_team_id: profileData.active_team_id
+    const { error } = await supabase.rpc('create_task_v2', {
+      p_title: taskData.title,
+      p_description: taskData.description,
+      p_project_id: finalProjectId,
+      p_due_date: taskData.dueDate,
+      p_assignee_id: taskData.assigneeId
     });
   
     if (error) { 
@@ -650,6 +642,7 @@ const handleUpdateTask = async (updatedData: TaskUpdatePayload) => {
 
   return (
     <AuthGuard>
+      <ModuleGuard module="mod_tareas">
       <DndContext sensors={sensors} collisionDetection={rectIntersection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <div className="bg-gray-50 min-h-screen font-sans">
           <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
@@ -844,6 +837,7 @@ const handleUpdateTask = async (updatedData: TaskUpdatePayload) => {
       
         </div>
       </DndContext>
+      </ModuleGuard>
     </AuthGuard>
   );
 }

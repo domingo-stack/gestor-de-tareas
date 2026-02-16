@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
+import AuthGuard from '@/components/AuthGuard';
+import ModuleGuard from '@/components/ModuleGuard';
 import { 
   BanknotesIcon, 
   CreditCardIcon, 
@@ -436,6 +438,8 @@ export default function RevenuePage() {
   const totalPages = Math.ceil(totalRecords / itemsPerPage);
 
   return (
+    <AuthGuard>
+    <ModuleGuard module="mod_revenue">
     <div className="p-6 max-w-7xl mx-auto space-y-8">
       {/* 1. HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -611,5 +615,7 @@ export default function RevenuePage() {
         )}
       </div>
     </div>
+    </ModuleGuard>
+    </AuthGuard>
   );
 };

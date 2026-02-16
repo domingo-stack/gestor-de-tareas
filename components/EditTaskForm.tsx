@@ -138,7 +138,7 @@ export default function EditTaskForm({
 
   useEffect(() => {
     async function fetchTeamMembers() {
-      const { data, error } = await supabase.rpc('get_team_members');
+      const { data, error } = await supabase.rpc('get_all_members');
       if (error) console.error("Error fetching team members:", error);
       else if (data) setTeamMembers(data);
     }

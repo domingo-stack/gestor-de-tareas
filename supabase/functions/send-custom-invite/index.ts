@@ -12,18 +12,18 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { emailToInvite, team_id } = await req.json();
-    if (!team_id || !emailToInvite) throw new Error("Faltan datos.");
+    const { emailToInvite } = await req.json();
+    if (!emailToInvite) throw new Error("El email a invitar es requerido.");
 
     const supabaseAdmin = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
     );
 
-    // 1. Crear una nueva fila en nuestra tabla de invitaciones
+    // 1. Crear una nueva fila en nuestra tabla de invitaciones (sin team_id)
     const { data: invitation, error: insertError } = await supabaseAdmin
       .from('invitations')
-      .insert({ email: emailToInvite, team_id: team_id })
+      .insert({ email: emailToInvite })
       .select()
       .single();
 
@@ -41,10 +41,10 @@ Deno.serve(async (req) => {
         'Authorization': `Bearer ${RESEND_API_KEY}`,
       },
       body: JSON.stringify({
-        from: 'Kali - Tareas <tareas@califica.ai>', // O tu email verificado en Resend
+        from: 'Kali - Tareas <tareas@califica.ai>',
         to: [emailToInvite],
-        subject: 'Invitación a unirte a un equipo',
-        html: `<h1>¡Has sido invitado!</h1><p>Para unirte al equipo, por favor regístrate en el siguiente enlace:</p><a href="${escapeHtml(registrationLink)}">Aceptar Invitación</a>`,
+        subject: 'Invitación a unirte a Califica',
+        html: `<h1>¡Has sido invitado!</h1><p>Para unirte a la organización, por favor regístrate en el siguiente enlace:</p><a href="${escapeHtml(registrationLink)}">Aceptar Invitación</a>`,
       }),
     });
 

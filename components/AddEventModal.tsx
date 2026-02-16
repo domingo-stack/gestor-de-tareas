@@ -76,7 +76,7 @@ export default function AddEventModal({ isOpen, onClose, onEventAdded, user, sup
   useEffect(() => {
     if (isOpen && supabase) {
         const fetchData = async () => {
-            const { data: members } = await supabase.rpc('get_team_members');
+            const { data: members } = await supabase.rpc('get_all_members');
             if (members) setTeamMembers(members);
 
             // ✅ Traemos todos los proyectos que tengan un equipo asignado

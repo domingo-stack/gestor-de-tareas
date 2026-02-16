@@ -26,14 +26,18 @@ npx supabase functions deploy <function-name>  # Deploy a single Edge Function
 
 ### Application Structure
 
-All pages use the Next.js App Router under `app/`. Every page is a client component (`"use client"`) that fetches data directly from Supabase via the client SDK. There is no API route layer — components query Supabase tables and call RPC functions directly.
+Single-organization app (Califica). No multi-tenancy. All pages use the Next.js App Router under `app/`. Every page is a client component (`"use client"`) that fetches data directly from Supabase via the client SDK. There is no API route layer — components query Supabase tables and call RPC functions directly.
 
 ### Authentication & Authorization
 
 - `context/AuthContext.tsx` provides a global `useAuth()` hook exposing `session`, `user`, `isLoading`, and the `supabase` client instance.
+- `context/PermissionsContext.tsx` provides `usePermissions()` hook exposing `role`, `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `isLoading`, `refetch`.
 - `components/AuthGuard.tsx` wraps protected pages; redirects to `/login` if unauthenticated.
-- Roles: `superadmin`, `Dueño` (owner), regular member. Finance and revenue pages are restricted to `superadmin`/`Dueño`. Admin panel is `superadmin` only.
-- Role info is fetched via the `get_user_role_and_team_info` RPC.
+- `components/ModuleGuard.tsx` wraps page content; checks module-level permissions. Shows "Acceso Denegado" if user lacks permission, or "Cuenta Pendiente" if user has no role (registered without invitation).
+- **Roles**: `superadmin` (full access), `member` (org employee), `invitado` (external collaborator).
+- **Permissions**: Per-module booleans in `user_permissions` table: `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`. Superadmin always has all permissions.
+- **Registration**: Invitation-only via `/register?invite_token=TOKEN`. Without token, registration is blocked.
+- Role info + permissions fetched via `get_user_role_and_permissions` RPC.
 
 ### Key Routes
 
@@ -44,14 +48,15 @@ All pages use the Next.js App Router under `app/`. Every page is a client compon
 | `/calendar` | FullCalendar event management with team-colored events |
 | `/finance` | Transaction management, multi-currency, CAC tracking |
 | `/revenue` | Revenue dashboard with country/provider/plan filters |
-| `/admin/teams` | Superadmin team administration |
-| `/settings/team` | Team member management |
+| `/admin/users` | Superadmin user & permissions administration |
+| `/settings/team` | Organization member management |
 
 ### Data Layer
 
 - All Supabase queries happen client-side inside components (no server actions or API routes).
-- RPC functions used: `get_team_members`, `get_team_members_by_active_team`, `get_user_role_and_team_info`, `add_member_to_active_team`, `remove_team_member`.
-- Types are centralized in `lib/types.ts` — key entities: `Task`, `Project`, `CompanyEvent`, `Transaction`, `Account`, `Category`, `MonthlyMetric`.
+- **RPC functions**: `get_user_role_and_permissions`, `get_all_members`, `get_all_users_admin`, `update_user_role`, `update_user_module_permission`, `add_member`, `remove_member`, `create_task_v2`, `create_project`, `get_project_members`, `get_projects_with_members`, `get_my_assigned_tasks_with_projects`.
+- **Key tables**: `profiles` (role), `user_permissions` (module booleans), `org_settings` (singleton org config), `invitations` (invite tokens).
+- Types are centralized in `lib/types.ts` — key entities: `Task`, `Project`, `CompanyEvent`, `Transaction`, `Account`, `Category`, `MonthlyMetric`, `UserPermissions`.
 
 ### Supabase Edge Functions (`supabase/functions/`)
 
@@ -59,8 +64,8 @@ Five Deno/TypeScript edge functions handle email notifications via Resend:
 - `send-event-notification` — new calendar events
 - `send-assignment-notification` — task assignments
 - `notify-mentions` — @mentions in comments
-- `invite-user-to-team` — team invitations
-- `send-custom-invite` — custom invitation emails
+- `invite-user-to-team` — user invitations (assigns role + permissions based on email domain)
+- `send-custom-invite` — custom invitation emails with registration token
 
 ### Component Patterns
 

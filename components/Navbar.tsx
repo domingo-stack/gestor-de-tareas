@@ -2,36 +2,14 @@
 
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
+import { usePermissions } from '@/context/PermissionsContext'
 import { useRouter } from 'next/navigation'
 import Notifications from '@/components/Notifications'
-import { useState, useEffect } from 'react'
 
 export default function Navbar() {
-  const { user, supabase, isLoading } = useAuth()
-  const [role, setRole] = useState<string | null>(null);
+  const { user, supabase } = useAuth()
+  const { role, mod_calendario, mod_finanzas, mod_revenue } = usePermissions()
   const router = useRouter()
-  // El estado de teamName no se usa en el JSX, pero mantenemos la lógica por si acaso.
-  const [teamName, setTeamName] = useState<string | null>(null);
-
-
-  useEffect(() => {
-    if (user && supabase) {
-      const getNavbarData = async () => {
-        const { data, error } = await supabase.rpc('get_user_role_and_team_info');
-
-        if (error) {
-          console.error("Error fetching navbar data:", error);
-        } else if (data && data.length > 0) {
-          setRole(data[0].role);
-          setTeamName(data[0].team_name);
-        }
-      };
-      getNavbarData();
-    } else {
-      setRole(null);
-      setTeamName(null);
-    }
-  }, [user, supabase]);
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut()
@@ -55,49 +33,50 @@ export default function Navbar() {
             {user ? (
               <>
                 <Notifications />
-                <Link
-                  href="/calendar"
-                  className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
-                >
-                  Ir a Kali-Calendario
-                </Link>
-
-                {/* 👇 AQUÍ ESTÁ EL CAMBIO CLAVE 
-                   Solo mostramos esto si el rol es 'superadmin'.
-                   Nota: Mantuve 'Dueño' por si tú todavía tienes ese rol en tu usuario actual,
-                   para que no se te desaparezca mientras te cambias el rol.
-                   Si ya todos son 'superadmin', puedes borrar "|| role === 'Dueño'".
-                */}
-                {(role === 'superadmin' || role === 'Dueño') && (
-                  <Link 
-                    href="/finance" 
-                    className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 flex items-center gap-2"
-                  >
-                    <span>Kali-Finanzas💰</span>
-                  </Link>
-                  
-                )}
-                {(role === 'superadmin' || role === 'Dueño') && (
-                  <Link 
-                    href="/revenue" 
-                    className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 flex items-center gap-2"
-                  >
-                    <span>💸 Revenue</span>
-                  </Link>
-                  
-                )}
-
-                {/* Mantuve la lógica original del botón Invitar */}
-                {(role === 'Dueño' || role === 'superadmin') && (
+                {mod_calendario && (
                   <Link
-                    href="/settings/team"
-                    className="px-3 py-2 text-sm font-medium rounded-md"
-                    style={{ backgroundColor: '#ff8080', color: 'white' }}
+                    href="/calendar"
+                    className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
                   >
-                    Invitar
+                    Ir a Kali-Calendario
                   </Link>
                 )}
-                
+
+                {mod_finanzas && (
+                  <Link
+                    href="/finance"
+                    className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 flex items-center gap-2"
+                  >
+                    <span>Kali-Finanzas</span>
+                  </Link>
+                )}
+                {mod_revenue && (
+                  <Link
+                    href="/revenue"
+                    className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 flex items-center gap-2"
+                  >
+                    <span>Revenue</span>
+                  </Link>
+                )}
+
+                {role === 'superadmin' && (
+                  <>
+                    <Link
+                      href="/admin/users"
+                      className="px-3 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                    >
+                      Admin
+                    </Link>
+                    <Link
+                      href="/settings/team"
+                      className="px-3 py-2 text-sm font-medium rounded-md"
+                      style={{ backgroundColor: '#ff8080', color: 'white' }}
+                    >
+                      Invitar
+                    </Link>
+                  </>
+                )}
+
                 <span className="text-sm text-gray-600 hidden sm:block">{user.email}</span>
                 <button
                   onClick={handleLogout}
@@ -120,13 +99,12 @@ export default function Navbar() {
                   className="px-3 py-2 text-sm font-medium text-white bg-primary rounded-md hover:opacity-90"
                 >
                   Registrarse
-                </Link>  
-
+                </Link>
               </>
-              
             )}
           </div>
         </div>
       </div>
     </nav>
-  )}
+  )
+}

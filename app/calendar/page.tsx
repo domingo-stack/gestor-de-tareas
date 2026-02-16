@@ -8,6 +8,7 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import { PlusIcon } from '@heroicons/react/24/outline';
 import AuthGuard from '@/components/AuthGuard';
+import ModuleGuard from '@/components/ModuleGuard';
 import AddEventModal from '@/components/AddEventModal';
 console.log('El componente AddEventModal es:', AddEventModal);
 import { UserPlusIcon } from '@/components/icons/UserPlusIcon';
@@ -117,7 +118,7 @@ export default function CalendarPage() {
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   useEffect(() => {
     const fetchMembers = async () => {
-      const { data } = await supabase.rpc('get_team_members');
+      const { data } = await supabase.rpc('get_all_members');
       if (data) setTeamMembers(data);
   };
   fetchMembers();
@@ -477,7 +478,6 @@ const tableEvents = useMemo(() => {
                  project_id: task_project_id || null,
                  assignee_user_id: task_assignee_id || null,
                  owner_id: user.id,
-                 team_id: 2, 
                  due_date: task_due_date || null,
                  completed: false
              };
@@ -916,6 +916,7 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
 
   return (
     <AuthGuard>
+      <ModuleGuard module="mod_calendario">
       <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
         
         {/* --- ENCABEZADO Y CONTROLES --- */}
@@ -1105,5 +1106,6 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
         onDuplicate={handleDuplicateCompletion}
       />
       <Toaster position="bottom-right" richColors />
+      </ModuleGuard>
     </AuthGuard>
   );}

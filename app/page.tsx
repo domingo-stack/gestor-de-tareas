@@ -8,6 +8,7 @@ import Modal from '@/components/Modal'
 import EditTaskForm from '@/components/EditTaskForm'
 import TaskCard from '@/components/TaskCard'
 import AuthGuard from '@/components/AuthGuard'
+import ModuleGuard from '@/components/ModuleGuard'
 import { useAuth } from '@/context/AuthContext'
 import CreateButton from '@/components/CreateButton'
 import AddProjectForm from '@/components/AddProjectForm'
@@ -136,7 +137,7 @@ const fetchData = useCallback(async () => {
     p_show_archived: showArchived
   });
   const projectsQuery = supabase.rpc('get_projects_with_members');
-    const membersQuery = supabase.rpc('get_team_members');
+    const membersQuery = supabase.rpc('get_all_members');
 
     const [tasksResponse, membersResponse, projectsResponse] = await Promise.all([
       tasksQuery,
@@ -234,22 +235,13 @@ useEffect(() => {
 
   const handleAddTask = async (taskData: { title: string; description: string; projectId: number | null; dueDate: string | null; assigneeId: string | null; }) => {
     if (!user) return;
-  
-    const { data: profileData } = await supabase.from('profiles').select('active_team_id').eq('id', user.id).single();
-    if (!profileData?.active_team_id) { 
-      alert('Error: No tienes un equipo activo seleccionado.');
-      return; 
-    }
 
-    // 1. MANTENEMOS TU LÓGICA ACTUAL (RPC)
-    // No cambiamos nada aquí para no romper reglas de negocio
-    const { error } = await supabase.rpc('create_task_v2', { 
-      p_title: taskData.title, 
-      p_description: taskData.description, 
-      p_project_id: taskData.projectId, 
-      p_due_date: taskData.dueDate, 
-      p_assignee_id: taskData.assigneeId, 
-      p_team_id: profileData.active_team_id
+    const { error } = await supabase.rpc('create_task_v2', {
+      p_title: taskData.title,
+      p_description: taskData.description,
+      p_project_id: taskData.projectId,
+      p_due_date: taskData.dueDate,
+      p_assignee_id: taskData.assigneeId
     });
   
     if (error) { 
@@ -292,19 +284,10 @@ useEffect(() => {
 
   const handleAddProject = async (projectData: { name: string; description: string | null }) => {
     if (!user) return;
-  
-    // Obtenemos el equipo activo desde el perfil
-    const { data: profileData } = await supabase.from('profiles').select('active_team_id').eq('id', user.id).single();
-    if (!profileData || !profileData.active_team_id) { 
-      console.error('No se pudo encontrar el equipo activo para crear el proyecto'); 
-      alert('Error: No tienes un equipo activo seleccionado.');
-      return; 
-    }
-  
-    const { error } = await supabase.rpc('create_project', { 
-      p_name: projectData.name, 
-      p_description: projectData.description, 
-      p_team_id: profileData.active_team_id // Usamos el ID del equipo activo
+
+    const { error } = await supabase.rpc('create_project', {
+      p_name: projectData.name,
+      p_description: projectData.description
     });
   
     if (error) { 
@@ -541,6 +524,7 @@ useEffect(() => {
 
   return (
     <AuthGuard>
+      <ModuleGuard module="mod_tareas">
       <DndContext sensors={sensors} collisionDetection={rectIntersection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
         <main className="max-w-4xl mx-auto p-4 sm:p-6 lg:p-8">
           <h1 
@@ -757,5 +741,6 @@ useEffect(() => {
       />
       
       </DndContext>
+      </ModuleGuard>
     </AuthGuard>
   );}

@@ -20,7 +20,7 @@ export type TeamMember = {
     name: string;
     description: string | null;
     end_date: string | null;
-    team_id: number;
+    team_id?: number | null;
     owner_id: string;
     google_drive_url?: string | null;
     is_favorited: boolean; 
@@ -63,9 +63,10 @@ export type TeamMember = {
     user_id: string;}
 
 
-export type Team = {
-  id: number;
-  created_at: string;
-  name: string;
-  owner_id: string;
+export type UserPermissions = {
+  role: string | null;
+  mod_tareas: boolean;
+  mod_calendario: boolean;
+  mod_revenue: boolean;
+  mod_finanzas: boolean;
 };

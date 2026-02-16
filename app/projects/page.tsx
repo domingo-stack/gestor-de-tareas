@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 
 import { Project } from '@/lib/types'
 import AuthGuard from '@/components/AuthGuard'
+import ModuleGuard from '@/components/ModuleGuard'
 import { useAuth } from '@/context/AuthContext'
 import Modal from '@/components/Modal'
 import AddProjectForm from '@/components/AddProjectForm'
@@ -29,52 +30,24 @@ export default function ProjectsPage() {
 
 const fetchData = useCallback(async () => {
   if (!user || !supabase) {
-    // Si no hay usuario, nos aseguramos de no quedarnos cargando.
     setLoading(false);
     return;
   }
   setLoading(true);
 
   try {
-    // 1. Obtenemos el equipo activo del perfil del usuario.
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select('active_team_id')
-      .eq('id', user.id)
-      .single();
-
-    if (profileError) {
-      // Si hay un error al buscar el perfil, lo registramos.
-      console.error('Error fetching profile:', profileError);
-      setProjects([]);
-      setLoading(false); // <-- Aseguramos que se detenga la carga
-      return;
-    }
-
-    // 2. Si el usuario no tiene un equipo activo, no hay proyectos que mostrar.
-    if (!profileData || !profileData.active_team_id) {
-      console.log('User has no active team set.');
-      setProjects([]);
-      setLoading(false); // <-- Aseguramos que se detenga la carga
-      return;
-    }
-
-    // 3. Pedimos los proyectos SOLAMENTE de ese equipo activo.
     let query = supabase
-    .from('projects')
-    .select('*')
-    .eq('team_id', profileData.active_team_id);
-  
-  // 4. Añadimos el filtro de archivado dinámicamente
-  if (showArchived) {
-    query = query.not('archived_at', 'is', null); // Pedimos los archivados
-  } else {
-    query = query.is('archived_at', null); // Pedimos los activos
-  }
-  
-  
-  const { data: projectsData, error: projectsError } = await query;
-    
+      .from('projects')
+      .select('*');
+
+    if (showArchived) {
+      query = query.not('archived_at', 'is', null);
+    } else {
+      query = query.is('archived_at', null);
+    }
+
+    const { data: projectsData, error: projectsError } = await query;
+
     if (projectsError) {
       console.error('Error fetching projects:', projectsError);
       setProjects([]);
@@ -82,12 +55,9 @@ const fetchData = useCallback(async () => {
       setProjects(projectsData || []);
     }
   } catch (err) {
-    // Un catch general por si algo más falla.
     console.error("An unexpected error occurred in fetchData:", err);
     setProjects([]);
   } finally {
-    // 4. ESTA ES LA CLAVE: El bloque 'finally' se ejecuta SIEMPRE,
-    //    sin importar si hubo éxito o error.
     setLoading(false);
   }
 }, [user, supabase, showArchived]);
@@ -99,29 +69,12 @@ const fetchData = useCallback(async () => {
 // Esta función reemplaza a tu handleAddProject actual en app/projects/page.tsx
 
 const handleAddProject = async (projectData: { name: string; description: string | null; team_name: string }) => {
-  // 1. Validaciones de seguridad
   if (!user || !supabase) return;
 
-  // 2. Obtenemos el equipo activo (Organización) como hacías antes
-  // Esto es necesario porque tu función SQL espera recibir este parámetro aunque luego lo verifique
-  const { data: profileData, error: profileError } = await supabase
-    .from('profiles')
-    .select('active_team_id')
-    .eq('id', user.id)
-    .single();
-
-  if (profileError || !profileData || !profileData.active_team_id) {
-    console.error('Error fetching active team id:', profileError);
-    alert('Error: No se pudo encontrar tu organización activa.');
-    return;
-  }
-
-  // 3. Llamamos a la RPC (Ahora acepta p_team_name)
   const { data: newProjectData, error: rpcError } = await supabase.rpc('create_project', {
     p_name: projectData.name,
     p_description: projectData.description,
-    p_team_id: profileData.active_team_id, // Organización (Seguridad)
-    p_team_name: projectData.team_name     // 👇 Departamento (Marketing, Kali, etc.)
+    p_team_name: projectData.team_name
   });
 
   if (rpcError) {
@@ -158,6 +111,7 @@ const handleUnarchiveProject = async (projectId: number) => {
 
 return (
   <AuthGuard>
+    <ModuleGuard module="mod_tareas">
     <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold" style={{ color: '#383838' }}>
@@ -239,5 +193,6 @@ return (
         onCancel={() => setIsCreateModalOpen(false)}
       />
     </Modal>
+    </ModuleGuard>
   </AuthGuard>
 );}

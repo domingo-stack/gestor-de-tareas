@@ -3,8 +3,9 @@
 import './globals.css'
 import type { Metadata } from 'next'
 import { Nunito } from 'next/font/google'
-import { AuthProvider } from '@/context/AuthContext' // <-- 1. IMPORTA EL PROVIDER
-import Navbar from '@/components/Navbar' // Asumiendo que el Navbar está aquí
+import { AuthProvider } from '@/context/AuthContext'
+import { PermissionsProvider } from '@/context/PermissionsContext'
+import Navbar from '@/components/Navbar'
 
 const nunito = Nunito({
   subsets: ['latin'],
@@ -27,9 +28,11 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body className={nunito.className} suppressHydrationWarning={true}>
-        <AuthProvider> {/* <-- 2. ENVUELVE TODO CON EL PROVIDER */}
-          <Navbar />
-          {children}
+        <AuthProvider>
+          <PermissionsProvider>
+            <Navbar />
+            {children}
+          </PermissionsProvider>
         </AuthProvider>
       </body>
     </html>

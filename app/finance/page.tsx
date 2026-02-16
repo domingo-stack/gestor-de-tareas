@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import AuthGuard from '@/components/AuthGuard'
+import ModuleGuard from '@/components/ModuleGuard'
 import UploadFinanceModal from '@/components/UploadFinanceModal'
 import { useAuth } from '@/context/AuthContext'
 import { Toaster, toast } from 'sonner' 
@@ -621,6 +622,7 @@ if (metricsData) setMonthlyMetrics(metricsData);
 
   return (
     <AuthGuard>
+      <ModuleGuard module="mod_finanzas">
       <main className="max-w-[1600px] mx-auto p-4 sm:p-6 lg:p-8 bg-gray-50 min-h-screen font-sans relative">
         <Toaster position="top-right" richColors />
 
@@ -1191,6 +1193,7 @@ if (metricsData) setMonthlyMetrics(metricsData);
         </div>
       )}
       {/* --- DATALIST PARA SUGERENCIAS (Invisible) --- */}
+      </ModuleGuard>
       </AuthGuard>
  )
 }
