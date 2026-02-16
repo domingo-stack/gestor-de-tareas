@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { usePermissions } from '@/context/PermissionsContext';
 import AuthGuard from '@/components/AuthGuard';
+import { TrashIcon } from '@heroicons/react/24/outline';
 import { Toaster, toast } from 'sonner';
 
 type AdminUser = {
@@ -91,6 +92,21 @@ export default function AdminUsersPage() {
         )
       );
     }
+  };
+
+  const handleDeactivateUser = async (userId: string, email: string) => {
+    if (!window.confirm(`¿Estás seguro de que quieres desactivar a ${email}? El usuario perderá todo acceso.`)) return;
+
+    const { error } = await supabase.rpc('deactivate_user', { target_user_id: userId });
+
+    if (error) {
+      toast.error(`Error al desactivar usuario: ${error.message}`);
+      return;
+    }
+
+    toast.success('Usuario desactivado');
+    const { data } = await supabase.rpc('get_all_users_admin');
+    if (data) setUsers(data);
   };
 
   const handleInviteUser = async (event: React.FormEvent) => {
@@ -188,6 +204,7 @@ export default function AdminUsersPage() {
                     <th className="text-center p-4 font-semibold text-gray-600">Calendario</th>
                     <th className="text-center p-4 font-semibold text-gray-600">Revenue</th>
                     <th className="text-center p-4 font-semibold text-gray-600">Finanzas</th>
+                    <th className="text-center p-4 font-semibold text-gray-600">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -227,14 +244,25 @@ export default function AdminUsersPage() {
                               } ${u.role === 'superadmin' ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                             >
                               <span
-                                className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                                  u[mod] ? 'translate-x-4' : 'translate-x-0.5'
+                                className={`absolute top-0.5 left-0 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                                  u[mod] ? 'translate-x-[18px]' : 'translate-x-[2px]'
                                 }`}
                               />
                             </button>
                           </td>
                         )
                       )}
+                      <td className="p-4 text-center">
+                        {u.role !== 'superadmin' && (
+                          <button
+                            onClick={() => handleDeactivateUser(u.user_id, u.email)}
+                            className="p-1.5 rounded-md text-red-500 hover:bg-red-50 transition-colors"
+                            title="Desactivar usuario"
+                          >
+                            <TrashIcon className="h-5 w-5" />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

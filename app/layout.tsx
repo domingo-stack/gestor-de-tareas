@@ -5,7 +5,8 @@ import type { Metadata } from 'next'
 import { Nunito } from 'next/font/google'
 import { AuthProvider } from '@/context/AuthContext'
 import { PermissionsProvider } from '@/context/PermissionsContext'
-import Navbar from '@/components/Navbar'
+import Sidebar from '@/components/Sidebar'
+import TopBar from '@/components/TopBar'
 
 const nunito = Nunito({
   subsets: ['latin'],
@@ -16,7 +17,7 @@ export const metadata: Metadata = {
   title: 'Gestor de Tareas',
   description: 'Una aplicación para gestionar tus proyectos y tareas.',
   icons: {
-    icon: '/icon.png', // <--- Pon aquí el nombre EXACTO de tu archivo en public
+    icon: '/icon.svg',
   },
 }
 
@@ -30,8 +31,15 @@ export default function RootLayout({
       <body className={nunito.className} suppressHydrationWarning={true}>
         <AuthProvider>
           <PermissionsProvider>
-            <Navbar />
-            {children}
+            <div className="flex h-screen">
+              <Sidebar />
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <TopBar />
+                <main className="flex-1 overflow-y-auto">
+                  {children}
+                </main>
+              </div>
+            </div>
           </PermissionsProvider>
         </AuthProvider>
       </body>
