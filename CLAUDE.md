@@ -54,7 +54,7 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 ### Data Layer
 
 - All Supabase queries happen client-side inside components (no server actions or API routes).
-- **RPC functions**: `get_user_role_and_permissions`, `get_all_members`, `get_all_users_admin`, `update_user_role`, `update_user_module_permission`, `add_member`, `remove_member`, `create_task_v2`, `create_project`, `get_project_members`, `get_projects_with_members`, `get_my_assigned_tasks_with_projects`.
+- **RPC functions**: `get_user_role_and_permissions`, `get_all_members`, `get_all_users_admin`, `update_user_role`, `update_user_module_permission`, `deactivate_user`, `add_member`, `remove_member`, `create_task_v2`, `create_project`, `get_project_members`, `get_projects_with_members`, `get_my_assigned_tasks_with_projects`.
 - **Key tables**: `profiles` (role), `user_permissions` (module booleans), `org_settings` (singleton org config), `invitations` (invite tokens).
 - Types are centralized in `lib/types.ts` — key entities: `Task`, `Project`, `CompanyEvent`, `Transaction`, `Account`, `Category`, `MonthlyMetric`, `UserPermissions`.
 
@@ -66,6 +66,13 @@ Five Deno/TypeScript edge functions handle email notifications via Resend:
 - `notify-mentions` — @mentions in comments
 - `invite-user-to-team` — user invitations (assigns role + permissions based on email domain)
 - `send-custom-invite` — custom invitation emails with registration token
+
+### Layout & Navigation
+
+- **Sidebar** (`components/Sidebar.tsx`): Collapsible left sidebar (240px expanded, 64px collapsed). State persisted in localStorage. Mobile: overlay with backdrop, triggered by hamburger button. Nav items are conditional based on user permissions. Footer has admin link (superadmin only), user email, and logout.
+- **TopBar** (`components/TopBar.tsx`): Fixed top bar on main content area with notification bell and Califica logo (right-aligned). Only renders when user is authenticated.
+- **Layout** (`app/layout.tsx`): Flex horizontal — `Sidebar | (TopBar + main content)`. Login/Register pages don't show sidebar or topbar (components return null when no user).
+- **Favicon**: `app/icon.svg` (monster from Califica logo). Auto-detected by Next.js convention.
 
 ### Component Patterns
 
