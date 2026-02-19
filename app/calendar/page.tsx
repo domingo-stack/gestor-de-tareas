@@ -1,7 +1,8 @@
 // app/calendar/page.tsx
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
@@ -66,15 +67,16 @@ const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
     title: string;
     start: string;
     end: string | undefined;
-    backgroundColor?: string; // <-- AÑADE ESTA LÍNEA
-    textColor?: string;     // <-- Y ESTA LÍNEA
+    backgroundColor?: string;
+    textColor?: string;
     borderColor?: string;
     is_draft?: boolean;
-    task_id?: number | null;   // <-- Y ESTA LÍNEA
+    task_id?: number | null;
     extendedProps: {
       description: string | null;
       video_link: string | null;
       team: string;
+      review_status?: string;
       custom_data?: any;
     }
   };
@@ -89,27 +91,34 @@ const TEAM_COLORS: { [key: string]: { background: string, text: string } } = {
     team: string;
     is_draft: boolean;
     task_id?: number | null;
+    review_status?: string;
     custom_data: any;
-    // 👇 CAMBIO: Aceptamos Objeto O Array para evitar errores
     task_data?: {
       status: string;
       completed: boolean;
     } | {
       status: string;
       completed: boolean;
-    }[] | null; 
+    }[] | null;
 };
 
   // --- PLANTILLA PARA DISEÑAR CADA EVENTO EN EL CALENDARIO ---
   // --- PLANTILLA PARA DISEÑAR CADA EVENTO EN EL CALENDARIO ---
   
   
-  // Justo debajo de esta función debería estar tu línea:
-  // export default function CalendarPage() { ... }
+export default function CalendarPageWrapper() {
+  return (
+    <Suspense fallback={<div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div></div>}>
+      <CalendarPage />
+    </Suspense>
+  );
+}
 
-export default function CalendarPage() {
+function CalendarPage() {
   const { supabase, user } = useAuth();
+  const searchParams = useSearchParams();
   const [events, setEvents] = useState<CompanyEvent[]>([]);
+  const [deepLinkProcessed, setDeepLinkProcessed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<CompanyEvent | null>(null);
@@ -217,6 +226,16 @@ const tableEvents = useMemo(() => {
               });
           }
 
+            // Determinar borde según review_status (overridea color de equipo)
+            const reviewBorderMap: Record<string, string> = {
+                approved: '#16a34a',
+                pending: '#ca8a04',
+                rejected: '#dc2626',
+            };
+            const reviewBorder = event.review_status && event.review_status !== 'none'
+                ? reviewBorderMap[event.review_status]
+                : null;
+
             return {
                 id: String(event.id),
                 title: event.title,
@@ -224,7 +243,7 @@ const tableEvents = useMemo(() => {
                 end: event.end_date || undefined,
                 backgroundColor: teamColor.background,
                 textColor: teamColor.text,
-                borderColor: teamColor.text,
+                borderColor: reviewBorder || teamColor.text,
                 is_draft: event.is_draft,
                 task_id: event.task_id,
                 extendedProps: {
@@ -232,8 +251,8 @@ const tableEvents = useMemo(() => {
                     video_link: event.video_link,
                     team: event.team,
                     custom_data: event.custom_data,
-                    task_data: linkedTask, // <--- Añadimos la tarea procesada
-                    
+                    task_data: linkedTask,
+                    review_status: event.review_status || 'none',
                     has_task: !!event.task_id,
                     is_completed: isCompleted
                 }
@@ -247,7 +266,20 @@ const tableEvents = useMemo(() => {
 
   useEffect(() => {
     fetchEvents();
-  }, [fetchEvents]); 
+  }, [fetchEvents]);
+
+  // Deep link: ?event=123 abre el evento directamente
+  useEffect(() => {
+    if (deepLinkProcessed || events.length === 0) return;
+    const eventParam = searchParams.get('event');
+    if (eventParam) {
+      const target = events.find(e => e.id === eventParam);
+      if (target) {
+        setSelectedEvent(target);
+        setDeepLinkProcessed(true);
+      }
+    }
+  }, [events, searchParams, deepLinkProcessed]);
 
   const handleEventClick = (eventInfo: EventClickArg | CompanyEvent) => {
     // Primero, determinamos si recibimos el objeto del calendario o el de la tabla
@@ -808,8 +840,8 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
   };
 
   // Esta función ahora vive DENTRO de CalendarPage
-  const renderEventContent = (eventInfo: EventContentArg) => { // Cambié 'function' por 'const' para que sea más moderno
-    const { custom_data, has_task, is_completed } = eventInfo.event.extendedProps;
+  const renderEventContent = (eventInfo: EventContentArg) => {
+    const { custom_data, has_task, is_completed, review_status } = eventInfo.event.extendedProps;
     const estado = custom_data?.Estado;
     const formato = custom_data?.Formato;
     const pilar = custom_data?.['Pilar de Contenido'];
@@ -860,7 +892,36 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
             )
         )}
 
-        <b className="truncate block pr-6">{eventInfo.event.title}</b>
+        {/* --- INDICADOR DE REVIEW STATUS --- */}
+        {review_status && review_status !== 'none' && (
+            <div className={`absolute top-0 ${has_task ? 'right-5' : 'right-0'} rounded-full p-0.5 shadow-sm border z-10 ${
+                review_status === 'approved' ? 'bg-green-50 border-green-300' :
+                review_status === 'rejected' ? 'bg-red-50 border-red-300' :
+                'bg-amber-50 border-amber-300'
+            }`} title={
+                review_status === 'approved' ? 'Contenido aprobado' :
+                review_status === 'rejected' ? 'Contenido rechazado' :
+                'Revisión pendiente'
+            }>
+                {review_status === 'approved' && (
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-green-600">
+                        <path fillRule="evenodd" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                    </svg>
+                )}
+                {review_status === 'pending' && (
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-amber-600">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .414.336.75.75.75h4a.75.75 0 000-1.5h-3.25V5z" clipRule="evenodd" />
+                    </svg>
+                )}
+                {review_status === 'rejected' && (
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-red-600">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clipRule="evenodd" />
+                    </svg>
+                )}
+            </div>
+        )}
+
+        <b className="truncate block pr-6" title={eventInfo.event.title}>{eventInfo.event.title}</b>
         
         <div className="flex flex-wrap gap-1 mt-1">
           {estado && <span className="bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded-full font-medium">{estado}</span>}
@@ -1104,6 +1165,7 @@ const marketingColumns: ColumnDef<CompanyEvent>[] = [
         onUpdate={handleUpdateEvent}
         teamMembers={teamMembers}
         onDuplicate={handleDuplicateCompletion}
+        onReviewSubmitted={() => fetchEvents()}
       />
       <Toaster position="bottom-right" richColors />
       </ModuleGuard>

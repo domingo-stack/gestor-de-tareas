@@ -54,18 +54,20 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 ### Data Layer
 
 - All Supabase queries happen client-side inside components (no server actions or API routes).
-- **RPC functions**: `get_user_role_and_permissions`, `get_all_members`, `get_all_users_admin`, `update_user_role`, `update_user_module_permission`, `deactivate_user`, `add_member`, `remove_member`, `create_task_v2`, `create_project`, `get_project_members`, `get_projects_with_members`, `get_my_assigned_tasks_with_projects`.
-- **Key tables**: `profiles` (role), `user_permissions` (module booleans), `org_settings` (singleton org config), `invitations` (invite tokens), `tasks` (uses `assignee_user_id` UUID column, not `assignee_id`).
+- **RPC functions**: `get_user_role_and_permissions`, `get_all_members`, `get_all_users_admin`, `update_user_role`, `update_user_module_permission`, `deactivate_user`, `add_member`, `remove_member`, `create_task_v2`, `create_project`, `get_project_members`, `get_projects_with_members`, `get_my_assigned_tasks_with_projects`, `create_content_review`, `submit_review_response`, `get_review_history`.
+- **Key tables**: `profiles` (role), `user_permissions` (module booleans), `org_settings` (singleton org config), `invitations` (invite tokens), `tasks` (uses `assignee_user_id` UUID column, not `assignee_id`), `content_reviews` (review rounds), `review_responses` (reviewer votes).
 - Types are centralized in `lib/types.ts` — key entities: `Task`, `Project`, `CompanyEvent`, `Transaction`, `Account`, `Category`, `MonthlyMetric`, `UserPermissions`.
 
 ### Supabase Edge Functions (`supabase/functions/`)
 
-Five Deno/TypeScript edge functions handle email notifications via Resend:
+Seven Deno/TypeScript edge functions handle email notifications via Resend:
 - `send-event-notification` — new calendar events
 - `send-assignment-notification` — task assignments
 - `notify-mentions` — @mentions in comments
 - `invite-user-to-team` — user invitations (assigns role + permissions based on email domain)
 - `send-custom-invite` — custom invitation emails with registration token
+- `send-review-notification` — content review requests to reviewers
+- `auto-approve-reviews` — cron-invoked function to auto-approve expired reviews (protected with CRON_SECRET)
 
 ### Layout & Navigation
 
@@ -81,6 +83,16 @@ Five Deno/TypeScript edge functions handle email notifications via Resend:
 - Kanban uses dnd-kit with `PointerSensor` (8px activation distance).
 - Task statuses: `Por Hacer`, `En Progreso`, `Hecho`.
 - Brand colors: primary red `#ff8080`, secondary blue `#3c527a`, background `#F8F8F8`, text `#383838`.
+
+### Content Approval System
+
+Calendar events support a content approval workflow:
+- **Flow**: User requests review → reviewers approve/reject → auto-approve on timer expiry.
+- **Tables**: `content_reviews` (rounds with timer), `review_responses` (per-reviewer votes). `company_events.review_status` tracks current state (`none`, `pending`, `approved`, `rejected`).
+- **Visual**: Review status shown as colored borders on calendar events — green (approved), yellow (pending), red (rejected) with 3px width.
+- **Deep links**: `/calendar?event=123` opens the event modal directly (used in notification emails).
+- **Auto-approve**: `auto-approve-reviews` edge function invoked by external cron every 5 min. Protected with `CRON_SECRET` env var.
+- **Components**: `CountdownTimer` (expiration countdown), review mode in `EventDetailModal` (request form, response panel, history).
 
 ## Language
 

@@ -1,28 +1,53 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Modal from '@/components/Modal';
 import { useAuth } from '@/context/AuthContext';
 import UrlPreview from '@/components/UrlPreview';
+import CountdownTimer from '@/components/CountdownTimer';
+import { toast } from 'sonner';
 
 // --- TIPOS ---
+type ReviewResponse = {
+    reviewer_id: string;
+    reviewer_email: string;
+    decision: string | null;
+    comment: string | null;
+    responded_at: string | null;
+};
+
+type ReviewRound = {
+    review_id: number;
+    round_number: number;
+    status: string;
+    attachment_url: string;
+    attachment_type: string;
+    timer_hours: number;
+    expires_at: string;
+    created_at: string;
+    resolved_at: string | null;
+    requested_by_email: string;
+    responses: ReviewResponse[];
+};
+
 type EventData = {
     id: string;
     title: string;
     start: string;
     end: string | undefined;
     task_id?: number | null;
-    task_data?: any; 
+    task_data?: any;
     extendedProps: {
         description: string | null;
         video_link: string | null;
         team: string;
         task_data?: any;
+        review_status?: string;
         custom_data?: {
             Estado?: string;
             Formato?: string;
             'Pilar de Contenido'?: string;
-            task_data?: any; 
+            task_data?: any;
             Pais?: string;
             CasoUso?: string;
         };
@@ -58,12 +83,12 @@ type ContentProject = {
 
 type EventDetailModalProps = {
     event: EventData | null;
-    teamMembers?: TeamMember[]; 
+    teamMembers?: TeamMember[];
     onClose: () => void;
     onDelete: () => void;
     onUpdate: (eventId: string, data: EventUpdatePayload) => void;
-    // 👇 NUEVO: Callback para avisar al padre que se duplicó algo
     onDuplicate?: (newEvent: any) => void;
+    onReviewSubmitted?: () => void;
 };
 
 // --- CONSTANTES ---
@@ -90,18 +115,19 @@ const DUE_DATE_PRESETS = [
 
 
 // --- COMPONENTE PRINCIPAL ---
-export default function EventDetailModal({ 
-    event, 
-    onClose, 
-    onDelete, 
-    onUpdate, 
-    onDuplicate, // <-- Recibimos la nueva función
-    teamMembers = [] 
+export default function EventDetailModal({
+    event,
+    onClose,
+    onDelete,
+    onUpdate,
+    onDuplicate,
+    onReviewSubmitted,
+    teamMembers = []
 }: EventDetailModalProps) {
     const { supabase, user } = useAuth();
-    
-    // MODO DE VISTA: 'view' | 'edit' | 'duplicate'
-    const [viewMode, setViewMode] = useState<'view' | 'edit' | 'duplicate'>('view');
+
+    // MODO DE VISTA: 'view' | 'edit' | 'duplicate' | 'review'
+    const [viewMode, setViewMode] = useState<'view' | 'edit' | 'duplicate' | 'review'>('view');
 
     // Estados del formulario (Edición)
     const [title, setTitle] = useState('');
@@ -165,7 +191,22 @@ export default function EventDetailModal({
         copyTeam: true,       // Equipo
         createTask: false     // Crear tarea nueva (por defecto false para no ensuciar)
     });
-    const [isDuplicating, setIsDuplicating] = useState(false); // Loading state
+    const [isDuplicating, setIsDuplicating] = useState(false);
+
+    // --- ESTADOS PARA REVISIÓN DE CONTENIDO ---
+    const [reviewAttachmentUrl, setReviewAttachmentUrl] = useState('');
+    const [reviewAttachmentType, setReviewAttachmentType] = useState<'image' | 'video' | 'drive_url'>('drive_url');
+    const [selectedReviewers, setSelectedReviewers] = useState<string[]>([]);
+    const [timerPreset, setTimerPreset] = useState<'1' | '2' | 'custom'>('1');
+    const [customTimerHours, setCustomTimerHours] = useState('');
+    const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+    const [reviewHistory, setReviewHistory] = useState<ReviewRound[]>([]);
+    const [activeReview, setActiveReview] = useState<ReviewRound | null>(null);
+    const [pendingResponse, setPendingResponse] = useState<ReviewResponse | null>(null);
+    const [rejectComment, setRejectComment] = useState('');
+    const [showRejectForm, setShowRejectForm] = useState(false);
+    const [showHistory, setShowHistory] = useState(false);
+    const [reviewAttachmentSource, setReviewAttachmentSource] = useState<'existing' | 'url'>('existing');
 
     // Cargar proyectos al abrir
     useEffect(() => {
@@ -212,10 +253,51 @@ export default function EventDetailModal({
                 copyDetails: true,
                 copyProps: true,
                 copyTeam: true,
-                createTask: false 
+                createTask: false
             });
+
+            // Resetear estados de revisión
+            setReviewAttachmentUrl('');
+            setReviewAttachmentType('drive_url');
+            setSelectedReviewers([]);
+            setTimerPreset('1');
+            setCustomTimerHours('');
+            setRejectComment('');
+            setShowRejectForm(false);
+            setShowHistory(false);
+            setReviewAttachmentSource('existing');
         }
     }, [event]);
+
+    // --- LÓGICA DE REVISIÓN DE CONTENIDO (hooks antes del early return) ---
+    const fetchReviewHistory = useCallback(async () => {
+        if (!supabase || !event) return;
+        const { data, error } = await supabase.rpc('get_review_history', { p_event_id: Number(event.id) });
+        if (error) {
+            console.error('Error fetching review history:', error);
+            return;
+        }
+        const rounds = (data || []) as ReviewRound[];
+        setReviewHistory(rounds);
+
+        const active = rounds.find(r => r.status === 'pending') || null;
+        setActiveReview(active);
+
+        if (active && user) {
+            const myResponse = active.responses.find(
+                r => r.reviewer_id === user.id && r.decision === null
+            );
+            setPendingResponse(myResponse || null);
+        } else {
+            setPendingResponse(null);
+        }
+    }, [supabase, event, user]);
+
+    useEffect(() => {
+        if (event && supabase) {
+            fetchReviewHistory();
+        }
+    }, [event, supabase, fetchReviewHistory]);
 
     if (!event) return null;
 
@@ -292,6 +374,18 @@ export default function EventDetailModal({
     };
 
     const handleSave = () => {
+        // Validar campos obligatorios si quiere crear tarea
+        if (wantTask) {
+            if (!taskAssignee) {
+                alert('Selecciona un responsable para la tarea.');
+                return;
+            }
+            if (!taskProject) {
+                alert('Selecciona un proyecto para la tarea.');
+                return;
+            }
+        }
+
         const updatedData: EventUpdatePayload = {
             title,
             description: description || null,
@@ -395,8 +489,124 @@ export default function EventDetailModal({
         }
     };
 
-    const taskLink = projectId && taskId 
-        ? `/projects/${projectId}?task=${taskId}&returnTo=/calendar` 
+    const getTimerHours = (): number => {
+        if (timerPreset === 'custom') return Number(customTimerHours) || 1;
+        return Number(timerPreset);
+    };
+
+    const handleSubmitReviewRequest = async () => {
+        if (!supabase || !user || !event) return;
+        if (selectedReviewers.length === 0) {
+            toast.error('Selecciona al menos un revisor');
+            return;
+        }
+
+        const attachmentUrl = reviewAttachmentSource === 'existing'
+            ? (event.extendedProps.video_link || '')
+            : reviewAttachmentUrl;
+
+        if (!attachmentUrl) {
+            toast.error('Agrega un contenido para revisión');
+            return;
+        }
+
+        setIsSubmittingReview(true);
+        try {
+            const { data: reviewId, error } = await supabase.rpc('create_content_review', {
+                p_event_id: Number(event.id),
+                p_attachment_url: attachmentUrl,
+                p_attachment_type: reviewAttachmentType,
+                p_timer_hours: getTimerHours(),
+                p_reviewer_ids: selectedReviewers,
+            });
+
+            if (error) throw error;
+
+            // Invocar edge function para notificar
+            await supabase.functions.invoke('send-review-notification', {
+                body: {
+                    review_id: reviewId,
+                    event_title: event.title,
+                    event_id: Number(event.id),
+                    reviewer_ids: selectedReviewers,
+                    requester_email: user.email,
+                    attachment_url: attachmentUrl,
+                },
+            });
+
+            toast.success('Solicitud de aprobación enviada');
+            setViewMode('view');
+            await fetchReviewHistory();
+            onReviewSubmitted?.();
+        } catch (error: any) {
+            toast.error('Error al enviar solicitud: ' + error.message);
+        } finally {
+            setIsSubmittingReview(false);
+        }
+    };
+
+    const handleApprove = async () => {
+        if (!supabase || !activeReview) return;
+        try {
+            const { data: result, error } = await supabase.rpc('submit_review_response', {
+                p_review_id: activeReview.review_id,
+                p_decision: 'approved',
+            });
+            if (error) throw error;
+            toast.success(result === 'all_approved' ? 'Contenido aprobado por todos' : 'Tu aprobación fue registrada');
+            await fetchReviewHistory();
+            onReviewSubmitted?.();
+        } catch (error: any) {
+            toast.error('Error: ' + error.message);
+        }
+    };
+
+    const handleReject = async () => {
+        if (!supabase || !activeReview) return;
+        if (!rejectComment.trim()) {
+            toast.error('Escribe un comentario explicando el rechazo');
+            return;
+        }
+        try {
+            const { error } = await supabase.rpc('submit_review_response', {
+                p_review_id: activeReview.review_id,
+                p_decision: 'rejected',
+                p_comment: rejectComment,
+            });
+            if (error) throw error;
+            toast.success('Contenido rechazado. El solicitante será notificado.');
+            setShowRejectForm(false);
+            setRejectComment('');
+            await fetchReviewHistory();
+            onReviewSubmitted?.();
+        } catch (error: any) {
+            toast.error('Error: ' + error.message);
+        }
+    };
+
+    const toggleReviewer = (userId: string) => {
+        setSelectedReviewers(prev =>
+            prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
+        );
+    };
+
+    const reviewStatusBadge = (status?: string) => {
+        if (!status || status === 'none') return null;
+        const config: Record<string, { bg: string; text: string; label: string }> = {
+            pending: { bg: 'bg-amber-100', text: 'text-amber-800', label: 'Revisión Pendiente' },
+            approved: { bg: 'bg-green-100', text: 'text-green-800', label: 'Aprobado' },
+            rejected: { bg: 'bg-red-100', text: 'text-red-800', label: 'Rechazado' },
+        };
+        const c = config[status] || config.pending;
+        return (
+            <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${c.bg} ${c.text}`}>
+                {c.label}
+            </span>
+        );
+    };
+
+    const taskLink = projectId && taskId
+        ? `/projects/${projectId}?task=${taskId}&returnTo=/calendar`
         : '#';
 
     return (
@@ -732,19 +942,25 @@ export default function EventDetailModal({
                                 <h2 className="text-2xl font-bold text-gray-800 leading-tight">{event.title}</h2>
                             </div>
                             
-                            {/* Botones Editar/Duplicar/Borrar */}
+                            {/* Botones Editar/Duplicar/Revisión/Borrar */}
                             <div className="flex gap-2">
-                                {/* BOTÓN DUPLICAR (NUEVO) */}
+                                {/* BOTÓN SOLICITAR APROBACIÓN */}
+                                <button onClick={() => setViewMode('review')} className="text-gray-400 p-1.5 hover:bg-emerald-50 hover:text-emerald-600 rounded-full" title="Solicitar Aprobación">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                    </svg>
+                                </button>
+
                                 <button onClick={() => setViewMode('duplicate')} className="text-gray-400 p-1.5 hover:bg-indigo-50 hover:text-indigo-600 rounded-full" title="Duplicar Evento">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                                     </svg>
                                 </button>
-                                
+
                                 <button onClick={() => setViewMode('edit')} className="text-gray-400 p-1.5 hover:bg-blue-50 hover:text-blue-600 rounded-full" title="Editar">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L13.196 5.232z" /></svg>
                                 </button>
-                                
+
                                 <button onClick={onDelete} className="text-gray-400 p-1.5 hover:bg-red-50 hover:text-red-600 rounded-full" title="Eliminar">
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                 </button>
@@ -777,8 +993,349 @@ export default function EventDetailModal({
                                 <UrlPreview url={videoLink} />
                             </div>
                         )}
+
+                        {/* === REVIEW STATUS BADGE === */}
+                        {event.extendedProps.review_status && event.extendedProps.review_status !== 'none' && (
+                            <div className="mt-6 pt-4 border-t">
+                                <div className="flex items-center gap-2">
+                                    <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wide">Estado de Aprobación</h4>
+                                    {reviewStatusBadge(event.extendedProps.review_status)}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* === PANEL DE RESPUESTA DEL REVISOR === */}
+                        {pendingResponse && activeReview && (
+                            <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                                <h4 className="text-sm font-bold text-amber-900 mb-3 flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                    </svg>
+                                    Tu aprobación es requerida
+                                </h4>
+                                <div className="mb-3">
+                                    <CountdownTimer expiresAt={activeReview.expires_at} />
+                                </div>
+                                {activeReview.attachment_url && (
+                                    <div className="mb-3">
+                                        <UrlPreview url={activeReview.attachment_url} />
+                                    </div>
+                                )}
+
+                                {!showRejectForm ? (
+                                    <div className="flex gap-3 mt-3">
+                                        <button
+                                            onClick={handleApprove}
+                                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                            </svg>
+                                            Aprobar
+                                        </button>
+                                        <button
+                                            onClick={() => setShowRejectForm(true)}
+                                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors shadow-sm"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                            Rechazar
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="mt-3 space-y-3">
+                                        <textarea
+                                            value={rejectComment}
+                                            onChange={(e) => setRejectComment(e.target.value)}
+                                            placeholder="Explica por qué rechazas el contenido (obligatorio)..."
+                                            rows={3}
+                                            className="block w-full border-red-300 rounded-lg shadow-sm text-sm p-2.5 border resize-none focus:ring-red-500 focus:border-red-500"
+                                        />
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => { setShowRejectForm(false); setRejectComment(''); }}
+                                                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                                            >
+                                                Cancelar
+                                            </button>
+                                            <button
+                                                onClick={handleReject}
+                                                className="px-4 py-2 text-sm font-semibold text-white bg-red-600 rounded-lg hover:bg-red-700"
+                                            >
+                                                Confirmar Rechazo
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* === HISTORIAL DE REVISIONES === */}
+                        {reviewHistory.length > 0 && (
+                            <div className="mt-6 pt-4 border-t">
+                                <button
+                                    onClick={() => setShowHistory(!showHistory)}
+                                    className="flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-gray-900 transition-colors w-full"
+                                >
+                                    <svg
+                                        xmlns="http://www.w3.org/2000/svg"
+                                        className={`h-4 w-4 transition-transform ${showHistory ? 'rotate-90' : ''}`}
+                                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                                    >
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                                    </svg>
+                                    Historial de Revisiones ({reviewHistory.length} ronda{reviewHistory.length !== 1 ? 's' : ''})
+                                </button>
+
+                                {showHistory && (
+                                    <div className="mt-3 space-y-3">
+                                        {reviewHistory.map((round) => (
+                                            <div key={round.review_id} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <span className="text-xs font-bold text-gray-500 uppercase">Ronda {round.round_number}</span>
+                                                    {reviewStatusBadge(round.status)}
+                                                </div>
+                                                <p className="text-xs text-gray-500 mb-2">
+                                                    Solicitado por <span className="font-medium">{round.requested_by_email}</span>
+                                                    {' · '}
+                                                    {new Date(round.created_at).toLocaleDateString('es-CL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                                </p>
+                                                <div className="space-y-1.5">
+                                                    {round.responses.map((resp, i) => (
+                                                        <div key={i} className="flex items-center gap-2 text-xs">
+                                                            <span className={`w-2 h-2 rounded-full ${
+                                                                resp.decision === 'approved' ? 'bg-green-500' :
+                                                                resp.decision === 'rejected' ? 'bg-red-500' :
+                                                                'bg-gray-300'
+                                                            }`} />
+                                                            <span className="text-gray-600">{resp.reviewer_email}</span>
+                                                            <span className="text-gray-400">
+                                                                {resp.decision === 'approved' ? 'Aprobó' :
+                                                                 resp.decision === 'rejected' ? 'Rechazó' :
+                                                                 'Pendiente'}
+                                                            </span>
+                                                            {resp.comment && (
+                                                                <span className="text-gray-500 italic truncate max-w-[200px]" title={resp.comment}>
+                                                                    — "{resp.comment}"
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                     </div>
+                )}
+
+                {/* === MODO REVISIÓN (SOLICITAR APROBACIÓN) === */}
+                {viewMode === 'review' && (
+                    <>
+                        <div className="p-6 border-b flex-none bg-white">
+                            <div className="flex items-center gap-3">
+                                <div className="bg-emerald-100 p-2.5 rounded-lg text-emerald-600">
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-bold text-gray-900">Solicitar Aprobación</h2>
+                                    <p className="text-sm text-gray-500">Envía el contenido para revisión del equipo.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
+                            <div className="space-y-5">
+
+                                {/* Historial de rechazos previos como contexto */}
+                                {reviewHistory.filter(r => r.status === 'rejected').length > 0 && (
+                                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                                        <p className="text-xs font-bold text-red-800 uppercase mb-2">Rechazos previos</p>
+                                        {reviewHistory.filter(r => r.status === 'rejected').map((round) => (
+                                            <div key={round.review_id} className="text-xs text-red-700 mb-1">
+                                                <span className="font-medium">Ronda {round.round_number}:</span>
+                                                {round.responses.filter(r => r.decision === 'rejected').map((r, i) => (
+                                                    <span key={i}> {r.reviewer_email}: "{r.comment}"</span>
+                                                ))}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* Sección: Contenido */}
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Contenido a Revisar</label>
+                                    <div className="flex gap-2 mb-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setReviewAttachmentSource('existing')}
+                                            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                                                reviewAttachmentSource === 'existing'
+                                                    ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                            }`}
+                                        >
+                                            Enlace existente del evento
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setReviewAttachmentSource('url')}
+                                            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                                                reviewAttachmentSource === 'url'
+                                                    ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+                                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                            }`}
+                                        >
+                                            URL diferente
+                                        </button>
+                                    </div>
+
+                                    {reviewAttachmentSource === 'existing' ? (
+                                        event.extendedProps.video_link ? (
+                                            <div className="p-3 bg-gray-50 rounded-lg border">
+                                                <UrlPreview url={event.extendedProps.video_link} />
+                                            </div>
+                                        ) : (
+                                            <p className="text-xs text-gray-400 italic">Este evento no tiene enlace adjunto. Usa "URL diferente" para agregar uno.</p>
+                                        )
+                                    ) : (
+                                        <div className="space-y-2">
+                                            <input
+                                                type="url"
+                                                value={reviewAttachmentUrl}
+                                                onChange={(e) => setReviewAttachmentUrl(e.target.value)}
+                                                placeholder="https://..."
+                                                className="block w-full border-gray-300 rounded-md shadow-sm text-sm p-2 border"
+                                            />
+                                            <select
+                                                value={reviewAttachmentType}
+                                                onChange={(e) => setReviewAttachmentType(e.target.value as any)}
+                                                className="block w-full border-gray-300 rounded-md shadow-sm text-xs p-1.5 border"
+                                            >
+                                                <option value="drive_url">Enlace (Drive, Figma, etc.)</option>
+                                                <option value="image">Imagen</option>
+                                                <option value="video">Video</option>
+                                            </select>
+                                            {reviewAttachmentUrl && <UrlPreview url={reviewAttachmentUrl} />}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Sección: Revisores */}
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
+                                        Revisores ({selectedReviewers.length} seleccionados)
+                                    </label>
+                                    <div className="flex flex-wrap gap-2">
+                                        {teamMembers
+                                            .filter(m => m.user_id !== user?.id)
+                                            .map(m => {
+                                                const isSelected = selectedReviewers.includes(m.user_id);
+                                                return (
+                                                    <button
+                                                        key={m.user_id}
+                                                        type="button"
+                                                        onClick={() => toggleReviewer(m.user_id)}
+                                                        className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-all ${
+                                                            isSelected
+                                                                ? 'bg-emerald-100 border-emerald-400 text-emerald-800 shadow-sm'
+                                                                : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
+                                                        }`}
+                                                    >
+                                                        {isSelected && (
+                                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 inline mr-1" viewBox="0 0 20 20" fill="currentColor">
+                                                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                                                            </svg>
+                                                        )}
+                                                        {m.first_name || m.email}
+                                                    </button>
+                                                );
+                                            })
+                                        }
+                                    </div>
+                                </div>
+
+                                {/* Sección: Timer */}
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Tiempo límite para responder</label>
+                                    <div className="flex gap-2">
+                                        {(['1', '2'] as const).map(h => (
+                                            <button
+                                                key={h}
+                                                type="button"
+                                                onClick={() => setTimerPreset(h)}
+                                                className={`px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                                                    timerPreset === h
+                                                        ? 'bg-amber-50 border-amber-300 text-amber-800'
+                                                        : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                                }`}
+                                            >
+                                                {h}h
+                                            </button>
+                                        ))}
+                                        <button
+                                            type="button"
+                                            onClick={() => setTimerPreset('custom')}
+                                            className={`px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                                                timerPreset === 'custom'
+                                                    ? 'bg-amber-50 border-amber-300 text-amber-800'
+                                                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                                            }`}
+                                        >
+                                            Custom
+                                        </button>
+                                    </div>
+                                    {timerPreset === 'custom' && (
+                                        <div className="mt-2 flex items-center gap-2">
+                                            <input
+                                                type="number"
+                                                min="0.5"
+                                                step="0.5"
+                                                value={customTimerHours}
+                                                onChange={(e) => setCustomTimerHours(e.target.value)}
+                                                placeholder="Ej: 4"
+                                                className="w-24 border-gray-300 rounded-md shadow-sm text-sm p-2 border"
+                                            />
+                                            <span className="text-sm text-gray-500">horas</span>
+                                        </div>
+                                    )}
+                                    <p className="text-xs text-gray-400 mt-1.5">Si nadie responde en este tiempo, el contenido se aprueba automáticamente.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="p-6 pt-4 border-t flex justify-end gap-3 flex-none bg-white">
+                            <button
+                                onClick={() => setViewMode('view')}
+                                className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shadow-sm"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleSubmitReviewRequest}
+                                disabled={isSubmittingReview || selectedReviewers.length === 0}
+                                className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-70 disabled:cursor-not-allowed shadow-md transition-all active:scale-95"
+                            >
+                                {isSubmittingReview ? (
+                                    <>
+                                        <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Enviando...
+                                    </>
+                                ) : (
+                                    'Enviar para Revisión'
+                                )}
+                            </button>
+                        </div>
+                    </>
                 )}
             </div>
         </Modal>
