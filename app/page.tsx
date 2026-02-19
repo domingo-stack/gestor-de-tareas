@@ -363,24 +363,50 @@ useEffect(() => {
 
   const handleUpdateTask = async (updatedData: TaskUpdatePayload) => {
     if (!editingTask) return;
-    setIsSaving(true); 
-  
+    setIsSaving(true);
+
     const { error } = await supabase.rpc('update_task', {
       p_task_id: editingTask.id,
       p_new_title: updatedData.title,
       p_new_description: updatedData.description,
       p_new_due_date: updatedData.due_date,
-      p_new_project_id: updatedData.project_id, // Ahora esto es válido
+      p_new_project_id: updatedData.project_id,
       p_new_assignee_id: updatedData.assignee_user_id
     });
-  
+
     if (error) {
       console.error('Error updating task via RPC:', error);
       alert('Error al guardar los cambios.');
+    } else {
+      // Actualizar optimistamente sin refetch para no resetear campos del form
+      setEditingTask(prev => prev ? {
+        ...prev,
+        title: updatedData.title ?? prev.title,
+        description: updatedData.description ?? prev.description,
+        due_date: updatedData.due_date ?? null,
+        projects: updatedData.project_id
+          ? projects.find(p => p.id === updatedData.project_id)
+            ? { id: updatedData.project_id, name: projects.find(p => p.id === updatedData.project_id)!.name }
+            : prev.projects
+          : null,
+        assignee_user_id: updatedData.assignee_user_id ?? null,
+      } : null);
+      // Actualizar también la lista de tareas del dashboard
+      setTasks(prev => prev.map(t => t.id === editingTask.id ? {
+        ...t,
+        title: updatedData.title ?? t.title,
+        description: updatedData.description ?? t.description,
+        due_date: updatedData.due_date ?? null,
+        projects: updatedData.project_id
+          ? projects.find(p => p.id === updatedData.project_id)
+            ? { id: updatedData.project_id, name: projects.find(p => p.id === updatedData.project_id)!.name }
+            : t.projects
+          : null,
+        assignee_user_id: updatedData.assignee_user_id ?? null,
+      } : t));
     }
-    
-    await fetchData(); 
-    setIsSaving(false); 
+
+    setIsSaving(false);
   };
   
   const handleSelectTask = async (task: Task) => {
