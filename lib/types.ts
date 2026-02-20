@@ -69,4 +69,42 @@ export type UserPermissions = {
   mod_calendario: boolean;
   mod_revenue: boolean;
   mod_finanzas: boolean;
+  mod_producto: boolean;
+};
+
+export type ExperimentData = {
+  hypothesis?: string;
+  funnel_stage?: string;
+  metric_base?: string;
+  metric_target?: string;
+  metric_result?: string;
+  dashboard_link?: string;
+  statistical_significance?: string;
+  result?: 'won' | 'lost' | 'inconclusive';
+  next_steps?: string;
+};
+
+export type ProductInitiative = {
+  id: number;
+  title: string;
+  problem_statement: string | null;
+  item_type: 'experiment' | 'feature' | 'tech_debt' | 'bug';
+  phase: 'backlog' | 'discovery' | 'delivery' | 'finalized';
+  status: 'pending' | 'design' | 'running' | 'analyzing' | 'paused' | 'completed';
+  owner_id: string | null;
+  rice_reach: number;
+  rice_impact: number;
+  rice_confidence: number;
+  rice_effort: number;
+  rice_score: number;
+  experiment_data: ExperimentData;
+  project_id: number | null;
+  parent_id: number | null;
+  period_type: 'week' | 'month' | null;
+  period_value: string | null;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+  owner_email?: string;
+  project_name?: string;
 };

@@ -57,7 +57,8 @@ Deno.serve(async (req) => {
           mod_tareas: true,
           mod_calendario: newRole === 'member',
           mod_revenue: false,
-          mod_finanzas: false
+          mod_finanzas: false,
+          mod_producto: newRole === 'member'
         });
     }
 

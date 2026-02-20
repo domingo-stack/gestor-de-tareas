@@ -9,6 +9,7 @@ type PermissionsContextType = {
   mod_calendario: boolean;
   mod_revenue: boolean;
   mod_finanzas: boolean;
+  mod_producto: boolean;
   isLoading: boolean;
   refetch: () => Promise<void>;
 };
@@ -22,6 +23,7 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
   const [mod_calendario, setModCalendario] = useState(false);
   const [mod_revenue, setModRevenue] = useState(false);
   const [mod_finanzas, setModFinanzas] = useState(false);
+  const [mod_producto, setModProducto] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchPermissions = useCallback(async () => {
@@ -31,6 +33,7 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
       setModCalendario(false);
       setModRevenue(false);
       setModFinanzas(false);
+      setModProducto(false);
       setIsLoading(false);
       return;
     }
@@ -50,6 +53,7 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
       setModCalendario(p.mod_calendario);
       setModRevenue(p.mod_revenue);
       setModFinanzas(p.mod_finanzas);
+      setModProducto(p.mod_producto);
     }
 
     setIsLoading(false);
@@ -67,9 +71,10 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
     mod_calendario,
     mod_revenue,
     mod_finanzas,
+    mod_producto,
     isLoading: isLoading || authLoading,
     refetch: fetchPermissions,
-  }), [role, mod_tareas, mod_calendario, mod_revenue, mod_finanzas, isLoading, authLoading, fetchPermissions]);
+  }), [role, mod_tareas, mod_calendario, mod_revenue, mod_finanzas, mod_producto, isLoading, authLoading, fetchPermissions]);
 
   return (
     <PermissionsContext.Provider value={value}>

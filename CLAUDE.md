@@ -35,7 +35,7 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 - `components/AuthGuard.tsx` wraps protected pages; redirects to `/login` if unauthenticated.
 - `components/ModuleGuard.tsx` wraps page content; checks module-level permissions. Shows "Acceso Denegado" if user lacks permission, or "Cuenta Pendiente" if user has no role (registered without invitation).
 - **Roles**: `superadmin` (full access), `member` (org employee), `invitado` (external collaborator).
-- **Permissions**: Per-module booleans in `user_permissions` table: `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`. Superadmin always has all permissions.
+- **Permissions**: Per-module booleans in `user_permissions` table: `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `mod_producto`. Superadmin always has all permissions.
 - **Registration**: Invitation-only via `/register?invite_token=TOKEN`. Without token, registration is blocked.
 - Role info + permissions fetched via `get_user_role_and_permissions` RPC.
 
@@ -48,6 +48,7 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 | `/calendar` | FullCalendar event management with team-colored events |
 | `/finance` | Transaction management, multi-currency, CAC tracking |
 | `/revenue` | Revenue dashboard with country/provider/plan filters |
+| `/producto` | Dual-Track Agile product module (Backlog, Discovery, Delivery) |
 | `/admin/users` | Superadmin user & permissions administration |
 | `/settings/team` | Organization member management |
 
@@ -55,8 +56,8 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 
 - All Supabase queries happen client-side inside components (no server actions or API routes).
 - **RPC functions**: `get_user_role_and_permissions`, `get_all_members`, `get_all_users_admin`, `update_user_role`, `update_user_module_permission`, `deactivate_user`, `add_member`, `remove_member`, `create_task_v2`, `create_project`, `get_project_members`, `get_projects_with_members`, `get_my_assigned_tasks_with_projects`, `create_content_review`, `submit_review_response`, `get_review_history`.
-- **Key tables**: `profiles` (role), `user_permissions` (module booleans), `org_settings` (singleton org config), `invitations` (invite tokens), `tasks` (uses `assignee_user_id` UUID column, not `assignee_id`), `content_reviews` (review rounds), `review_responses` (reviewer votes).
-- Types are centralized in `lib/types.ts` — key entities: `Task`, `Project`, `CompanyEvent`, `Transaction`, `Account`, `Category`, `MonthlyMetric`, `UserPermissions`.
+- **Key tables**: `profiles` (role), `user_permissions` (module booleans), `org_settings` (singleton org config), `invitations` (invite tokens), `tasks` (uses `assignee_user_id` UUID column, not `assignee_id`), `content_reviews` (review rounds), `review_responses` (reviewer votes), `product_initiatives` (Dual-Track product items with RICE scoring).
+- Types are centralized in `lib/types.ts` — key entities: `Task`, `Project`, `CompanyEvent`, `Transaction`, `Account`, `Category`, `MonthlyMetric`, `UserPermissions`, `ProductInitiative`, `ExperimentData`.
 
 ### Supabase Edge Functions (`supabase/functions/`)
 
@@ -93,6 +94,18 @@ Calendar events support a content approval workflow:
 - **Deep links**: `/calendar?event=123` opens the event modal directly (used in notification emails).
 - **Auto-approve**: `auto-approve-reviews` edge function invoked by external cron every 5 min. Protected with `CRON_SECRET` env var.
 - **Components**: `CountdownTimer` (expiration countdown), review mode in `EventDetailModal` (request form, response panel, history).
+
+### Product Module (Dual-Track Agile)
+
+The `/producto` route implements a Dual-Track Agile product management system:
+- **Backlog tab**: TanStack-style table with RICE scoring (Reach×Impact×Confidence/Effort), inline-editable cells, sorted by score. Quick-create row at bottom.
+- **Discovery tab**: Kanban board (dnd-kit) with columns: En diseño, Ejecutándose, Terminado, En pausa. Cards show experiment hypothesis, funnel stage, metrics, and result badges. Won experiments can be escalated to Delivery as features.
+- **Delivery tab**: Same Kanban layout. Cards show linked project name and task progress bar (fetched in batch).
+- **SidePeek**: Right-side drawer (480px) for initiative detail editing. Auto-save with 1500ms debounce. Contains PromoteForm (backlog→roadmap), experiment data fields (discovery), project linking (delivery), and finalize button.
+- **FinalizeModal**: Marks initiative as finalized and creates a `company_events` calendar entry.
+- **BulkCreateProjectModal**: Creates a new project with tasks (one per line) or links an existing project to a delivery initiative.
+- **Table**: `product_initiatives` with RICE columns, `experiment_data` JSONB, self-referencing `parent_id`, and `phase`/`status` workflow.
+- **Components**: `components/producto/` — BacklogTable, QuickCreateRow, SidePeek, PromoteForm, DiscoveryKanban, DeliveryKanban, InitiativeCard, BulkCreateProjectModal, FinalizeModal.
 
 ## Language
 

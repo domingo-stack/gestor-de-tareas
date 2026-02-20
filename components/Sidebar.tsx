@@ -11,6 +11,7 @@ import {
   CalendarDaysIcon,
   BanknotesIcon,
   ChartBarIcon,
+  RocketLaunchIcon,
   Cog6ToothIcon,
   ArrowRightStartOnRectangleIcon,
   Bars3Icon,
@@ -21,7 +22,7 @@ const STORAGE_KEY = 'sidebar-expanded'
 
 export default function Sidebar() {
   const { user, supabase } = useAuth()
-  const { role, mod_calendario, mod_finanzas, mod_revenue } = usePermissions()
+  const { role, mod_calendario, mod_finanzas, mod_revenue, mod_producto } = usePermissions()
   const router = useRouter()
   const pathname = usePathname()
 
@@ -56,9 +57,10 @@ export default function Sidebar() {
   const navItems = [
     { href: '/', label: 'Dashboard', icon: HomeIcon, visible: true },
     { href: '/projects', label: 'Proyectos', icon: FolderIcon, visible: true },
-    { href: '/calendar', label: 'Calendario', icon: CalendarDaysIcon, visible: !!mod_calendario },
-    { href: '/finance', label: 'Finanzas', icon: BanknotesIcon, visible: !!mod_finanzas },
-    { href: '/revenue', label: 'Revenue', icon: ChartBarIcon, visible: !!mod_revenue },
+    { href: '/calendar', label: 'Calendario', icon: CalendarDaysIcon, visible: role === 'superadmin' || !!mod_calendario },
+    { href: '/finance', label: 'Finanzas', icon: BanknotesIcon, visible: role === 'superadmin' || !!mod_finanzas },
+    { href: '/revenue', label: 'Revenue', icon: ChartBarIcon, visible: role === 'superadmin' || !!mod_revenue },
+    { href: '/producto', label: 'Producto', icon: RocketLaunchIcon, visible: role === 'superadmin' || !!mod_producto },
   ]
 
   const isActive = (href: string) => {
