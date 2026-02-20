@@ -2,12 +2,24 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 
 serve(async (req: Request) => {
-  try {
-    // Protección: solo ejecutable con el CRON_SECRET correcto
-    const authHeader = req.headers.get('Authorization');
-    const cronSecret = Deno.env.get('CRON_SECRET');
+  // CORS preflight
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { status: 200, headers: { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' } });
+  }
 
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  try {
+    // Protección: verificar CRON_SECRET via header o query param
+    const cronSecret = Deno.env.get('CRON_SECRET');
+    if (!cronSecret) {
+      return new Response(JSON.stringify({ error: 'CRON_SECRET not configured' }), { status: 500 });
+    }
+
+    // Aceptar secret en Authorization header o query param ?secret=
+    const authHeader = req.headers.get('x-cron-secret') || '';
+    const url = new URL(req.url);
+    const querySecret = url.searchParams.get('secret') || '';
+
+    if (authHeader !== cronSecret && querySecret !== cronSecret) {
       return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
     }
 

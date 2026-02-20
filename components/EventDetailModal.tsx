@@ -522,17 +522,26 @@ export default function EventDetailModal({
 
             if (error) throw error;
 
-            // Invocar edge function para notificar
-            await supabase.functions.invoke('send-review-notification', {
-                body: {
+            // Invocar edge function para notificar revisores
+            fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-review-notification`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+                },
+                body: JSON.stringify({
                     review_id: reviewId,
                     event_title: event.title,
                     event_id: Number(event.id),
+                    event_description: event.extendedProps.description || '',
+                    event_date: event.start,
+                    event_team: event.extendedProps.team || '',
                     reviewer_ids: selectedReviewers,
                     requester_email: user.email,
                     attachment_url: attachmentUrl,
-                },
-            });
+                    media_url: event.extendedProps.video_link || '',
+                }),
+            }).catch(err => console.error('Error notificando revisores:', err));
 
             toast.success('Solicitud de aprobación enviada');
             setViewMode('view');
@@ -546,13 +555,34 @@ export default function EventDetailModal({
     };
 
     const handleApprove = async () => {
-        if (!supabase || !activeReview) return;
+        if (!supabase || !activeReview || !user) return;
         try {
             const { data: result, error } = await supabase.rpc('submit_review_response', {
                 p_review_id: activeReview.review_id,
                 p_decision: 'approved',
             });
             if (error) throw error;
+
+            // Notificar al solicitante de la aprobación
+            fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-approval-notification`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+                },
+                body: JSON.stringify({
+                    event_title: event.title,
+                    event_id: Number(event.id),
+                    event_description: event.extendedProps.description || '',
+                    event_date: event.start,
+                    event_team: event.extendedProps.team || '',
+                    requester_email: activeReview.requested_by_email,
+                    reviewer_email: user.email,
+                    all_approved: result === 'all_approved',
+                    media_url: activeReview.attachment_url || event.extendedProps.video_link || '',
+                }),
+            }).catch(err => console.error('Error notificando aprobación:', err));
+
             toast.success(result === 'all_approved' ? 'Contenido aprobado por todos' : 'Tu aprobación fue registrada');
             await fetchReviewHistory();
             onReviewSubmitted?.();
@@ -562,7 +592,7 @@ export default function EventDetailModal({
     };
 
     const handleReject = async () => {
-        if (!supabase || !activeReview) return;
+        if (!supabase || !activeReview || !user) return;
         if (!rejectComment.trim()) {
             toast.error('Escribe un comentario explicando el rechazo');
             return;
@@ -574,6 +604,27 @@ export default function EventDetailModal({
                 p_comment: rejectComment,
             });
             if (error) throw error;
+
+            // Notificar al solicitante del rechazo (correo + in-app)
+            fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/send-rejection-notification`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY}`,
+                },
+                body: JSON.stringify({
+                    event_title: event.title,
+                    event_id: Number(event.id),
+                    event_description: event.extendedProps.description || '',
+                    event_date: event.start,
+                    event_team: event.extendedProps.team || '',
+                    requester_email: activeReview.requested_by_email,
+                    reviewer_email: user.email,
+                    comment: rejectComment,
+                    media_url: activeReview.attachment_url || event.extendedProps.video_link || '',
+                }),
+            }).catch(err => console.error('Error notificando rechazo:', err));
+
             toast.success('Contenido rechazado. El solicitante será notificado.');
             setShowRejectForm(false);
             setRejectComment('');
@@ -913,7 +964,7 @@ export default function EventDetailModal({
 
                 {/* === MODO VISTA (LECTURA) === */}
                 {viewMode === 'view' && (
-                    <div>
+                    <div className="flex flex-col flex-1 min-h-0">
                         <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
                         <div className="flex justify-between items-start mb-4">
                             <div>
