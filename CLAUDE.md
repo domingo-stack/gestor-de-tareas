@@ -44,6 +44,7 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 | Route | Purpose |
 |---|---|
 | `/` | Main dashboard — tasks, projects, activity feed |
+| `/projects` | Project listing with favorites, delete, invite members (uses `ProjectCard`) |
 | `/projects/[id]` | Project detail with Kanban board (drag-and-drop) |
 | `/calendar` | FullCalendar event management with team-colored events |
 | `/finance` | Transaction management, multi-currency, CAC tracking |
@@ -56,8 +57,8 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 ### Data Layer
 
 - All Supabase queries happen client-side inside components (no server actions or API routes).
-- **RPC functions**: `get_user_role_and_permissions`, `get_all_members`, `get_all_users_admin`, `update_user_role`, `update_user_module_permission`, `deactivate_user`, `add_member`, `remove_member`, `create_task_v2`, `create_project`, `get_project_members`, `get_projects_with_members`, `get_my_assigned_tasks_with_projects`, `create_content_review`, `submit_review_response`, `get_review_history`, `get_notification_preferences`, `upsert_notification_preferences`, `get_all_notification_preferences`, `get_notification_recipients`.
-- **Key tables**: `profiles` (role), `user_permissions` (module booleans), `org_settings` (singleton org config), `invitations` (invite tokens), `tasks` (uses `assignee_user_id` UUID column, not `assignee_id`), `content_reviews` (review rounds), `review_responses` (reviewer votes), `product_initiatives` (Dual-Track product items with RICE scoring), `notification_preferences` (per-user notification channel preferences).
+- **RPC functions**: `get_user_role_and_permissions`, `get_all_members`, `get_all_users_admin`, `update_user_role`, `update_user_module_permission`, `deactivate_user`, `add_member`, `remove_member`, `create_task_v2`, `create_project`, `get_project_members`, `get_projects_with_members`, `get_my_assigned_tasks_with_projects`, `toggle_project_favorite`, `delete_project_and_tasks`, `migrate_tasks_and_delete_project`, `create_content_review`, `submit_review_response`, `get_review_history`, `get_notification_preferences`, `upsert_notification_preferences`, `get_all_notification_preferences`, `get_notification_recipients`.
+- **Key tables**: `profiles` (role), `user_permissions` (module booleans), `org_settings` (singleton org config), `invitations` (invite tokens), `tasks` (uses `assignee_user_id` UUID column, not `assignee_id`), `content_reviews` (review rounds), `review_responses` (reviewer votes), `product_initiatives` (Dual-Track product items with RICE scoring), `notification_preferences` (per-user notification channel preferences), `project_favorites` (user-project favorite relation, managed via `toggle_project_favorite` RPC).
 - Types are centralized in `lib/types.ts` — key entities: `Task`, `Project`, `CompanyEvent`, `Transaction`, `Account`, `Category`, `MonthlyMetric`, `UserPermissions`, `ProductInitiative`, `ExperimentData`.
 
 ### Supabase Edge Functions (`supabase/functions/`)
@@ -119,11 +120,11 @@ Calendar events support a content approval workflow:
 
 The `/producto` route implements a Dual-Track Agile product management system:
 - **Backlog tab**: TanStack-style table with RICE scoring (Reach×Impact×Confidence/Effort), inline-editable cells, sorted by score. Quick-create row at bottom.
-- **Discovery tab**: Kanban board (dnd-kit) with columns: En diseño, Ejecutándose, Terminado, En pausa. Cards show experiment hypothesis, funnel stage, metrics, and result badges. Won experiments can be escalated to Delivery as features.
-- **Delivery tab**: Same Kanban layout. Cards show linked project name and task progress bar (fetched in batch).
-- **SidePeek**: Right-side drawer (480px) for initiative detail editing. Auto-save with 1500ms debounce. Contains PromoteForm (backlog→roadmap), experiment data fields (discovery), project linking (delivery), and finalize button.
+- **Discovery tab**: Kanban board (dnd-kit) with columns: En diseño, Ejecutándose, Terminado, En pausa. Cards show experiment hypothesis, funnel stage, metrics, result badges, and linked project with progress bar. Won experiments can be escalated to Delivery as features (preserving `project_id`). Quick-create button ("+ Nuevo experimento") creates directly in discovery phase.
+- **Delivery tab**: Same Kanban layout. Cards show linked project name and task progress bar (fetched in batch). Quick-create button ("+ Nueva funcionalidad") creates directly in delivery phase.
+- **SidePeek**: Right-side drawer (480px) for initiative detail editing. Auto-save with 1500ms debounce. Contains PromoteForm (backlog→roadmap), experiment data fields (discovery), project linking (both discovery and delivery phases), and finalize button.
 - **FinalizeModal**: Marks initiative as finalized and creates a `company_events` calendar entry.
-- **BulkCreateProjectModal**: Creates a new project with tasks (one per line) or links an existing project to a delivery initiative.
+- **BulkCreateProjectModal**: Creates a new project with tasks (one per line) or links an existing project to a discovery/delivery initiative. After creation, queries the project by name to reliably obtain the ID.
 - **Table**: `product_initiatives` with RICE columns, `experiment_data` JSONB, self-referencing `parent_id`, and `phase`/`status` workflow.
 - **Components**: `components/producto/` — BacklogTable, QuickCreateRow, SidePeek, PromoteForm, DiscoveryKanban, DeliveryKanban, InitiativeCard, BulkCreateProjectModal, FinalizeModal.
 
