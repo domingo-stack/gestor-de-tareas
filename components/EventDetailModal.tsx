@@ -27,6 +27,7 @@ type ReviewRound = {
     created_at: string;
     resolved_at: string | null;
     requested_by_email: string;
+    requester_comment: string | null;
     responses: ReviewResponse[];
 };
 
@@ -207,6 +208,7 @@ export default function EventDetailModal({
     const [showRejectForm, setShowRejectForm] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
     const [reviewAttachmentSource, setReviewAttachmentSource] = useState<'existing' | 'url'>('existing');
+    const [reviewComment, setReviewComment] = useState('');
 
     // Cargar proyectos al abrir
     useEffect(() => {
@@ -266,6 +268,7 @@ export default function EventDetailModal({
             setShowRejectForm(false);
             setShowHistory(false);
             setReviewAttachmentSource('existing');
+            setReviewComment('');
         }
     }, [event]);
 
@@ -518,6 +521,7 @@ export default function EventDetailModal({
                 p_attachment_type: reviewAttachmentType,
                 p_timer_hours: getTimerHours(),
                 p_reviewer_ids: selectedReviewers,
+                p_requester_comment: reviewComment.trim() || null,
             });
 
             if (error) throw error;
@@ -540,6 +544,7 @@ export default function EventDetailModal({
                     requester_email: user.email,
                     attachment_url: attachmentUrl,
                     media_url: event.extendedProps.video_link || '',
+                    requester_comment: reviewComment.trim() || null,
                 }),
             }).catch(err => console.error('Error notificando revisores:', err));
 
@@ -1067,6 +1072,12 @@ export default function EventDetailModal({
                                 <div className="mb-3">
                                     <CountdownTimer expiresAt={activeReview.expires_at} />
                                 </div>
+                                {activeReview.requester_comment && (
+                                    <div className="mb-3 p-3 bg-white border border-amber-200 rounded-lg">
+                                        <p className="text-xs font-semibold text-amber-700 uppercase mb-1">Comentario del solicitante</p>
+                                        <p className="text-sm text-gray-700 whitespace-pre-wrap">{activeReview.requester_comment}</p>
+                                    </div>
+                                )}
                                 {activeReview.attachment_url && (
                                     <div className="mb-3">
                                         <UrlPreview url={activeReview.attachment_url} />
@@ -1152,6 +1163,11 @@ export default function EventDetailModal({
                                                     {' · '}
                                                     {new Date(round.created_at).toLocaleDateString('es-CL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                                                 </p>
+                                                {round.requester_comment && (
+                                                    <p className="text-xs text-gray-600 mb-2 pl-2 border-l-2 border-gray-300 italic">
+                                                        "{round.requester_comment}"
+                                                    </p>
+                                                )}
                                                 <div className="space-y-1.5">
                                                     {round.responses.map((resp, i) => (
                                                         <div key={i} className="flex items-center gap-2 text-xs">
@@ -1276,6 +1292,18 @@ export default function EventDetailModal({
                                             {reviewAttachmentUrl && <UrlPreview url={reviewAttachmentUrl} />}
                                         </div>
                                     )}
+                                </div>
+
+                                {/* Sección: Comentario para revisores */}
+                                <div>
+                                    <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Comentario para revisores <span className="text-gray-400 font-normal normal-case">(opcional)</span></label>
+                                    <textarea
+                                        value={reviewComment}
+                                        onChange={(e) => setReviewComment(e.target.value)}
+                                        placeholder="Ej: Revisar que el copy esté alineado con la campaña de verano..."
+                                        rows={3}
+                                        className="block w-full border-gray-300 rounded-md shadow-sm text-sm p-2.5 border resize-none focus:ring-emerald-500 focus:border-emerald-500"
+                                    />
                                 </div>
 
                                 {/* Sección: Revisores */}

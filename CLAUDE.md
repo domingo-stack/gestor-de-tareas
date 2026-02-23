@@ -110,7 +110,7 @@ Nine Deno/TypeScript edge functions handle email + in-app notifications via Rese
 
 Calendar events support a content approval workflow:
 - **Flow**: User requests review → reviewers approve/reject → auto-approve on timer expiry.
-- **Tables**: `content_reviews` (rounds with timer), `review_responses` (per-reviewer votes). `company_events.review_status` tracks current state (`none`, `pending`, `approved`, `rejected`).
+- **Tables**: `content_reviews` (rounds with timer, optional `requester_comment` TEXT), `review_responses` (per-reviewer votes). `company_events.review_status` tracks current state (`none`, `pending`, `approved`, `rejected`).
 - **Visual**: Review status shown as colored borders on calendar events — green (approved), yellow (pending), red (rejected) with 3px width.
 - **Deep links**: `/calendar?event=123` opens the event modal directly (used in notification emails).
 - **Auto-approve**: `auto-approve-reviews` edge function invoked by external cron every 5 min. Protected with `CRON_SECRET` env var.

@@ -268,6 +268,35 @@ const tableEvents = useMemo(() => {
     fetchEvents();
   }, [fetchEvents]);
 
+  // Real-time: suscripción a cambios en company_events (review_status, etc.)
+  useEffect(() => {
+    if (!supabase) return;
+    const channel = supabase
+      .channel('calendar-events-realtime')
+      .on(
+        'postgres_changes' as any,
+        { event: 'UPDATE', schema: 'public', table: 'company_events' },
+        (payload: any) => {
+          fetchEvents();
+          // Si el evento abierto fue el que cambió, actualizar su review_status
+          if (selectedEvent && payload.new && String(payload.new.id) === selectedEvent.id) {
+            setSelectedEvent(prev => prev ? {
+              ...prev,
+              extendedProps: {
+                ...prev.extendedProps,
+                review_status: payload.new.review_status || 'none',
+              }
+            } : null);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, fetchEvents]);
+
   // Deep link: ?event=123 abre el evento directamente
   useEffect(() => {
     if (deepLinkProcessed || events.length === 0) return;

@@ -15,6 +15,7 @@ interface ReviewNotificationPayload {
   requester_email: string;
   attachment_url: string;
   media_url: string;
+  requester_comment?: string;
 }
 
 function formatDate(dateStr: string): string {
@@ -43,7 +44,7 @@ serve(async (req: Request) => {
     const resend = new Resend(resendApiKey);
 
     const payload: ReviewNotificationPayload = await req.json();
-    const { event_title, event_id, event_description, event_date, event_team, reviewer_ids, requester_email, attachment_url, media_url } = payload;
+    const { event_title, event_id, event_description, event_date, event_team, reviewer_ids, requester_email, attachment_url, media_url, requester_comment } = payload;
 
     const previewUrl = attachment_url || media_url;
 
@@ -77,6 +78,11 @@ serve(async (req: Request) => {
               </div>
               <div style="padding: 28px 30px; background: #ffffff; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
                 <p style="margin: 0 0 20px; font-size: 14px;"><strong>${escapeHtml(requester_email)}</strong> necesita tu aprobación para publicar el siguiente contenido:</p>
+
+                ${requester_comment ? `<div style="background: #fef9c3; border-left: 4px solid #f59e0b; padding: 12px 16px; border-radius: 0 6px 6px 0; margin: 0 0 20px;">
+                  <p style="margin: 0 0 4px; font-size: 11px; font-weight: 600; color: #92400e; text-transform: uppercase;">Comentario del solicitante</p>
+                  <p style="margin: 0; font-size: 13px; color: #451a03; line-height: 1.5;">${escapeHtml(requester_comment)}</p>
+                </div>` : ''}
 
                 <div style="background: #fafafa; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin: 0 0 20px;">
                   ${previewUrl && isImageUrl(previewUrl) ? `<img src="${escapeHtml(previewUrl)}" alt="Preview" style="width: 100%; max-height: 280px; object-fit: cover; display: block;" />` : ''}
