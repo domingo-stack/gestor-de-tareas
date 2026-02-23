@@ -4,8 +4,9 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { usePermissions } from '@/context/PermissionsContext';
 import AuthGuard from '@/components/AuthGuard';
-import { TrashIcon } from '@heroicons/react/24/outline';
+import { TrashIcon, BellIcon } from '@heroicons/react/24/outline';
 import { Toaster, toast } from 'sonner';
+import NotificationPrefsModal from '@/components/admin/NotificationPrefsModal';
 
 type AdminUser = {
   user_id: string;
@@ -36,6 +37,7 @@ export default function AdminUsersPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [emailToInvite, setEmailToInvite] = useState('');
   const [isInviting, setIsInviting] = useState(false);
+  const [notifModalUser, setNotifModalUser] = useState<AdminUser | null>(null);
 
   useEffect(() => {
     if (!supabase || currentUserRole !== 'superadmin') return;
@@ -256,15 +258,24 @@ export default function AdminUsersPage() {
                         )
                       )}
                       <td className="p-4 text-center">
-                        {u.role !== 'superadmin' && (
+                        <div className="flex items-center justify-center gap-1">
                           <button
-                            onClick={() => handleDeactivateUser(u.user_id, u.email)}
-                            className="p-1.5 rounded-md text-red-500 hover:bg-red-50 transition-colors"
-                            title="Desactivar usuario"
+                            onClick={() => setNotifModalUser(u)}
+                            className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 transition-colors"
+                            title="Preferencias de notificaciones"
                           >
-                            <TrashIcon className="h-5 w-5" />
+                            <BellIcon className="h-5 w-5" />
                           </button>
-                        )}
+                          {u.role !== 'superadmin' && (
+                            <button
+                              onClick={() => handleDeactivateUser(u.user_id, u.email)}
+                              className="p-1.5 rounded-md text-red-500 hover:bg-red-50 transition-colors"
+                              title="Desactivar usuario"
+                            >
+                              <TrashIcon className="h-5 w-5" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -274,6 +285,17 @@ export default function AdminUsersPage() {
           )}
         </div>
       </div>
+
+      {notifModalUser && (
+        <NotificationPrefsModal
+          isOpen={!!notifModalUser}
+          onClose={() => setNotifModalUser(null)}
+          userId={notifModalUser.user_id}
+          userEmail={notifModalUser.email}
+          userRole={notifModalUser.role}
+          supabase={supabase}
+        />
+      )}
     </AuthGuard>
   );
 }

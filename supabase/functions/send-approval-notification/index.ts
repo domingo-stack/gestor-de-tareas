@@ -44,57 +44,83 @@ serve(async (req: Request) => {
     const payload: ApprovalPayload = await req.json();
     const { event_title, event_id, event_description, event_date, event_team, requester_email, reviewer_email, all_approved, media_url } = payload;
 
+    // Buscar al requester para obtener su user_id y consultar preferencias
+    const { data: users } = await supabaseAdmin.auth.admin.listUsers();
+    const requester = users?.users?.find(u => u.email === requester_email);
+
+    if (!requester) {
+      return new Response(JSON.stringify({ message: "Requester no encontrado" }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
+    // Consultar preferencias del solicitante para review_result
+    const { data: prefs } = await supabaseAdmin.rpc('get_notification_preferences', {
+      p_user_id: requester.id
+    });
+
+    const userPref = prefs?.review_result || 'default';
+    // Default para review_result es 'all' para todos los roles
+    const resolved = userPref === 'default' ? 'all' : userPref;
+    const sendEmail = resolved === 'all' || resolved === 'email';
+    const sendInapp = resolved === 'all' || resolved === 'inapp';
+
+    if (resolved === 'off') {
+      return new Response(JSON.stringify({ message: "Requester tiene notificaciones desactivadas" }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     const headerBg = all_approved ? '#16a34a' : '#3c527a';
     const headerTitle = all_approved ? 'Contenido Aprobado' : 'Aprobación Registrada';
     const headerSub = all_approved
       ? 'Todos los revisores han dado su visto bueno'
       : `${reviewer_email} aprobó tu contenido`;
 
-    const { data: users } = await supabaseAdmin.auth.admin.listUsers();
-    const requester = users?.users?.find(u => u.email === requester_email);
+    if (sendEmail) {
+      await resend.emails.send({
+        from: 'Califica - Contenido <tareas@califica.ai>',
+        to: [requester_email],
+        subject: all_approved ? `Contenido aprobado: ${event_title}` : `${reviewer_email} aprobó tu contenido`,
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #333; max-width: 600px; margin: 0 auto;">
+            <div style="background: ${headerBg}; padding: 24px 30px; border-radius: 8px 8px 0 0;">
+              <h2 style="color: white; margin: 0; font-size: 20px;">${headerTitle}</h2>
+              <p style="color: rgba(255,255,255,0.8); margin: 6px 0 0; font-size: 13px;">${escapeHtml(headerSub)}</p>
+            </div>
+            <div style="padding: 28px 30px; background: #ffffff; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+              ${all_approved ? '<div style="text-align: center; margin: 0 0 20px;"><span style="font-size: 48px;">✅</span></div>' : ''}
 
-    await resend.emails.send({
-      from: 'Califica - Contenido <tareas@califica.ai>',
-      to: [requester_email],
-      subject: all_approved ? `✅ Contenido aprobado: ${event_title}` : `👍 ${reviewer_email} aprobó tu contenido`,
-      html: `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #333; max-width: 600px; margin: 0 auto;">
-          <div style="background: ${headerBg}; padding: 24px 30px; border-radius: 8px 8px 0 0;">
-            <h2 style="color: white; margin: 0; font-size: 20px;">${headerTitle}</h2>
-            <p style="color: rgba(255,255,255,0.8); margin: 6px 0 0; font-size: 13px;">${escapeHtml(headerSub)}</p>
-          </div>
-          <div style="padding: 28px 30px; background: #ffffff; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
-            ${all_approved ? '<div style="text-align: center; margin: 0 0 20px;"><span style="font-size: 48px;">✅</span></div>' : ''}
-
-            <div style="background: #fafafa; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin: 0 0 20px;">
-              ${media_url && isImageUrl(media_url) ? `<img src="${escapeHtml(media_url)}" alt="Preview" style="width: 100%; max-height: 280px; object-fit: cover; display: block;" />` : ''}
-              <div style="padding: 16px;">
-                <h3 style="margin: 0 0 8px; font-size: 17px; color: #1a1a1a;">${escapeHtml(event_title)}</h3>
-                <div style="margin-bottom: 8px;">
-                  <span style="font-size: 12px; color: #6b7280;">📅 ${formatDate(event_date)}</span>
-                  ${event_team ? `<span style="font-size: 12px; color: #6b7280; margin-left: 12px;">👥 ${escapeHtml(event_team)}</span>` : ''}
+              <div style="background: #fafafa; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; margin: 0 0 20px;">
+                ${media_url && isImageUrl(media_url) ? `<img src="${escapeHtml(media_url)}" alt="Preview" style="width: 100%; max-height: 280px; object-fit: cover; display: block;" />` : ''}
+                <div style="padding: 16px;">
+                  <h3 style="margin: 0 0 8px; font-size: 17px; color: #1a1a1a;">${escapeHtml(event_title)}</h3>
+                  <div style="margin-bottom: 8px;">
+                    <span style="font-size: 12px; color: #6b7280;">📅 ${formatDate(event_date)}</span>
+                    ${event_team ? `<span style="font-size: 12px; color: #6b7280; margin-left: 12px;">👥 ${escapeHtml(event_team)}</span>` : ''}
+                  </div>
+                  ${event_description ? `<p style="margin: 8px 0 0; font-size: 13px; color: #6b7280; line-height: 1.5;">${escapeHtml(event_description).substring(0, 200)}${event_description.length > 200 ? '...' : ''}</p>` : ''}
                 </div>
-                ${event_description ? `<p style="margin: 8px 0 0; font-size: 13px; color: #6b7280; line-height: 1.5;">${escapeHtml(event_description).substring(0, 200)}${event_description.length > 200 ? '...' : ''}</p>` : ''}
+              </div>
+
+              ${!all_approved ? `<p style="font-size: 13px; color: #6b7280; margin: 0 0 16px;">Aún faltan revisores por responder. Te notificaremos cuando se complete la revisión.</p>` : ''}
+
+              <div style="text-align: center; margin: 24px 0 16px;">
+                <a href="https://gestor.califica.ai/calendar?event=${event_id}"
+                   style="background: #ff8080; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
+                  Ver Evento
+                </a>
               </div>
             </div>
-
-            ${!all_approved ? `<p style="font-size: 13px; color: #6b7280; margin: 0 0 16px;">Aún faltan revisores por responder. Te notificaremos cuando se complete la revisión.</p>` : ''}
-
-            <div style="text-align: center; margin: 24px 0 16px;">
-              <a href="https://gestor.califica.ai/calendar?event=${event_id}"
-                 style="background: #ff8080; color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; display: inline-block;">
-                Ver Evento
-              </a>
-            </div>
           </div>
-        </div>
-      `
-    });
+        `
+      });
+    }
 
-    if (requester) {
+    if (sendInapp) {
       const message = all_approved
-        ? `✅ Tu contenido "${event_title}" fue aprobado por todos los revisores`
-        : `👍 ${reviewer_email} aprobó tu contenido "${event_title}"`;
+        ? `Tu contenido "${event_title}" fue aprobado por todos los revisores`
+        : `${reviewer_email} aprobó tu contenido "${event_title}"`;
 
       await supabaseAdmin.from('notifications').insert({
         recipient_user_id: requester.id,

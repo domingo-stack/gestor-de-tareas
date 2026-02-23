@@ -2,11 +2,42 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { usePermissions } from '@/context/PermissionsContext';
 import { TrashIcon } from '@/components/icons/TrashIcon';
 import AuthGuard from '@/components/AuthGuard';
 import { Toaster, toast } from 'sonner';
+
+function SettingsTabs() {
+  const pathname = usePathname();
+  const tabs = [
+    { href: '/settings/team', label: 'Equipo' },
+    { href: '/settings/notifications', label: 'Notificaciones' },
+  ];
+
+  return (
+    <div className="flex gap-1 mb-6 border-b border-gray-200">
+      {tabs.map((tab) => {
+        const active = pathname === tab.href;
+        return (
+          <Link
+            key={tab.href}
+            href={tab.href}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              active
+                ? 'border-[#ff8080] text-[#ff8080]'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            {tab.label}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
 
 type TeamMember = {
   user_id: string;
@@ -120,7 +151,8 @@ export default function TeamSettingsPage() {
     <AuthGuard>
       <div className="max-w-4xl mx-auto p-4 md:p-8">
         <Toaster position="top-right" richColors />
-        <h1 className="text-2xl font-bold mb-6">Gestión de Organización</h1>
+        <h1 className="text-2xl font-bold mb-2">Configuración</h1>
+        <SettingsTabs />
 
         {isSuperadmin && (
           <>

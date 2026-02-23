@@ -18,7 +18,6 @@ serve(async (req: Request) => {
   };
 
   try {
-    // --- Configuración (se mantiene igual) ---
     const resendApiKey = Deno.env.get('RESEND_API_KEY');
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -28,94 +27,101 @@ serve(async (req: Request) => {
     }
 
     const resend = new Resend(resendApiKey);
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     const payload = await req.json();
     const newEvent = payload.record;
 
-    // --- PASO 1: OBTENER DATOS ADICIONALES ---
+    // Obtener nombre del creador del evento
+    const { data: creatorData } = await supabaseAdmin.auth.admin.getUserById(newEvent.user_id);
+    const creatorIdentifier = creatorData?.user?.email || 'Alguien';
 
-    // Buscamos el nombre del usuario que creó el evento
-    const { data: { users: allUsers }, error: usersError } = await supabaseAdmin.auth.admin.listUsers();
-if (usersError) {
-  throw new Error(`Error al buscar usuarios: ${usersError.message}`);
-}
-if (!allUsers || allUsers.length === 0) {
-  return new Response(JSON.stringify({ message: "No se encontraron usuarios para notificar." }));
-}
+    // Obtener destinatarios filtrados por preferencias y permisos
+    const { data: recipients, error: recipientsError } = await supabaseAdmin.rpc('get_notification_recipients', {
+      p_notification_type: 'event_created'
+    });
 
-// Ahora, de esa lista, encontramos al creador del evento.
-const creator = allUsers.find(user => user.id === newEvent.user_id);
-// Usamos su email como identificador. Si no lo encontramos, usamos un texto genérico.
-const creatorIdentifier = creator?.email || 'Alguien';
+    if (recipientsError) {
+      throw new Error(`Error al obtener destinatarios: ${recipientsError.message}`);
+    }
 
-// La lista de correos para enviar la notificación se queda igual.
-const recipientEmails = allUsers.map(user => user.email).filter((email): email is string => !!email);
-if (recipientEmails.length === 0) {
-  return new Response(JSON.stringify({ message: "No se encontraron correos válidos." }));
-}
+    if (!recipients || recipients.length === 0) {
+      return new Response(JSON.stringify({ message: "No hay destinatarios para notificar." }), { status: 200 });
+    }
 
-    // --- PASO 2: USAR LA NUEVA PLANTILLA HTML ---
+    // Filtrar al creador del evento
+    const filteredRecipients = recipients.filter((r: any) => r.user_id !== newEvent.user_id);
+
+    if (filteredRecipients.length === 0) {
+      return new Response(JSON.stringify({ message: "No hay destinatarios (excluido el creador)." }), { status: 200 });
+    }
 
     const subject = `${escapeHtml(creatorIdentifier)} creó un nuevo evento: ${escapeHtml(newEvent.title)}`;
 
-    await resend.emails.send({
-      from: 'tareas@califica.ai',
-      to: recipientEmails,
-      subject: subject,
-      html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
-            .container { max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-            .header { background-color: #3c527a; color: #ffffff; padding: 20px; text-align: center; }
-            .content { padding: 30px; color: #333; }
-            .content h1 { font-size: 20px; color: #383838; }
-            .content p { line-height: 1.6; }
-            .item { margin-bottom: 10px; }
-            .item strong { color: #3c527a; }
-            .button { display: inline-block; padding: 12px 24px; margin-top: 20px; background-color: #ff8080; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; }
-            .footer { background-color: #f9f9f9; padding: 15px; text-align: center; font-size: 12px; color: #888; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            <div class="header">
-              <h2>Nuevo Evento en el Calendario</h2>
-            </div>
-            <div class="content">
-              <h1>${escapeHtml(creatorIdentifier)} ha creado un nuevo evento:</h1>
-              <p class="item"><strong>Evento:</strong> ${escapeHtml(newEvent.title)}</p>
-              <p class="item"><strong>Equipo:</strong> ${escapeHtml(newEvent.team || '')}</p>
-              <p class="item"><strong>Descripción:</strong> ${escapeHtml(newEvent.description || '')}</p>
-              <p class="item"><strong>Fecha:</strong> ${new Date(newEvent.start_date).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
-              <a href="https://gestor.califica.ai/calendar" class="button">Ver en el Calendario</a>
-            </div>
-            <div class="footer">
-              <p>Gestor de Tareas de Califica.ai</p>
-            </div>
+    const emailHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
+          .container { max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+          .header { background-color: #3c527a; color: #ffffff; padding: 20px; text-align: center; }
+          .content { padding: 30px; color: #333; }
+          .content h1 { font-size: 20px; color: #383838; }
+          .content p { line-height: 1.6; }
+          .item { margin-bottom: 10px; }
+          .item strong { color: #3c527a; }
+          .button { display: inline-block; padding: 12px 24px; margin-top: 20px; background-color: #ff8080; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: bold; }
+          .footer { background-color: #f9f9f9; padding: 15px; text-align: center; font-size: 12px; color: #888; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <h2>Nuevo Evento en el Calendario</h2>
           </div>
-        </body>
-        </html>
-      `,
-    });
+          <div class="content">
+            <h1>${escapeHtml(creatorIdentifier)} ha creado un nuevo evento:</h1>
+            <p class="item"><strong>Evento:</strong> ${escapeHtml(newEvent.title)}</p>
+            <p class="item"><strong>Equipo:</strong> ${escapeHtml(newEvent.team || '')}</p>
+            <p class="item"><strong>Descripción:</strong> ${escapeHtml(newEvent.description || '')}</p>
+            <p class="item"><strong>Fecha:</strong> ${new Date(newEvent.start_date).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+            <a href="https://gestor.califica.ai/calendar" class="button">Ver en el Calendario</a>
+          </div>
+          <div class="footer">
+            <p>Gestor de Tareas de Califica.ai</p>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
 
-    const notificationsToInsert = allUsers.map(user => ({
-        recipient_user_id: user.id,
-        message: `Nuevo evento de ${newEvent.team}: ${newEvent.title}`,
-        link_url: '/calendar',
-    }));
-
-    const { error: notificationError } = await supabaseAdmin.from('notifications').insert(notificationsToInsert);
-
-    // Si hay un error al insertar la notificación, lo lanzamos para que el catch lo registre.
-    if (notificationError) {
-        throw new Error(`Error al crear la notificación en la app: ${notificationError.message}`);
+    // Enviar emails individuales solo a quienes tienen send_email = true
+    const emailRecipients = filteredRecipients.filter((r: any) => r.send_email && r.email);
+    for (const recipient of emailRecipients) {
+      await resend.emails.send({
+        from: 'tareas@califica.ai',
+        to: [recipient.email],
+        subject: subject,
+        html: emailHtml,
+      });
     }
 
-    return new Response(JSON.stringify({ message: "OK" }), { status: 200 });
+    // Notificaciones in-app solo a quienes tienen send_inapp = true
+    const inappRecipients = filteredRecipients.filter((r: any) => r.send_inapp);
+    if (inappRecipients.length > 0) {
+      const notificationsToInsert = inappRecipients.map((r: any) => ({
+        recipient_user_id: r.user_id,
+        message: `Nuevo evento de ${newEvent.team}: ${newEvent.title}`,
+        link_url: '/calendar',
+      }));
+
+      const { error: notificationError } = await supabaseAdmin.from('notifications').insert(notificationsToInsert);
+      if (notificationError) {
+        throw new Error(`Error al crear notificaciones in-app: ${notificationError.message}`);
+      }
+    }
+
+    return new Response(JSON.stringify({ message: "OK", emailed: emailRecipients.length, inapp: inappRecipients.length }), { status: 200 });
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Ocurrió un error desconocido';
