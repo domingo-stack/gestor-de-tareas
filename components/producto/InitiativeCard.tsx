@@ -97,6 +97,30 @@ export default function InitiativeCard({ initiative, onClick, mode, progress, on
         {/* Discovery-specific content */}
         {mode === 'discovery' && (
           <>
+            {initiative.project_name && (
+              <p className="text-xs text-gray-500 mb-1.5">
+                📁 {initiative.project_name}
+              </p>
+            )}
+
+            {progress && progress.total > 0 && (
+              <div className="mb-1.5">
+                <div className="flex justify-between text-[10px] text-gray-400 mb-1">
+                  <span>Progreso</span>
+                  <span>{progress.completed}/{progress.total} ({Math.round((progress.completed / progress.total) * 100)}%)</span>
+                </div>
+                <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{
+                      width: `${(progress.completed / progress.total) * 100}%`,
+                      backgroundColor: '#ff8080',
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
             {expData.hypothesis && (
               <p className="text-xs text-gray-500 line-clamp-2 mb-1.5">
                 {expData.hypothesis}

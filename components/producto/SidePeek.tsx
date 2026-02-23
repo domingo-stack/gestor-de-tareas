@@ -419,6 +419,30 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
                   </p>
                 </div>
               )}
+
+              {/* Proyecto asociado (Discovery) */}
+              <div className="border-t pt-3 mt-3">
+                <h4 className="text-xs font-semibold text-gray-600 uppercase mb-2">Proyecto asociado</h4>
+                {initiative.project_id ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-500">Proyecto vinculado:</span>
+                    <a
+                      href={`/projects/${initiative.project_id}`}
+                      className="text-sm font-medium hover:underline"
+                      style={{ color: '#3c527a' }}
+                    >
+                      {initiative.project_name || `Proyecto #${initiative.project_id}`}
+                    </a>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setShowBulkCreate(true)}
+                    className="w-full py-2.5 rounded-md text-sm font-medium border-2 border-dashed border-gray-300 text-gray-500 hover:border-gray-400 hover:text-gray-600 transition"
+                  >
+                    Generar / Vincular Proyecto
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

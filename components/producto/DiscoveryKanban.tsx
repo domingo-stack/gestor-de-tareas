@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, rectIntersection, useSensor, useSensors, PointerSensor } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useDroppable } from '@dnd-kit/core'
@@ -24,10 +24,45 @@ interface DiscoveryKanbanProps {
   onFinalize?: (initiative: ProductInitiative) => void
 }
 
+type ProgressMap = Record<number, { completed: number; total: number }>
+
 export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRefresh, onFinalize }: DiscoveryKanbanProps) {
   const { supabase } = useAuth()
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
   const [activeInitiative, setActiveInitiative] = useState<ProductInitiative | null>(null)
+  const [progressMap, setProgressMap] = useState<ProgressMap>({})
+
+  // Fetch task progress for discovery initiatives with linked projects
+  useEffect(() => {
+    if (!supabase) return
+    const projectIds = initiatives.map(i => i.project_id).filter((id): id is number => id !== null)
+    if (projectIds.length === 0) return
+
+    const uniqueIds = [...new Set(projectIds)]
+
+    supabase
+      .from('tasks')
+      .select('project_id, status')
+      .in('project_id', uniqueIds)
+      .is('archived_at', null)
+      .then(({ data }) => {
+        if (!data) return
+        const map: ProgressMap = {}
+        for (const task of data) {
+          if (!task.project_id) continue
+          if (!map[task.project_id]) map[task.project_id] = { completed: 0, total: 0 }
+          map[task.project_id].total++
+          if (task.status === 'Hecho') map[task.project_id].completed++
+        }
+        const initiativeProgress: ProgressMap = {}
+        for (const init of initiatives) {
+          if (init.project_id && map[init.project_id]) {
+            initiativeProgress[init.id] = map[init.project_id]
+          }
+        }
+        setProgressMap(initiativeProgress)
+      })
+  }, [supabase, initiatives])
 
   const handleDragStart = (event: DragStartEvent) => {
     const item = initiatives.find(i => i.id === Number(event.active.id))
@@ -83,6 +118,7 @@ export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRef
         status: 'design',
         owner_id: parentInitiative.owner_id,
         parent_id: parentInitiative.id,
+        project_id: parentInitiative.project_id,
         period_type: parentInitiative.period_type,
         period_value: parentInitiative.period_value,
         experiment_data: parentInitiative.experiment_data,
@@ -115,6 +151,7 @@ export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRef
                         initiative={item}
                         onClick={() => onSelect(item)}
                         mode="discovery"
+                        progress={progressMap[item.id]}
                         onCreateFeature={
                           item.status === 'completed' && item.experiment_data?.result === 'won'
                             ? () => handleCreateFeature(item)
