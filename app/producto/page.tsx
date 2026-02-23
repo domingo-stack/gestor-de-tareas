@@ -43,6 +43,12 @@ export default function ProductoPage() {
         project_name: d.projects?.name || null,
       }))
       setInitiatives(mapped as ProductInitiative[])
+      // Sync selectedInitiative with fresh data (e.g. after linking a project)
+      setSelectedInitiative(prev => {
+        if (!prev) return null
+        const fresh = mapped.find((i: any) => i.id === prev.id)
+        return fresh ? (fresh as ProductInitiative) : null
+      })
     }
     setLoading(false)
   }, [supabase])
@@ -139,6 +145,30 @@ export default function ProductoPage() {
     }
   }, [supabase, user])
 
+  const handleCreateInPhase = useCallback(async (title: string, phase: 'discovery' | 'delivery') => {
+    if (!supabase || !user) return
+    const { data, error } = await supabase
+      .from('product_initiatives')
+      .insert({
+        title,
+        phase,
+        status: 'design',
+        item_type: phase === 'discovery' ? 'experiment' : 'feature',
+        owner_id: user.id,
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error('Error creating initiative:', error)
+      return
+    }
+
+    if (data) {
+      setInitiatives(prev => [data as ProductInitiative, ...prev])
+    }
+  }, [supabase, user])
+
   return (
     <AuthGuard>
       <ModuleGuard module="mod_producto">
@@ -196,6 +226,7 @@ export default function ProductoPage() {
                   onUpdate={handleUpdate}
                   onRefresh={fetchInitiatives}
                   onFinalize={handleFinalizeFromCard}
+                  onCreate={(title) => handleCreateInPhase(title, 'discovery')}
                 />
               )}
               {activeTab === 'delivery' && (
@@ -204,6 +235,7 @@ export default function ProductoPage() {
                   onSelect={handleSelect}
                   onUpdate={handleUpdate}
                   onRefresh={fetchInitiatives}
+                  onCreate={(title) => handleCreateInPhase(title, 'delivery')}
                   onFinalize={handleFinalizeFromCard}
                 />
               )}

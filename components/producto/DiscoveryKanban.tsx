@@ -22,11 +22,12 @@ interface DiscoveryKanbanProps {
   onUpdate: (id: number, updates: Partial<ProductInitiative>) => Promise<void>
   onRefresh: () => Promise<void>
   onFinalize?: (initiative: ProductInitiative) => void
+  onCreate?: (title: string) => Promise<void>
 }
 
 type ProgressMap = Record<number, { completed: number; total: number }>
 
-export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRefresh, onFinalize }: DiscoveryKanbanProps) {
+export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRefresh, onFinalize, onCreate }: DiscoveryKanbanProps) {
   const { supabase } = useAuth()
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
   const [activeInitiative, setActiveInitiative] = useState<ProductInitiative | null>(null)
@@ -85,6 +86,8 @@ export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRef
     await onUpdate(initiativeId, { status: newStatus as ProductInitiative['status'] })
   }, [initiatives, onUpdate])
 
+  const [quickCreateTitle, setQuickCreateTitle] = useState('')
+  const [showQuickCreate, setShowQuickCreate] = useState(false)
   const [escalatingIds, setEscalatingIds] = useState<Set<number>>(new Set())
 
   const handleCreateFeature = useCallback(async (parentInitiative: ProductInitiative) => {
@@ -135,7 +138,56 @@ export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRef
     setEscalatingIds(prev => { const s = new Set(prev); s.delete(parentInitiative.id); return s })
   }, [supabase, onRefresh, escalatingIds])
 
+  const handleQuickCreate = async () => {
+    if (!quickCreateTitle.trim() || !onCreate) return
+    await onCreate(quickCreateTitle.trim())
+    setQuickCreateTitle('')
+    setShowQuickCreate(false)
+  }
+
   return (
+    <div>
+      {/* Quick create bar */}
+      {onCreate && (
+        <div className="mb-4">
+          {showQuickCreate ? (
+            <div className="flex gap-2 items-center">
+              <input
+                type="text"
+                value={quickCreateTitle}
+                onChange={e => setQuickCreateTitle(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleQuickCreate()}
+                placeholder="Nombre del experimento..."
+                className="flex-1 border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                autoFocus
+              />
+              <button
+                onClick={handleQuickCreate}
+                disabled={!quickCreateTitle.trim()}
+                className="px-4 py-2 rounded-md text-white text-sm font-medium transition hover:opacity-90 disabled:opacity-50"
+                style={{ backgroundColor: '#7c3aed' }}
+              >
+                Crear
+              </button>
+              <button
+                onClick={() => { setShowQuickCreate(false); setQuickCreateTitle('') }}
+                className="px-3 py-2 rounded-md text-sm text-gray-500 hover:bg-gray-100"
+              >
+                Cancelar
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowQuickCreate(true)}
+              className="flex items-center gap-1.5 text-sm font-medium transition hover:opacity-80"
+              style={{ color: '#7c3aed' }}
+            >
+              <span className="text-lg leading-none">+</span> Nuevo experimento
+            </button>
+          )}
+        </div>
+      )}
+
     <DndContext sensors={sensors} collisionDetection={rectIntersection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {COLUMNS.map(col => {
@@ -186,6 +238,7 @@ export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRef
         ) : null}
       </DragOverlay>
     </DndContext>
+    </div>
   )
 }
 

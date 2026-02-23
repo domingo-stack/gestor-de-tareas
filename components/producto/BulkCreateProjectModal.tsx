@@ -40,33 +40,48 @@ export default function BulkCreateProjectModal({ initiative, onClose, onUpdate, 
     setSaving(true)
     try {
       // Create project via RPC (SECURITY DEFINER bypasses RLS)
-      // Uses same signature as dashboard: p_name, p_description
-      const { data: rpcResult, error: projectError } = await supabase.rpc('create_project', {
+      const { error: projectError } = await supabase.rpc('create_project', {
         p_name: projectName.trim(),
         p_description: initiative.problem_statement || '',
       })
 
       if (projectError) throw projectError
 
-      // RPC may return array or single value
-      const projectId = Array.isArray(rpcResult) ? rpcResult[0]?.id : (rpcResult?.id ?? rpcResult)
+      // Query the created project to reliably get its ID
+      const { data: projectRow, error: fetchError } = await supabase
+        .from('projects')
+        .select('id')
+        .eq('name', projectName.trim())
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (fetchError || !projectRow) throw new Error('No se pudo obtener el ID del proyecto creado')
+
+      const projectId = projectRow.id
 
       // Create tasks from text lines
       const lines = tasksText.split('\n').map(l => l.trim()).filter(Boolean)
+      let tasksCreated = 0
       for (const line of lines) {
-        await supabase.rpc('create_task_v2', {
+        const { error: taskError } = await supabase.rpc('create_task_v2', {
           p_title: line,
           p_project_id: projectId,
           p_assignee_id: user.id,
           p_due_date: null,
           p_description: null,
         })
+        if (taskError) {
+          console.error('Error creating task:', taskError)
+        } else {
+          tasksCreated++
+        }
       }
 
       // Link project to initiative
       await onUpdate(initiative.id, { project_id: projectId })
 
-      toast.success(`Proyecto creado con ${lines.length} tarea${lines.length !== 1 ? 's' : ''}`)
+      toast.success(`Proyecto creado con ${tasksCreated} tarea${tasksCreated !== 1 ? 's' : ''}`)
       await onRefresh()
       onClose()
     } catch (err: any) {
