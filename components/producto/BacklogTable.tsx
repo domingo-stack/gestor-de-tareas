@@ -141,7 +141,7 @@ export default function BacklogTable({ initiatives, onSelect, onUpdate, onCreate
                     <button
                       onClick={() => onPromote(item)}
                       className="p-1.5 rounded-md text-gray-400 hover:text-[#3c527a] hover:bg-blue-50 transition"
-                      title="Promover a Roadmap"
+                      title={item.item_type === 'experiment' ? 'Promover a Experimentos' : 'Promover a Roadmap'}
                     >
                       <ArrowUpCircleIcon className="h-5 w-5" />
                     </button>

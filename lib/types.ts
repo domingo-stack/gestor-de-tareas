@@ -80,8 +80,9 @@ export type ExperimentData = {
   metric_result?: string;
   dashboard_link?: string;
   statistical_significance?: string;
-  result?: 'won' | 'lost' | 'inconclusive';
+  result?: 'won' | 'lost' | 'inconclusive' | 'pending';
   next_steps?: string;
+  priority?: 'alta' | 'media' | 'baja';
 };
 
 export type ProductInitiative = {

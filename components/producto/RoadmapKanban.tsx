@@ -1,69 +1,32 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, rectIntersection, useSensor, useSensors, PointerSensor } from '@dnd-kit/core'
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { useDroppable } from '@dnd-kit/core'
 import { ProductInitiative } from '@/lib/types'
-import { useAuth } from '@/context/AuthContext'
 import InitiativeCard from './InitiativeCard'
-import { toast } from 'sonner'
 
 const COLUMNS = [
   { id: 'design', label: 'En diseño' },
-  { id: 'running', label: 'Ejecutándose' },
+  { id: 'running', label: 'En progreso' },
   { id: 'completed', label: 'Terminado' },
-  { id: 'paused', label: 'En pausa' },
 ]
 
-interface DiscoveryKanbanProps {
+interface RoadmapKanbanProps {
   initiatives: ProductInitiative[]
   onSelect: (initiative: ProductInitiative) => void
   onUpdate: (id: number, updates: Partial<ProductInitiative>) => Promise<void>
-  onRefresh: () => Promise<void>
   onFinalize?: (initiative: ProductInitiative) => void
   onCreate?: (title: string) => Promise<void>
+  members: { user_id: string; email: string; first_name?: string }[]
 }
 
-type ProgressMap = Record<number, { completed: number; total: number }>
-
-export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRefresh, onFinalize, onCreate }: DiscoveryKanbanProps) {
-  const { supabase } = useAuth()
+export default function RoadmapKanban({ initiatives, onSelect, onUpdate, onFinalize, onCreate, members }: RoadmapKanbanProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
   const [activeInitiative, setActiveInitiative] = useState<ProductInitiative | null>(null)
-  const [progressMap, setProgressMap] = useState<ProgressMap>({})
-
-  // Fetch task progress for discovery initiatives with linked projects
-  useEffect(() => {
-    if (!supabase) return
-    const projectIds = initiatives.map(i => i.project_id).filter((id): id is number => id !== null)
-    if (projectIds.length === 0) return
-
-    const uniqueIds = [...new Set(projectIds)]
-
-    supabase
-      .from('tasks')
-      .select('project_id, status')
-      .in('project_id', uniqueIds)
-      .is('archived_at', null)
-      .then(({ data }) => {
-        if (!data) return
-        const map: ProgressMap = {}
-        for (const task of data) {
-          if (!task.project_id) continue
-          if (!map[task.project_id]) map[task.project_id] = { completed: 0, total: 0 }
-          map[task.project_id].total++
-          if (task.status === 'Hecho') map[task.project_id].completed++
-        }
-        const initiativeProgress: ProgressMap = {}
-        for (const init of initiatives) {
-          if (init.project_id && map[init.project_id]) {
-            initiativeProgress[init.id] = map[init.project_id]
-          }
-        }
-        setProgressMap(initiativeProgress)
-      })
-  }, [supabase, initiatives])
+  const [quickCreateTitle, setQuickCreateTitle] = useState('')
+  const [showQuickCreate, setShowQuickCreate] = useState(false)
 
   const handleDragStart = (event: DragStartEvent) => {
     const item = initiatives.find(i => i.id === Number(event.active.id))
@@ -84,59 +47,13 @@ export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRef
     if (!item || item.status === newStatus) return
 
     await onUpdate(initiativeId, { status: newStatus as ProductInitiative['status'] })
-  }, [initiatives, onUpdate])
 
-  const [quickCreateTitle, setQuickCreateTitle] = useState('')
-  const [showQuickCreate, setShowQuickCreate] = useState(false)
-  const [escalatingIds, setEscalatingIds] = useState<Set<number>>(new Set())
-
-  const handleCreateFeature = useCallback(async (parentInitiative: ProductInitiative) => {
-    if (!supabase) return
-
-    // Prevent duplicate escalation
-    if (escalatingIds.has(parentInitiative.id)) return
-    setEscalatingIds(prev => new Set(prev).add(parentInitiative.id))
-
-    // Check if already escalated
-    const { data: existing } = await supabase
-      .from('product_initiatives')
-      .select('id')
-      .eq('parent_id', parentInitiative.id)
-      .eq('phase', 'delivery')
-      .limit(1)
-
-    if (existing && existing.length > 0) {
-      toast.info('Este experimento ya fue escalado a Delivery')
-      setEscalatingIds(prev => { const s = new Set(prev); s.delete(parentInitiative.id); return s })
-      return
+    // Auto-trigger finalize when dragged to completed
+    if (newStatus === 'completed' && onFinalize) {
+      const updated = { ...item, status: 'completed' as const }
+      onFinalize(updated)
     }
-
-    const { error } = await supabase
-      .from('product_initiatives')
-      .insert({
-        title: parentInitiative.title,
-        problem_statement: parentInitiative.problem_statement,
-        item_type: 'feature',
-        phase: 'delivery',
-        status: 'design',
-        owner_id: parentInitiative.owner_id,
-        parent_id: parentInitiative.id,
-        project_id: parentInitiative.project_id,
-        period_type: parentInitiative.period_type,
-        period_value: parentInitiative.period_value,
-        experiment_data: parentInitiative.experiment_data,
-      })
-      .select()
-      .single()
-
-    if (error) {
-      toast.error('Error creando feature: ' + error.message)
-    } else {
-      toast.success('Feature creada en Delivery')
-      await onRefresh()
-    }
-    setEscalatingIds(prev => { const s = new Set(prev); s.delete(parentInitiative.id); return s })
-  }, [supabase, onRefresh, escalatingIds])
+  }, [initiatives, onUpdate, onFinalize])
 
   const handleQuickCreate = async () => {
     if (!quickCreateTitle.trim() || !onCreate) return
@@ -157,15 +74,15 @@ export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRef
                 value={quickCreateTitle}
                 onChange={e => setQuickCreateTitle(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleQuickCreate()}
-                placeholder="Nombre del experimento..."
-                className="flex-1 border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                placeholder="Nombre de la tarea..."
+                className="flex-1 border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
                 autoFocus
               />
               <button
                 onClick={handleQuickCreate}
                 disabled={!quickCreateTitle.trim()}
                 className="px-4 py-2 rounded-md text-white text-sm font-medium transition hover:opacity-90 disabled:opacity-50"
-                style={{ backgroundColor: '#7c3aed' }}
+                style={{ backgroundColor: '#3c527a' }}
               >
                 Crear
               </button>
@@ -180,16 +97,16 @@ export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRef
             <button
               onClick={() => setShowQuickCreate(true)}
               className="flex items-center gap-1.5 text-sm font-medium transition hover:opacity-80"
-              style={{ color: '#7c3aed' }}
+              style={{ color: '#3c527a' }}
             >
-              <span className="text-lg leading-none">+</span> Nuevo experimento
+              <span className="text-lg leading-none">+</span> Nueva tarea
             </button>
           )}
         </div>
       )}
 
     <DndContext sensors={sensors} collisionDetection={rectIntersection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {COLUMNS.map(col => {
           const items = initiatives.filter(i => i.status === col.id)
           return (
@@ -202,13 +119,8 @@ export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRef
                         key={item.id}
                         initiative={item}
                         onClick={() => onSelect(item)}
-                        mode="discovery"
-                        progress={progressMap[item.id]}
-                        onCreateFeature={
-                          item.status === 'completed' && item.experiment_data?.result === 'won'
-                            ? () => handleCreateFeature(item)
-                            : undefined
-                        }
+                        mode="roadmap"
+                        members={members}
                         onFinalize={
                           item.status === 'completed' && onFinalize
                             ? () => onFinalize(item)
@@ -233,7 +145,8 @@ export default function DiscoveryKanban({ initiatives, onSelect, onUpdate, onRef
           <InitiativeCard
             initiative={activeInitiative}
             onClick={() => {}}
-            mode="discovery"
+            mode="roadmap"
+            members={members}
           />
         ) : null}
       </DragOverlay>

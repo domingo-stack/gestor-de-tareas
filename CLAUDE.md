@@ -49,7 +49,7 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 | `/calendar` | FullCalendar event management with team-colored events |
 | `/finance` | Transaction management, multi-currency, CAC tracking |
 | `/revenue` | Revenue dashboard with country/provider/plan filters |
-| `/producto` | Dual-Track Agile product module (Backlog, Discovery, Delivery) |
+| `/producto` | Product module (Backlog, Roadmap, Experimentos) |
 | `/admin/users` | Superadmin user & permissions administration |
 | `/settings/team` | Organization member management |
 | `/settings/notifications` | Per-user notification preferences (email/in-app toggles) |
@@ -116,17 +116,17 @@ Calendar events support a content approval workflow:
 - **Auto-approve**: `auto-approve-reviews` edge function invoked by external cron every 5 min. Protected with `CRON_SECRET` env var.
 - **Components**: `CountdownTimer` (expiration countdown), review mode in `EventDetailModal` (request form, response panel, history).
 
-### Product Module (Dual-Track Agile)
+### Product Module (Backlog | Roadmap | Experimentos)
 
-The `/producto` route implements a Dual-Track Agile product management system:
-- **Backlog tab**: TanStack-style table with RICE scoring (Reach×Impact×Confidence/Effort), inline-editable cells, sorted by score. Quick-create row at bottom.
-- **Discovery tab**: Kanban board (dnd-kit) with columns: En diseño, Ejecutándose, Terminado, En pausa. Cards show experiment hypothesis, funnel stage, metrics, result badges, and linked project with progress bar. Won experiments can be escalated to Delivery as features (preserving `project_id`). Quick-create button ("+ Nuevo experimento") creates directly in discovery phase.
-- **Delivery tab**: Same Kanban layout. Cards show linked project name and task progress bar (fetched in batch). Quick-create button ("+ Nueva funcionalidad") creates directly in delivery phase.
-- **SidePeek**: Right-side drawer (480px) for initiative detail editing. Auto-save with 1500ms debounce. Contains PromoteForm (backlog→roadmap), experiment data fields (discovery), project linking (both discovery and delivery phases), and finalize button.
+The `/producto` route implements a product management system with three independent tabs:
+- **Backlog tab**: TanStack-style table with RICE scoring (Reach×Impact×Confidence/Effort), inline-editable cells, sorted by score. Quick-create row at bottom. Items can be promoted to Roadmap or Experimentos via PromoteForm.
+- **Roadmap tab** (phase=`delivery` in DB): Kanban board (dnd-kit) with 3 columns: En diseño, En progreso, Terminado. Simple task-like cards showing title, owner email, and dates. Dragging to "Terminado" auto-triggers FinalizeModal. Quick-create button ("+ Nueva tarea"). No project linking.
+- **Experimentos tab** (phase=`discovery` in DB): Notion-style table with 17 columns and horizontal scroll (`min-w-[1800px]`). Inline editing with auto-save (1500ms debounce for text, immediate for dropdowns/checkboxes). Sticky "Experimento" column. Click name to open SidePeek with full experiment fields. Quick-create row at bottom.
+- **SidePeek**: Right-side drawer (480px) for initiative detail editing. Auto-save with 1500ms debounce. Contains PromoteForm (backlog→roadmap/experimentos), experiment data fields (discovery phase), finalize button (delivery phase).
 - **FinalizeModal**: Marks initiative as finalized and creates a `company_events` calendar entry.
-- **BulkCreateProjectModal**: Creates a new project with tasks (one per line) or links an existing project to a discovery/delivery initiative. After creation, queries the project by name to reliably obtain the ID.
-- **Table**: `product_initiatives` with RICE columns, `experiment_data` JSONB, self-referencing `parent_id`, and `phase`/`status` workflow.
-- **Components**: `components/producto/` — BacklogTable, QuickCreateRow, SidePeek, PromoteForm, DiscoveryKanban, DeliveryKanban, InitiativeCard, BulkCreateProjectModal, FinalizeModal.
+- **No interaction between Roadmap and Experimentos** — tabs are independent. No escalation from experiments to roadmap.
+- **Table**: `product_initiatives` with RICE columns, `experiment_data` JSONB (includes `result: 'won'|'lost'|'inconclusive'|'pending'`), self-referencing `parent_id`, and `phase`/`status` workflow. Paused delivery items auto-move to `design` on load.
+- **Components**: `components/producto/` — BacklogTable, QuickCreateRow, SidePeek, PromoteForm, RoadmapKanban, ExperimentosTable, InitiativeCard, FinalizeModal.
 
 ## Language
 

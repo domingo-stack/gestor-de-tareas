@@ -5,19 +5,21 @@ import { useAuth } from '@/context/AuthContext'
 import AuthGuard from '@/components/AuthGuard'
 import ModuleGuard from '@/components/ModuleGuard'
 import BacklogTable from '@/components/producto/BacklogTable'
-import DiscoveryKanban from '@/components/producto/DiscoveryKanban'
-import DeliveryKanban from '@/components/producto/DeliveryKanban'
+import RoadmapKanban from '@/components/producto/RoadmapKanban'
+import ExperimentosTable from '@/components/producto/ExperimentosTable'
 import SidePeek from '@/components/producto/SidePeek'
 import { ProductInitiative } from '@/lib/types'
 import { Toaster } from 'sonner'
 
-type TabKey = 'backlog' | 'discovery' | 'delivery'
+type TabKey = 'backlog' | 'delivery' | 'discovery'
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'backlog', label: 'Backlog' },
-  { key: 'discovery', label: 'Discovery' },
-  { key: 'delivery', label: 'Delivery' },
+  { key: 'delivery', label: 'Roadmap' },
+  { key: 'discovery', label: 'Experimentos' },
 ]
+
+type Member = { user_id: string; email: string; first_name?: string }
 
 export default function ProductoPage() {
   const { supabase, user } = useAuth()
@@ -27,6 +29,15 @@ export default function ProductoPage() {
   const [selectedInitiative, setSelectedInitiative] = useState<ProductInitiative | null>(null)
   const [promotingInitiative, setPromotingInitiative] = useState<ProductInitiative | null>(null)
   const [finalizingInitiative, setFinalizingInitiative] = useState<ProductInitiative | null>(null)
+  const [members, setMembers] = useState<Member[]>([])
+
+  // Fetch members
+  useEffect(() => {
+    if (!supabase) return
+    supabase.rpc('get_all_members').then(({ data }) => {
+      if (data) setMembers(data)
+    })
+  }, [supabase])
 
   const fetchInitiatives = useCallback(async () => {
     if (!supabase) return
@@ -43,7 +54,7 @@ export default function ProductoPage() {
         project_name: d.projects?.name || null,
       }))
       setInitiatives(mapped as ProductInitiative[])
-      // Sync selectedInitiative with fresh data (e.g. after linking a project)
+      // Sync selectedInitiative with fresh data
       setSelectedInitiative(prev => {
         if (!prev) return null
         const fresh = mapped.find((i: any) => i.id === prev.id)
@@ -57,6 +68,21 @@ export default function ProductoPage() {
     fetchInitiatives()
   }, [fetchInitiatives])
 
+  // Auto-move paused delivery items to 'design' (Roadmap has no paused column)
+  useEffect(() => {
+    if (!supabase || loading) return
+    const pausedDelivery = initiatives.filter(i => i.phase === 'delivery' && i.status === 'paused')
+    for (const item of pausedDelivery) {
+      supabase
+        .from('product_initiatives')
+        .update({ status: 'design' })
+        .eq('id', item.id)
+        .then(() => {
+          setInitiatives(prev => prev.map(i => i.id === item.id ? { ...i, status: 'design' } : i))
+        })
+    }
+  }, [supabase, loading, initiatives])
+
   const backlogItems = initiatives.filter(i => i.phase === 'backlog')
   const discoveryItems = initiatives.filter(i => i.phase === 'discovery')
   const deliveryItems = initiatives.filter(i => i.phase === 'delivery')
@@ -67,14 +93,12 @@ export default function ProductoPage() {
     setFinalizingInitiative(null)
   }
 
-  // Open SidePeek in promote mode from backlog table button
   const handlePromoteFromTable = (initiative: ProductInitiative) => {
     setSelectedInitiative(initiative)
     setPromotingInitiative(initiative)
     setFinalizingInitiative(null)
   }
 
-  // Open SidePeek in finalize mode from kanban card button
   const handleFinalizeFromCard = (initiative: ProductInitiative) => {
     setSelectedInitiative(initiative)
     setFinalizingInitiative(initiative)
@@ -219,24 +243,23 @@ export default function ProductoPage() {
                   onPromote={handlePromoteFromTable}
                 />
               )}
-              {activeTab === 'discovery' && (
-                <DiscoveryKanban
-                  initiatives={discoveryItems}
-                  onSelect={handleSelect}
-                  onUpdate={handleUpdate}
-                  onRefresh={fetchInitiatives}
-                  onFinalize={handleFinalizeFromCard}
-                  onCreate={(title) => handleCreateInPhase(title, 'discovery')}
-                />
-              )}
               {activeTab === 'delivery' && (
-                <DeliveryKanban
+                <RoadmapKanban
                   initiatives={deliveryItems}
                   onSelect={handleSelect}
                   onUpdate={handleUpdate}
-                  onRefresh={fetchInitiatives}
-                  onCreate={(title) => handleCreateInPhase(title, 'delivery')}
                   onFinalize={handleFinalizeFromCard}
+                  onCreate={(title) => handleCreateInPhase(title, 'delivery')}
+                  members={members}
+                />
+              )}
+              {activeTab === 'discovery' && (
+                <ExperimentosTable
+                  initiatives={discoveryItems}
+                  onSelect={handleSelect}
+                  onUpdate={handleUpdate}
+                  onCreate={(title) => handleCreateInPhase(title, 'discovery')}
+                  members={members}
                 />
               )}
             </>
@@ -252,6 +275,7 @@ export default function ProductoPage() {
               onRefresh={fetchInitiatives}
               autoPromote={promotingInitiative?.id === selectedInitiative.id}
               autoFinalize={finalizingInitiative?.id === selectedInitiative.id}
+              members={members}
             />
           )}
         </div>

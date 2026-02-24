@@ -59,7 +59,7 @@ export default function PromoteForm({ initiative, onUpdate, onCancel, onRefresh 
       period_type: 'week',
       period_value: `${startDate} → ${endDate || '...'}`,
     })
-    toast.success(`Promovido a ${via === 'discovery' ? 'Discovery' : 'Delivery'}`)
+    toast.success(`Promovido a ${via === 'discovery' ? 'Experimentos' : 'Roadmap'}`)
     await onRefresh()
     setPromoting(false)
     onCancel()
@@ -120,7 +120,7 @@ export default function PromoteForm({ initiative, onUpdate, onCancel, onRefresh 
               onChange={() => setVia('discovery')}
               className="accent-[#7c3aed]"
             />
-            <span>Discovery <span className="text-gray-400">(experimentos)</span></span>
+            <span>Experimentos <span className="text-gray-400">(validar hipótesis)</span></span>
           </label>
           <label className="flex items-center gap-1.5 text-sm cursor-pointer">
             <input
@@ -129,7 +129,7 @@ export default function PromoteForm({ initiative, onUpdate, onCancel, onRefresh 
               onChange={() => setVia('delivery')}
               className="accent-[#2563eb]"
             />
-            <span>Delivery <span className="text-gray-400">(construir)</span></span>
+            <span>Roadmap <span className="text-gray-400">(construir)</span></span>
           </label>
         </div>
       </div>

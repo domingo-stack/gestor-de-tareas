@@ -5,21 +5,14 @@ import { XMarkIcon, TrashIcon, ArrowUturnLeftIcon } from '@heroicons/react/24/ou
 import { ProductInitiative, ExperimentData } from '@/lib/types'
 import PromoteForm from './PromoteForm'
 import FinalizeModal from './FinalizeModal'
-import BulkCreateProjectModal from './BulkCreateProjectModal'
+import MediaTextarea from '@/components/MediaTextarea'
 import { toast } from 'sonner'
-
-const TYPE_OPTIONS = [
-  { value: 'experiment', label: 'Experimento 🧪' },
-  { value: 'feature', label: 'Funcionalidad 🚀' },
-  { value: 'tech_debt', label: 'Deuda Técnica 🛠️' },
-  { value: 'bug', label: 'Bug 🐛' },
-]
 
 const RESULT_OPTIONS = [
   { value: '', label: 'Pendiente' },
-  { value: 'won', label: 'Ganó ✅' },
-  { value: 'lost', label: 'Perdió ❌' },
-  { value: 'inconclusive', label: 'Inconcluso ⚠️' },
+  { value: 'won', label: 'Ganó' },
+  { value: 'lost', label: 'Perdió' },
+  { value: 'inconclusive', label: 'Inconcluso' },
 ]
 
 const NEXT_STEPS_OPTIONS = [
@@ -29,6 +22,16 @@ const NEXT_STEPS_OPTIONS = [
   { value: 'iterate', label: 'Iterar' },
 ]
 
+function parsePeriod(periodValue: string | null): { start: string; end: string } {
+  if (!periodValue) return { start: '', end: '' }
+  const parts = periodValue.split('→').map(s => s.trim())
+  return { start: parts[0] || '', end: parts[1] || '' }
+}
+
+function buildPeriod(start: string, end: string): string {
+  return `${start} → ${end || '...'}`
+}
+
 interface SidePeekProps {
   initiative: ProductInitiative
   onClose: () => void
@@ -37,15 +40,14 @@ interface SidePeekProps {
   onRefresh: () => Promise<void>
   autoPromote?: boolean
   autoFinalize?: boolean
+  members?: { user_id: string; email: string; first_name?: string }[]
 }
 
-export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRefresh, autoPromote, autoFinalize }: SidePeekProps) {
+export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRefresh, autoPromote, autoFinalize, members = [] }: SidePeekProps) {
   const [title, setTitle] = useState(initiative.title)
   const [problemStatement, setProblemStatement] = useState(initiative.problem_statement || '')
-  const [itemType, setItemType] = useState(initiative.item_type)
   const [showPromote, setShowPromote] = useState(!!autoPromote)
   const [showFinalize, setShowFinalize] = useState(!!autoFinalize)
-  const [showBulkCreate, setShowBulkCreate] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showReturnConfirm, setShowReturnConfirm] = useState(false)
   const [returnReason, setReturnReason] = useState('')
@@ -56,13 +58,12 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
   useEffect(() => {
     setTitle(initiative.title)
     setProblemStatement(initiative.problem_statement || '')
-    setItemType(initiative.item_type)
     setExperimentData(initiative.experiment_data || {})
     setShowPromote(!!autoPromote)
     setShowFinalize(!!autoFinalize)
     setShowDeleteConfirm(false)
     setShowReturnConfirm(false)
-  }, [initiative.id, initiative.title, initiative.problem_statement, initiative.item_type, initiative.experiment_data, autoPromote, autoFinalize])
+  }, [initiative.id, initiative.title, initiative.problem_statement, initiative.experiment_data, autoPromote, autoFinalize])
 
   const debouncedUpdate = useCallback((updates: Partial<ProductInitiative>) => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -83,11 +84,6 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
   const handleProblemChange = (val: string) => {
     setProblemStatement(val)
     debouncedUpdate({ problem_statement: val || null })
-  }
-
-  const handleTypeChange = (val: string) => {
-    setItemType(val as ProductInitiative['item_type'])
-    onUpdate(initiative.id, { item_type: val as ProductInitiative['item_type'] })
   }
 
   const handleExperimentDataChange = (field: keyof ExperimentData, val: string) => {
@@ -113,10 +109,38 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
     setShowReturnConfirm(false)
   }
 
+  const handleFinalizeFromSidePeek = async () => {
+    await onUpdate(initiative.id, { status: 'completed' })
+    setShowFinalize(true)
+  }
+
+  const handleDateChange = (type: 'start' | 'end', val: string) => {
+    const { start, end } = parsePeriod(initiative.period_value)
+    const newStart = type === 'start' ? val : start
+    const newEnd = type === 'end' ? val : end
+    onUpdate(initiative.id, {
+      period_value: buildPeriod(newStart, newEnd),
+      period_type: 'week',
+    })
+  }
+
   // Compute local RICE score
   const riceScore = initiative.rice_effort > 0
     ? (initiative.rice_reach * initiative.rice_impact * initiative.rice_confidence) / initiative.rice_effort
     : 0
+
+  const phaseLabel = initiative.phase === 'discovery' ? 'Experimentos'
+    : initiative.phase === 'delivery' ? 'Roadmap'
+    : initiative.phase.charAt(0).toUpperCase() + initiative.phase.slice(1)
+
+  // Dynamic promote button text
+  const isExperimentType = initiative.item_type === 'experiment'
+  const promoteButtonText = isExperimentType ? 'Promover a Experimentos' : 'Promover a Roadmap'
+
+  const { start: dateStart, end: dateEnd } = parsePeriod(initiative.period_value)
+
+  const ownerMember = members.find(m => m.user_id === initiative.owner_id)
+  const ownerLabel = ownerMember ? (ownerMember.first_name || ownerMember.email) : null
 
   return (
     <>
@@ -134,7 +158,7 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
               initiative.phase === 'delivery' ? 'bg-blue-100 text-blue-700' :
               'bg-green-100 text-green-700'
             }`}>
-              {initiative.phase.charAt(0).toUpperCase() + initiative.phase.slice(1)}
+              {phaseLabel}
             </span>
             <span className="text-xs text-gray-400">•</span>
             <span className="text-xs text-gray-500 capitalize">{initiative.status}</span>
@@ -144,53 +168,87 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
           </button>
         </div>
 
+        {/* Responsable (small, below header) */}
+        {(initiative.phase === 'delivery' || initiative.phase === 'discovery') && (
+          <div className="px-4 pt-2 flex items-center justify-end gap-2">
+            <select
+              value={initiative.owner_id || ''}
+              onChange={e => onUpdate(initiative.id, { owner_id: e.target.value || null })}
+              className="text-xs border rounded px-2 py-1 text-gray-500 bg-transparent max-w-[200px]"
+            >
+              <option value="">Sin responsable</option>
+              {members.map(m => (
+                <option key={m.user_id} value={m.user_id}>{m.first_name || m.email}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {/* Scrollable content */}
         <div className="flex-1 overflow-y-auto p-4 space-y-5">
           {/* Title */}
           <div>
-            <label className="text-xs font-medium text-gray-500 uppercase">Título</label>
             <input
               type="text"
               value={title}
               onChange={e => handleTitleChange(e.target.value)}
-              className="w-full mt-1 text-lg font-semibold border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none pb-1"
+              className="w-full text-lg font-semibold border-b border-transparent hover:border-gray-300 focus:border-blue-500 focus:outline-none pb-1"
               style={{ color: '#383838' }}
             />
           </div>
 
-          {/* Problem Statement */}
+          {/* Description with media support */}
           <div>
-            <label className="text-xs font-medium text-gray-500 uppercase">Problema / Descripción</label>
-            <textarea
+            <label className="text-xs font-medium text-gray-500 uppercase">Descripción</label>
+            <MediaTextarea
               value={problemStatement}
-              onChange={e => handleProblemChange(e.target.value)}
-              rows={3}
-              className="w-full mt-1 text-sm border rounded-md px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:outline-none resize-none"
-              placeholder="¿Qué problema resuelve? ¿Cómo se hará?"
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => handleProblemChange(e.target.value)}
+              onTextInsert={(text: string) => handleProblemChange(text)}
+              placeholder="Agrega los detalles y la descripción de este requerimiento acá..."
+              rows={6}
+              className="mt-1"
             />
           </div>
 
-          {/* Type + Tags row */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* Dates for Roadmap (only fecha fin) */}
+          {initiative.phase === 'delivery' && (
             <div>
-              <label className="text-xs font-medium text-gray-500 uppercase">Tipo</label>
-              <select
-                value={itemType}
-                onChange={e => handleTypeChange(e.target.value)}
-                className="w-full mt-1 text-sm border rounded-md px-2 py-1.5"
-              >
-                {TYPE_OPTIONS.map(o => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+              <label className="text-xs font-medium text-gray-500 uppercase">Fecha límite</label>
+              <input
+                type="date"
+                value={dateEnd}
+                onChange={e => handleDateChange('end', e.target.value)}
+                className="w-full mt-1 border rounded-md px-2 py-1.5 text-sm"
+              />
             </div>
-            {initiative.period_value && (
-              <div>
-                <label className="text-xs font-medium text-gray-500 uppercase">Periodo</label>
-                <p className="mt-1 text-sm text-gray-700 py-1.5">{initiative.period_value} ({initiative.period_type})</p>
+          )}
+
+          {/* Dates for Experimentos (inicio y fin) */}
+          {initiative.phase === 'discovery' && (
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase">Periodo</label>
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                <div>
+                  <label className="text-[10px] text-gray-400">Inicio</label>
+                  <input
+                    type="date"
+                    value={dateStart}
+                    onChange={e => handleDateChange('start', e.target.value)}
+                    className="w-full border rounded-md px-2 py-1.5 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-400">Fin</label>
+                  <input
+                    type="date"
+                    value={dateEnd}
+                    onChange={e => handleDateChange('end', e.target.value)}
+                    className="w-full border rounded-md px-2 py-1.5 text-sm"
+                  />
+                </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* RICE (backlog) */}
           {initiative.phase === 'backlog' && (
@@ -240,9 +298,9 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
                 <button
                   onClick={() => setShowPromote(true)}
                   className="w-full py-2.5 rounded-md text-white font-medium text-sm transition hover:opacity-90"
-                  style={{ backgroundColor: '#3c527a' }}
+                  style={{ backgroundColor: isExperimentType ? '#7c3aed' : '#3c527a' }}
                 >
-                  Promover a Roadmap
+                  {promoteButtonText}
                 </button>
               )}
             </div>
@@ -288,7 +346,7 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
             </div>
           )}
 
-          {/* ===== DISCOVERY: Experiment fields ===== */}
+          {/* ===== EXPERIMENTOS (discovery): Experiment fields ===== */}
           {initiative.phase === 'discovery' && (
             <div className="space-y-3 border-t pt-4">
               <h3 className="text-sm font-semibold text-gray-700">Datos del Experimento</h3>
@@ -363,7 +421,7 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
                     onChange={e => handleExperimentDataChange('statistical_significance', e.target.checked ? 'true' : 'false')}
                     className="rounded accent-[#3c527a]"
                   />
-                  Significancia estadística (≥300 usuarios, comparativo válido)
+                  Significancia estadística
                 </label>
               </div>
 
@@ -407,74 +465,21 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
                   </select>
                 </div>
               </div>
-
-              {/* Escalar a Delivery button */}
-              {experimentData.result === 'won' && experimentData.next_steps === 'scale' && (
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                  <p className="text-sm text-green-800 mb-2">
-                    Experimento ganador listo para escalar
-                  </p>
-                  <p className="text-xs text-green-600 mb-3">
-                    Esto creará una nueva Funcionalidad en Delivery vinculada a este experimento.
-                  </p>
-                </div>
-              )}
-
-              {/* Proyecto asociado (Discovery) */}
-              <div className="border-t pt-3 mt-3">
-                <h4 className="text-xs font-semibold text-gray-600 uppercase mb-2">Proyecto asociado</h4>
-                {initiative.project_id ? (
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-500">Proyecto vinculado:</span>
-                    <a
-                      href={`/projects/${initiative.project_id}`}
-                      className="text-sm font-medium hover:underline"
-                      style={{ color: '#3c527a' }}
-                    >
-                      {initiative.project_name || `Proyecto #${initiative.project_id}`}
-                    </a>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setShowBulkCreate(true)}
-                    className="w-full py-2.5 rounded-md text-sm font-medium border-2 border-dashed border-gray-300 text-gray-500 hover:border-gray-400 hover:text-gray-600 transition"
-                  >
-                    Generar / Vincular Proyecto
-                  </button>
-                )}
-              </div>
             </div>
           )}
 
-          {/* ===== DELIVERY: Project fields ===== */}
+          {/* ===== ROADMAP (delivery): Finalize ===== */}
           {initiative.phase === 'delivery' && (
             <div className="space-y-3 border-t pt-4">
-              <h3 className="text-sm font-semibold text-gray-700">Delivery</h3>
+              <h3 className="text-sm font-semibold text-gray-700">Roadmap</h3>
 
-              {/* Show parent experiment link if exists */}
-              {initiative.parent_id && (
-                <div className="text-xs text-gray-500 bg-purple-50 rounded p-2">
-                  Originado desde experimento #{initiative.parent_id}
-                </div>
-              )}
-
-              {initiative.project_id ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-gray-500">Proyecto vinculado:</span>
-                  <a
-                    href={`/projects/${initiative.project_id}`}
-                    className="text-sm font-medium hover:underline"
-                    style={{ color: '#3c527a' }}
-                  >
-                    {initiative.project_name || `Proyecto #${initiative.project_id}`}
-                  </a>
-                </div>
-              ) : (
+              {/* Finalize button for delivery items */}
+              {initiative.status !== 'completed' && initiative.phase !== 'finalized' && (
                 <button
-                  onClick={() => setShowBulkCreate(true)}
-                  className="w-full py-2.5 rounded-md text-sm font-medium border-2 border-dashed border-gray-300 text-gray-500 hover:border-gray-400 hover:text-gray-600 transition"
+                  onClick={handleFinalizeFromSidePeek}
+                  className="w-full py-2.5 rounded-md text-sm font-medium border-2 border-dashed border-green-300 text-green-600 hover:border-green-400 hover:text-green-700 transition"
                 >
-                  Generar / Vincular Proyecto
+                  Marcar como completado y Finalizar
                 </button>
               )}
             </div>
@@ -487,7 +492,7 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
               className="w-full py-3 rounded-md text-white font-semibold text-sm transition hover:opacity-90"
               style={{ backgroundColor: '#22c55e' }}
             >
-              📅 Finalizar y Anunciar en Calendario
+              Finalizar y Anunciar en Calendario
             </button>
           )}
         </div>
@@ -527,15 +532,6 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
         <FinalizeModal
           initiative={initiative}
           onClose={() => setShowFinalize(false)}
-          onUpdate={onUpdate}
-          onRefresh={onRefresh}
-        />
-      )}
-
-      {showBulkCreate && (
-        <BulkCreateProjectModal
-          initiative={initiative}
-          onClose={() => setShowBulkCreate(false)}
           onUpdate={onUpdate}
           onRefresh={onRefresh}
         />
