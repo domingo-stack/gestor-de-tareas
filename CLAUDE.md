@@ -31,11 +31,11 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 ### Authentication & Authorization
 
 - `context/AuthContext.tsx` provides a global `useAuth()` hook exposing `session`, `user`, `isLoading`, and the `supabase` client instance.
-- `context/PermissionsContext.tsx` provides `usePermissions()` hook exposing `role`, `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `isLoading`, `refetch`.
+- `context/PermissionsContext.tsx` provides `usePermissions()` hook exposing `role`, `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `mod_customer_success`, `isLoading`, `refetch`.
 - `components/AuthGuard.tsx` wraps protected pages; redirects to `/login` if unauthenticated.
 - `components/ModuleGuard.tsx` wraps page content; checks module-level permissions. Shows "Acceso Denegado" if user lacks permission, or "Cuenta Pendiente" if user has no role (registered without invitation).
 - **Roles**: `superadmin` (full access), `member` (org employee), `invitado` (external collaborator).
-- **Permissions**: Per-module booleans in `user_permissions` table: `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `mod_producto`. Superadmin always has all permissions.
+- **Permissions**: Per-module booleans in `user_permissions` table: `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `mod_producto`, `mod_customer_success`. Superadmin always has all permissions.
 - **Registration**: Invitation-only via `/register?invite_token=TOKEN`. Without token, registration is blocked.
 - Role info + permissions fetched via `get_user_role_and_permissions` RPC.
 
@@ -50,6 +50,7 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 | `/finance` | Transaction management, multi-currency, CAC tracking |
 | `/revenue` | Revenue dashboard with country/provider/plan filters |
 | `/producto` | Product module (Backlog, Roadmap, Experimentos) |
+| `/customer-success` | Customer Success dashboard (embedded Kali Analytics iframe) |
 | `/admin/users` | Superadmin user & permissions administration |
 | `/settings/team` | Organization member management |
 | `/settings/notifications` | Per-user notification preferences (email/in-app toggles) |

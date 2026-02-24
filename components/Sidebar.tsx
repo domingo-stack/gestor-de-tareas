@@ -12,6 +12,7 @@ import {
   BanknotesIcon,
   ChartBarIcon,
   RocketLaunchIcon,
+  ChatBubbleLeftRightIcon,
   Cog6ToothIcon,
   ArrowRightStartOnRectangleIcon,
   Bars3Icon,
@@ -22,7 +23,7 @@ const STORAGE_KEY = 'sidebar-expanded'
 
 export default function Sidebar() {
   const { user, supabase } = useAuth()
-  const { role, mod_calendario, mod_finanzas, mod_revenue, mod_producto } = usePermissions()
+  const { role, mod_calendario, mod_finanzas, mod_revenue, mod_producto, mod_customer_success } = usePermissions()
   const router = useRouter()
   const pathname = usePathname()
 
@@ -61,6 +62,7 @@ export default function Sidebar() {
     { href: '/finance', label: 'Finanzas', icon: BanknotesIcon, visible: role === 'superadmin' || !!mod_finanzas },
     { href: '/revenue', label: 'Revenue', icon: ChartBarIcon, visible: role === 'superadmin' || !!mod_revenue },
     { href: '/producto', label: 'Producto', icon: RocketLaunchIcon, visible: role === 'superadmin' || !!mod_producto },
+    { href: '/customer-success', label: 'Customer Success', icon: ChatBubbleLeftRightIcon, visible: role === 'superadmin' || !!mod_customer_success },
   ]
 
   const isActive = (href: string) => {

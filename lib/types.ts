@@ -70,6 +70,7 @@ export type UserPermissions = {
   mod_revenue: boolean;
   mod_finanzas: boolean;
   mod_producto: boolean;
+  mod_customer_success: boolean;
 };
 
 export type ExperimentData = {

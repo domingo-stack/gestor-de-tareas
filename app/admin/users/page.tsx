@@ -17,6 +17,7 @@ type AdminUser = {
   mod_revenue: boolean;
   mod_finanzas: boolean;
   mod_producto: boolean;
+  mod_customer_success: boolean;
   created_at: string;
 };
 
@@ -28,6 +29,7 @@ const MODULE_LABELS: Record<string, string> = {
   mod_revenue: 'Revenue',
   mod_finanzas: 'Finanzas',
   mod_producto: 'Producto',
+  mod_customer_success: 'Customer Success',
 };
 
 export default function AdminUsersPage() {
@@ -209,6 +211,7 @@ export default function AdminUsersPage() {
                     <th className="text-center p-4 font-semibold text-gray-600">Revenue</th>
                     <th className="text-center p-4 font-semibold text-gray-600">Finanzas</th>
                     <th className="text-center p-4 font-semibold text-gray-600">Producto</th>
+                    <th className="text-center p-4 font-semibold text-gray-600">Customer Success</th>
                     <th className="text-center p-4 font-semibold text-gray-600">Acciones</th>
                   </tr>
                 </thead>
@@ -238,7 +241,7 @@ export default function AdminUsersPage() {
                           ))}
                         </select>
                       </td>
-                      {(['mod_tareas', 'mod_calendario', 'mod_revenue', 'mod_finanzas', 'mod_producto'] as const).map(
+                      {(['mod_tareas', 'mod_calendario', 'mod_revenue', 'mod_finanzas', 'mod_producto', 'mod_customer_success'] as const).map(
                         (mod) => (
                           <td key={mod} className="p-4 text-center">
                             <button
