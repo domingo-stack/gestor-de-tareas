@@ -8,6 +8,13 @@ import FinalizeModal from './FinalizeModal'
 import MediaTextarea from '@/components/MediaTextarea'
 import { toast } from 'sonner'
 
+const TYPE_OPTIONS = [
+  { value: 'experiment', label: 'Experimento' },
+  { value: 'feature', label: 'Funcionalidad' },
+  { value: 'tech_debt', label: 'Deuda Técnica' },
+  { value: 'bug', label: 'Bug' },
+]
+
 const RESULT_OPTIONS = [
   { value: '', label: 'Pendiente' },
   { value: 'won', label: 'Ganó' },
@@ -247,6 +254,22 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
                   />
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Tipo (backlog only - determines promote target) */}
+          {initiative.phase === 'backlog' && (
+            <div>
+              <label className="text-xs font-medium text-gray-500 uppercase">Tipo</label>
+              <select
+                value={initiative.item_type || 'feature'}
+                onChange={e => onUpdate(initiative.id, { item_type: e.target.value as any })}
+                className="w-full mt-1 border rounded-md px-2 py-1.5 text-sm"
+              >
+                {TYPE_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
             </div>
           )}
 
