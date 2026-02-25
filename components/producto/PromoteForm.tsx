@@ -46,7 +46,7 @@ export default function PromoteForm({ initiative, onUpdate, onCancel, onRefresh 
       toast.error('Debes asignar un responsable')
       return
     }
-    if (!startDate) {
+    if (via === 'discovery' && !startDate) {
       toast.error('La fecha de inicio es requerida')
       return
     }
@@ -57,7 +57,9 @@ export default function PromoteForm({ initiative, onUpdate, onCancel, onRefresh 
       status: 'design',
       owner_id: ownerId,
       period_type: 'week',
-      period_value: `${startDate} → ${endDate || '...'}`,
+      period_value: via === 'delivery'
+        ? (endDate || '')
+        : `${startDate} → ${endDate || '...'}`,
     })
     toast.success(`Promovido a ${via === 'discovery' ? 'Experimentos' : 'Roadmap'}`)
     await onRefresh()
@@ -86,19 +88,9 @@ export default function PromoteForm({ initiative, onUpdate, onCancel, onRefresh 
 
       {/* Date range */}
       <div>
-        <label className="text-xs text-gray-500">Periodo</label>
-        <div className="grid grid-cols-2 gap-2 mt-1">
-          <div>
-            <label className="text-[10px] text-gray-400">Inicio</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={e => setStartDate(e.target.value)}
-              className="w-full border rounded-md px-2 py-1.5 text-sm"
-            />
-          </div>
-          <div>
-            <label className="text-[10px] text-gray-400">Fin estimado</label>
+        <label className="text-xs text-gray-500">{via === 'delivery' ? 'Fecha fin estimado' : 'Periodo'}</label>
+        {via === 'delivery' ? (
+          <div className="mt-1">
             <input
               type="date"
               value={endDate}
@@ -106,7 +98,28 @@ export default function PromoteForm({ initiative, onUpdate, onCancel, onRefresh 
               className="w-full border rounded-md px-2 py-1.5 text-sm"
             />
           </div>
-        </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2 mt-1">
+            <div>
+              <label className="text-[10px] text-gray-400">Inicio</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
+                className="w-full border rounded-md px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-gray-400">Fin estimado</label>
+              <input
+                type="date"
+                value={endDate}
+                onChange={e => setEndDate(e.target.value)}
+                className="w-full border rounded-md px-2 py-1.5 text-sm"
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Via */}

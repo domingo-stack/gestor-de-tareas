@@ -47,10 +47,11 @@ interface SidePeekProps {
   onRefresh: () => Promise<void>
   autoPromote?: boolean
   autoFinalize?: boolean
+  onFinalize?: (initiative: ProductInitiative) => void
   members?: { user_id: string; email: string; first_name?: string }[]
 }
 
-export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRefresh, autoPromote, autoFinalize, members = [] }: SidePeekProps) {
+export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRefresh, autoPromote, autoFinalize, onFinalize, members = [] }: SidePeekProps) {
   const [title, setTitle] = useState(initiative.title)
   const [problemStatement, setProblemStatement] = useState(initiative.problem_statement || '')
   const [showPromote, setShowPromote] = useState(!!autoPromote)
@@ -118,7 +119,11 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
 
   const handleFinalizeFromSidePeek = async () => {
     await onUpdate(initiative.id, { status: 'completed' })
-    setShowFinalize(true)
+    if (onFinalize) {
+      onFinalize({ ...initiative, status: 'completed' })
+    } else {
+      setShowFinalize(true)
+    }
   }
 
   const handleDateChange = (type: 'start' | 'end', val: string) => {
@@ -511,7 +516,13 @@ export default function SidePeek({ initiative, onClose, onUpdate, onDelete, onRe
           {/* ===== FINALIZE BUTTON ===== */}
           {initiative.status === 'completed' && initiative.phase !== 'finalized' && (
             <button
-              onClick={() => setShowFinalize(true)}
+              onClick={() => {
+                if (onFinalize) {
+                  onFinalize(initiative)
+                } else {
+                  setShowFinalize(true)
+                }
+              }}
               className="w-full py-3 rounded-md text-white font-semibold text-sm transition hover:opacity-90"
               style={{ backgroundColor: '#22c55e' }}
             >

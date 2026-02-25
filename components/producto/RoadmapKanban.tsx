@@ -122,7 +122,7 @@ export default function RoadmapKanban({ initiatives, onSelect, onUpdate, onFinal
                         mode="roadmap"
                         members={members}
                         onFinalize={
-                          item.status === 'completed' && onFinalize
+                          item.status === 'completed' && item.phase !== 'finalized' && onFinalize
                             ? () => onFinalize(item)
                             : undefined
                         }

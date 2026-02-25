@@ -16,7 +16,7 @@ interface FinalizeModalProps {
 export default function FinalizeModal({ initiative, onClose, onUpdate, onRefresh }: FinalizeModalProps) {
   const { supabase, user } = useAuth()
 
-  const [title, setTitle] = useState(`[Lanzamiento] ${initiative.title}`)
+  const [title, setTitle] = useState(initiative.title)
   const [description, setDescription] = useState(buildDescription(initiative))
   const [eventDate, setEventDate] = useState(new Date().toISOString().split('T')[0])
   const [saving, setSaving] = useState(false)
@@ -30,6 +30,7 @@ export default function FinalizeModal({ initiative, onClose, onUpdate, onRefresh
       await onUpdate(initiative.id, { phase: 'finalized' })
 
       // 2. Create calendar event with correct company_events schema
+      const videoLink = extractUrl(initiative.problem_statement || '')
       const { error } = await supabase
         .from('company_events')
         .insert({
@@ -40,6 +41,7 @@ export default function FinalizeModal({ initiative, onClose, onUpdate, onRefresh
           team: 'Producto',
           user_id: user.id,
           is_draft: false,
+          ...(videoLink ? { video_link: videoLink } : {}),
           custom_data: {
             initiative_id: initiative.id,
             source: 'producto_module',
@@ -118,6 +120,11 @@ export default function FinalizeModal({ initiative, onClose, onUpdate, onRefresh
       </div>
     </Modal>
   )
+}
+
+function extractUrl(text: string): string | null {
+  const match = text.match(/https?:\/\/[^\s<>"')\]]+/)
+  return match ? match[0] : null
 }
 
 function buildDescription(initiative: ProductInitiative): string {

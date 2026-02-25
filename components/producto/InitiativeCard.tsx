@@ -31,7 +31,7 @@ export default function InitiativeCard({ initiative, onClick, mode, onFinalize, 
       ref={setNodeRef}
       style={style}
       {...attributes}
-      className={`group bg-white border rounded-lg p-3 flex flex-col gap-1.5 transition-shadow hover:shadow-md ${isDragging ? 'shadow-lg' : ''}`}
+      className={`group border rounded-lg p-3 flex flex-col gap-1.5 transition-shadow hover:shadow-md ${isDragging ? 'shadow-lg' : ''} ${initiative.phase === 'finalized' ? 'bg-gray-50 opacity-80' : 'bg-white'}`}
     >
       {/* Header: drag handle + title + responsable */}
       <div className="flex items-start gap-2">
@@ -68,8 +68,16 @@ export default function InitiativeCard({ initiative, onClick, mode, onFinalize, 
           </div>
         )}
 
-        {/* Completed: show finalize button */}
-        {initiative.status === 'completed' && onFinalize && (
+        {/* Finalized badge */}
+        {initiative.phase === 'finalized' && (
+          <div className="mt-2 w-full py-1 px-2 rounded-md text-[11px] font-medium text-center"
+            style={{ backgroundColor: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0' }}>
+            Lanzado
+          </div>
+        )}
+
+        {/* Completed: show finalize button (only if not already finalized) */}
+        {initiative.phase !== 'finalized' && initiative.status === 'completed' && onFinalize && (
           <button
             onClick={e => { e.stopPropagation(); onFinalize() }}
             className="mt-2 w-full py-1.5 px-2 rounded-md text-[11px] font-medium text-center transition hover:opacity-90"

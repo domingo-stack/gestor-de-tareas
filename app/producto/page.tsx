@@ -8,6 +8,7 @@ import BacklogTable from '@/components/producto/BacklogTable'
 import RoadmapKanban from '@/components/producto/RoadmapKanban'
 import ExperimentosTable from '@/components/producto/ExperimentosTable'
 import SidePeek from '@/components/producto/SidePeek'
+import FinalizeModal from '@/components/producto/FinalizeModal'
 import { ProductInitiative } from '@/lib/types'
 import { Toaster } from 'sonner'
 
@@ -85,7 +86,7 @@ export default function ProductoPage() {
 
   const backlogItems = initiatives.filter(i => i.phase === 'backlog')
   const discoveryItems = initiatives.filter(i => i.phase === 'discovery')
-  const deliveryItems = initiatives.filter(i => i.phase === 'delivery')
+  const deliveryItems = initiatives.filter(i => i.phase === 'delivery' || i.phase === 'finalized')
 
   const handleSelect = (initiative: ProductInitiative) => {
     setSelectedInitiative(initiative)
@@ -265,8 +266,8 @@ export default function ProductoPage() {
             </>
           )}
 
-          {/* SidePeek */}
-          {selectedInitiative && (
+          {/* SidePeek (not shown when finalizing) */}
+          {selectedInitiative && !finalizingInitiative && (
             <SidePeek
               initiative={selectedInitiative}
               onClose={() => { setSelectedInitiative(null); setPromotingInitiative(null); setFinalizingInitiative(null) }}
@@ -274,8 +275,22 @@ export default function ProductoPage() {
               onDelete={handleDelete}
               onRefresh={fetchInitiatives}
               autoPromote={promotingInitiative?.id === selectedInitiative.id}
-              autoFinalize={finalizingInitiative?.id === selectedInitiative.id}
+              autoFinalize={false}
+              onFinalize={(init) => {
+                setFinalizingInitiative(init)
+                setSelectedInitiative(null)
+              }}
               members={members}
+            />
+          )}
+
+          {/* FinalizeModal directo (sin SidePeek) */}
+          {finalizingInitiative && (
+            <FinalizeModal
+              initiative={finalizingInitiative}
+              onClose={() => { setFinalizingInitiative(null); setSelectedInitiative(null) }}
+              onUpdate={handleUpdate}
+              onRefresh={fetchInitiatives}
             />
           )}
         </div>
