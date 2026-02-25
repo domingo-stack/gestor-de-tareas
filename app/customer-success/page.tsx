@@ -13,10 +13,11 @@ export default function CustomerSuccessPage() {
           </h1>
           <div className="bg-white rounded-lg shadow-md overflow-hidden">
             <iframe
-              src="https://kali-analitycs.vercel.app/"
+              src="https://kali-analitycs.vercel.app/?token=e3354ab5-d2c3-49ed-bd89-a916c690f130&embed=true"
               width="100%"
-              height="1400px"
-              style={{ border: 'none' }}
+              height="1200"
+              frameBorder="0"
+              style={{ border: 'none', borderRadius: '12px' }}
             />
           </div>
         </div>
