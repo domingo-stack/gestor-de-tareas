@@ -48,7 +48,7 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 | `/projects/[id]` | Project detail with Kanban board (drag-and-drop) |
 | `/calendar` | FullCalendar event management with team-colored events |
 | `/finance` | Transaction management, multi-currency, CAC tracking |
-| `/revenue` | Revenue dashboard with country/provider/plan filters |
+| `/revenue` | Growth Dashboard — 8-tab growth analytics (Revenue, Country, Churn, Conversion, Acquisition, Behavior, Reports) |
 | `/producto` | Product module (Backlog, Roadmap, Experimentos) |
 | `/customer-success` | Customer Success dashboard (embedded Kali Analytics iframe) |
 | `/admin/users` | Superadmin user & permissions administration |
@@ -59,7 +59,7 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 
 - All Supabase queries happen client-side inside components (no server actions or API routes).
 - **RPC functions**: `get_user_role_and_permissions`, `get_all_members`, `get_all_users_admin`, `update_user_role`, `update_user_module_permission`, `deactivate_user`, `add_member`, `remove_member`, `create_task_v2`, `create_project`, `get_project_members`, `get_projects_with_members`, `get_my_assigned_tasks_with_projects`, `toggle_project_favorite`, `delete_project_and_tasks`, `migrate_tasks_and_delete_project`, `create_content_review`, `submit_review_response`, `get_review_history`, `get_notification_preferences`, `upsert_notification_preferences`, `get_all_notification_preferences`, `get_notification_recipients`.
-- **Key tables**: `profiles` (role), `user_permissions` (module booleans), `org_settings` (singleton org config), `invitations` (invite tokens), `tasks` (uses `assignee_user_id` UUID column, not `assignee_id`), `content_reviews` (review rounds), `review_responses` (reviewer votes), `product_initiatives` (Dual-Track product items with RICE scoring), `notification_preferences` (per-user notification channel preferences), `project_favorites` (user-project favorite relation, managed via `toggle_project_favorite` RPC).
+- **Key tables**: `profiles` (role), `user_permissions` (module booleans), `org_settings` (singleton org config), `invitations` (invite tokens), `tasks` (uses `assignee_user_id` UUID column, not `assignee_id`), `content_reviews` (review rounds), `review_responses` (reviewer votes), `product_initiatives` (Dual-Track product items with RICE scoring), `notification_preferences` (per-user notification channel preferences), `project_favorites` (user-project favorite relation, managed via `toggle_project_favorite` RPC), `rev_orders` (payment orders with `client_type`, `plan_category`, `plan_duration` columns), `growth_users` (Bubble users sync), `growth_events` (Mixpanel events), `growth_funnels` (Mixpanel funnels), `growth_retention` (Mixpanel cohorts), `growth_metrics_daily` (DAU/WAU/MAU), `growth_report_config` (report recipients), `growth_report_log` (report send history), `growth_weekly_snapshots` (weekly computed metrics).
 - Types are centralized in `lib/types.ts` — key entities: `Task`, `Project`, `CompanyEvent`, `Transaction`, `Account`, `Category`, `MonthlyMetric`, `UserPermissions`, `ProductInitiative`, `ExperimentData`.
 
 ### Supabase Edge Functions (`supabase/functions/`)
@@ -116,6 +116,20 @@ Calendar events support a content approval workflow:
 - **Deep links**: `/calendar?event=123` opens the event modal directly (used in notification emails).
 - **Auto-approve**: `auto-approve-reviews` edge function invoked by external cron every 5 min. Protected with `CRON_SECRET` env var.
 - **Components**: `CountdownTimer` (expiration countdown), review mode in `EventDetailModal` (request form, response panel, history).
+
+### Growth Module (8-tab dashboard at `/revenue`)
+
+The `/revenue` route implements a Growth Dashboard with 8 tabs:
+- **Resumen Ejecutivo**: Weekly KPI grid — Revenue (total/new/recurring/ARPU) from `rev_orders`, Users (registrations/activation/conversion) from `growth_users`, Behavior (DAU/WAU/MAU) from `growth_metrics_daily`. WeekSelector for navigation.
+- **Revenue**: Improved revenue explorer — granularity toggle (daily/weekly/monthly), stacked bars (Nuevo vs Renovación), pie charts (country/plan/provider/category), paginated detail table with `client_type`, `plan_category`, `plan_duration` columns.
+- **Por País**: Matrix table — rows=countries, columns=periods (monthly/weekly/daily), year selector (2024-2026), optional YoY % growth overlay. Summary stats.
+- **Churn & Renovación** (Fase 2): Weekly churn table, renewal tracking, actionable renewal list. Requires `growth_users`.
+- **Conversión** (Fase 2+3): Funnel Registro→Activación→Paywall→Pago. Onboarding funnel from Mixpanel.
+- **Adquisición** (Fase 2+3): Country×Status cross-table, Channel×Plan cross-table. Requires `growth_users` + `growth_events`.
+- **Comportamiento** (Fase 3): DAU/WAU/MAU trends, retention cohorts, paywall insights. Requires Mixpanel pipeline.
+- **Reportes** (Fase 4, superadmin only): Report recipients CRUD, send history, test send.
+- **Components**: `components/growth/` — KpiCard, GrowthFilters, WeekSelector, ExecutiveSummary, RevenueTab, RevenueByCountry, ChurnRenewal, ConversionFunnel, AcquisitionTab, RetentionCohort, ReportConfig.
+- **Data sources**: `rev_orders` (existing, enhanced), `growth_users` (Bubble Users via n8n), `growth_events`/`growth_funnels`/`growth_retention`/`growth_metrics_daily` (Mixpanel via n8n).
 
 ### Product Module (Backlog | Roadmap | Experimentos)
 

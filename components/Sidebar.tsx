@@ -60,7 +60,7 @@ export default function Sidebar() {
     { href: '/projects', label: 'Proyectos', icon: FolderIcon, visible: true },
     { href: '/calendar', label: 'Calendario', icon: CalendarDaysIcon, visible: role === 'superadmin' || !!mod_calendario },
     { href: '/finance', label: 'Finanzas', icon: BanknotesIcon, visible: role === 'superadmin' || !!mod_finanzas },
-    { href: '/revenue', label: 'Revenue', icon: ChartBarIcon, visible: role === 'superadmin' || !!mod_revenue },
+    { href: '/revenue', label: 'Growth', icon: ChartBarIcon, visible: role === 'superadmin' || !!mod_revenue },
     { href: '/producto', label: 'Producto', icon: RocketLaunchIcon, visible: role === 'superadmin' || !!mod_producto },
     { href: '/customer-success', label: 'Customer Success', icon: ChatBubbleLeftRightIcon, visible: role === 'superadmin' || !!mod_customer_success },
   ]
