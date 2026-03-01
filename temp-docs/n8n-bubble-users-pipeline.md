@@ -30,12 +30,14 @@ Con 340k+ usuarios, **NO** traemos todo cada vez. La estrategia es:
 | `Ultima Conexion` | SI |
 | `Subscription_start` | SI |
 | `Subscription_end` | SI |
-| `plan gratuito` | SI |
-| `plan pagado` | SI |
+| `Plan gratuito` | SI |
+| `Plan pagado` | SI |
 | `Cancelado` | SI |
-| `PlanID` | SI |
+| `Suscripcion` | **SI** — trae el nombre del plan ("12 Meses", "Gratuito", etc.) |
 | `Numero Invitados` | SI |
 | Todo lo demas | NO — no lo necesitamos |
+
+> **NOTA:** El campo `PlanID` esta vacio en la mayoria de registros. El nombre del plan real viene en `Suscripcion`.
 
 4. Descarga el CSV
 
@@ -53,10 +55,10 @@ Abre el CSV en Excel/Sheets y renombra las columnas para que coincidan con Supab
 | `Ultima Conexion` | `last_login` | fecha/texto | Mismo formato que arriba |
 | `Subscription_start` | `subscription_start` | fecha/texto | |
 | `Subscription_end` | `subscription_end` | fecha/texto | |
-| `plan gratuito` | `plan_free` | booleano | Debe ser `true` o `false` (no "yes"/"no") |
-| `plan pagado` | `plan_paid` | booleano | Debe ser `true` o `false` |
-| `Cancelado` | `cancelled` | booleano | Debe ser `true` o `false` |
-| `PlanID` | `plan_id` | texto | "Anual", "1 Mes", etc. |
+| `Plan gratuito` | `plan_free` | booleano | Bubble exporta `"si"`/`"no"`. Convertir a `true`/`false` (ver transformaciones) |
+| `Plan pagado` | `plan_paid` | booleano | Bubble exporta `"si"`/`"no"`. Convertir a `true`/`false` |
+| `Cancelado` | `cancelled` | booleano | Bubble exporta `"si"`/`"no"` o `"yes"`/`"no"`. Convertir a `true`/`false` |
+| `Suscripcion` | `plan_id` | texto | **Este campo trae el plan real**: "12 Meses", "Gratuito", "1 Mes", etc. |
 | `Evento de Valor` | `eventos_valor` | numero | Entero. Si esta vacio, poner `0` |
 | `Numero Invitados` | `referral_count` | numero | Entero. Si esta vacio, poner `0` |
 
@@ -74,10 +76,13 @@ Si Bubble exporta fechas como `Jun 15, 2025 2:30 pm`:
 - El formato final debe ser: `2025-06-15T14:30:00Z`
 - **Si ya viene en ISO 8601** (`2025-06-15T14:30:00.000Z`), no necesitas cambiar nada
 
-#### Booleanos
-Si Bubble exporta `yes`/`no` en vez de `true`/`false`:
-- Buscar y reemplazar en toda la columna: `yes` → `true`, `no` → `false`
-- O en Sheets: `=IF(A2="yes", "true", "false")`
+#### Booleanos (IMPORTANTE)
+Bubble exporta `"si"`/`"no"` (en espanol) para los campos `Plan gratuito`, `Plan pagado` y `Cancelado`.
+Supabase necesita `true`/`false`. Hacer buscar y reemplazar en CADA columna booleana:
+- `si` → `true`
+- `no` → `false`
+- En Sheets: `=IF(LOWER(A2)="si", "true", IF(LOWER(A2)="yes", "true", "false"))`
+- Tambien puede venir `"yes"`/`"no"` dependiendo del idioma de Bubble
 
 #### Numeros vacios
 Si `Evento de Valor` o `Numero Invitados` estan vacios:
@@ -249,6 +254,16 @@ Con cambios frecuentes (diarios), espera entre **500 y 5,000 usuarios** por sync
 **Nodo: Code (JavaScript)**
 
 ```javascript
+// Helper: convierte "si"/"yes"/true a booleano
+function toBool(val) {
+  if (val === true) return true;
+  if (typeof val === 'string') {
+    const lower = val.toLowerCase().trim();
+    return lower === 'si' || lower === 'sí' || lower === 'yes' || lower === 'true';
+  }
+  return false;
+}
+
 const results = [];
 
 for (const item of $input.all()) {
@@ -262,7 +277,6 @@ for (const item of $input.all()) {
     email: u.email || null,
     country: u["Pais"] || u["País"] || null,
     origin: u["Origen"] || null,
-    plan_id: u["PlanID"] || null,
 
     // === FECHAS ===
     // Bubble envia ISO 8601 → Supabase lo acepta directo
@@ -272,12 +286,17 @@ for (const item of $input.all()) {
     subscription_start: u["Subscription_start"] || null,
     subscription_end: u["Subscription_end"] || null,
 
+    // === PLAN (nombre real del plan) ===
+    // El campo "Suscripcion" trae el plan: "12 Meses", "Gratuito", "1 Mes", etc.
+    // El campo "PlanID" suele estar vacio — NO usarlo
+    plan_id: u["Suscripcion"] || u["Suscripción"] || null,
+
     // === BOOLEANOS ===
-    // Bubble puede enviar true, false, null o ""
-    // Usar === true para limpiar
-    plan_free: u["plan gratuito"] === true,
-    plan_paid: u["plan pagado"] === true,
-    cancelled: u["Cancelado"] === true,
+    // Bubble envia "si"/"no" (texto en espanol) via API
+    // Convertimos a booleano real
+    plan_free: toBool(u["Plan gratuito"] || u["plan gratuito"]),
+    plan_paid: toBool(u["Plan pagado"] || u["plan pagado"]),
+    cancelled: toBool(u["Cancelado"]),
 
     // === NUMEROS ===
     // parseInt con fallback a 0
@@ -306,10 +325,10 @@ return results;
 | `Ultima Conexion` | `last_login` | Intentar ambos nombres |
 | `Subscription_start` | `subscription_start` | Ninguna |
 | `Subscription_end` | `subscription_end` | Ninguna |
-| `plan gratuito` | `plan_free` | `=== true` |
-| `plan pagado` | `plan_paid` | `=== true` |
-| `Cancelado` | `cancelled` | `=== true` |
-| `PlanID` | `plan_id` | `\|\| null` |
+| `Plan gratuito` | `plan_free` | `toBool()` — convierte "si"/"no" a true/false |
+| `Plan pagado` | `plan_paid` | `toBool()` — convierte "si"/"no" a true/false |
+| `Cancelado` | `cancelled` | `toBool()` — convierte "si"/"no" a true/false |
+| `Suscripcion` | `plan_id` | `\|\| null` — trae "12 Meses", "Gratuito", etc. (NO usar PlanID) |
 | `Evento de Valor` | `eventos_valor` | `parseInt() \|\| 0` |
 | `Numero Invitados` | `referral_count` | `parseInt() \|\| 0` |
 | *(generado)* | `updated_at` | `new Date().toISOString()` |
