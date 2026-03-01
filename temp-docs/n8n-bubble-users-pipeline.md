@@ -1,34 +1,190 @@
 # Pipeline n8n: Bubble Users → Supabase `growth_users`
 
-## Resumen
+## Estrategia: Carga historica + Sync incremental
 
-Este pipeline sincroniza la tabla **User** de Bubble hacia la tabla **growth_users** de Supabase cada 4 horas. Usa upsert (insertar o actualizar) basado en `bubble_user_id`.
+Con 340k+ usuarios, **NO** traemos todo cada vez. La estrategia es:
 
----
-
-## Arquitectura del flujo
-
-```
-[Schedule Trigger]  →  [Loop: Paginacion Bubble]  →  [Transformar datos]  →  [Supabase Upsert]  →  [Log sync]
-      (4h)                   (100 por pagina)           (mapeo + fechas)        (growth_users)       (sync_logs)
-```
+| Fase | Que | Como | Frecuencia |
+|---|---|---|---|
+| **A** | Carga historica (340k) | CSV export desde Bubble → Supabase | 1 sola vez |
+| **B** | Sync incremental | API Bubble filtrado por `Modified Date` → n8n → Supabase | Cada 4h |
 
 ---
 
-## Paso 1: Schedule Trigger
+## FASE A: Carga Historica (CSV)
+
+### Paso 1: Exportar CSV desde Bubble
+
+1. Ve a **Data** → **App Data** → **User**
+2. Click en **Export** (o Export as CSV)
+3. Selecciona SOLO estos campos:
+
+| Campo en Bubble | Necesario? |
+|---|---|
+| `unique id` (o `_id`) | **SI** — es el identificador unico |
+| `email` | SI |
+| `Created Date` | SI |
+| `Pais` (o `País`) | SI |
+| `Origen` | SI |
+| `Evento de Valor` | SI |
+| `Ultima Conexion` | SI |
+| `Subscription_start` | SI |
+| `Subscription_end` | SI |
+| `plan gratuito` | SI |
+| `plan pagado` | SI |
+| `Cancelado` | SI |
+| `PlanID` | SI |
+| `Numero Invitados` | SI |
+| Todo lo demas | NO — no lo necesitamos |
+
+4. Descarga el CSV
+
+### Paso 2: Preparar el CSV
+
+Abre el CSV en Excel/Sheets y renombra las columnas para que coincidan con Supabase:
+
+| Columna original (Bubble) | Renombrar a | Tipo | Notas |
+|---|---|---|---|
+| `unique id` o `_id` | `bubble_user_id` | texto | **Obligatorio** — clave unica |
+| `email` | `email` | texto | |
+| `Pais` o `País` | `country` | texto | |
+| `Origen` | `origin` | texto | Canal: Facebook, Google, etc. |
+| `Created Date` | `created_date` | fecha/texto | Formato ISO: `2025-06-15T14:30:00Z`. Si viene como `Jun 15, 2025 2:30pm`, convertir (ver abajo) |
+| `Ultima Conexion` | `last_login` | fecha/texto | Mismo formato que arriba |
+| `Subscription_start` | `subscription_start` | fecha/texto | |
+| `Subscription_end` | `subscription_end` | fecha/texto | |
+| `plan gratuito` | `plan_free` | booleano | Debe ser `true` o `false` (no "yes"/"no") |
+| `plan pagado` | `plan_paid` | booleano | Debe ser `true` o `false` |
+| `Cancelado` | `cancelled` | booleano | Debe ser `true` o `false` |
+| `PlanID` | `plan_id` | texto | "Anual", "1 Mes", etc. |
+| `Evento de Valor` | `eventos_valor` | numero | Entero. Si esta vacio, poner `0` |
+| `Numero Invitados` | `referral_count` | numero | Entero. Si esta vacio, poner `0` |
+
+**NO incluir** estas columnas (se generan automaticamente):
+- `id` — Supabase lo genera (UUID)
+- `imported_at` — tiene default `now()`
+- `updated_at` — tiene default `now()`
+
+### Transformaciones necesarias en el CSV
+
+#### Fechas
+Si Bubble exporta fechas como `Jun 15, 2025 2:30 pm`:
+- En Google Sheets: Selecciona la columna → Format → Number → Date time
+- O usa formula: `=TEXT(A2, "yyyy-mm-ddThh:mm:ss") & "Z"`
+- El formato final debe ser: `2025-06-15T14:30:00Z`
+- **Si ya viene en ISO 8601** (`2025-06-15T14:30:00.000Z`), no necesitas cambiar nada
+
+#### Booleanos
+Si Bubble exporta `yes`/`no` en vez de `true`/`false`:
+- Buscar y reemplazar en toda la columna: `yes` → `true`, `no` → `false`
+- O en Sheets: `=IF(A2="yes", "true", "false")`
+
+#### Numeros vacios
+Si `Evento de Valor` o `Numero Invitados` estan vacios:
+- Reemplazar celdas vacias con `0`
+- En Sheets: seleccionar columna → Find & Replace → Find: (vacio) → Replace: `0`
+
+### Paso 3: Importar CSV a Supabase
+
+**Opcion A: Desde el dashboard (recomendada para < 500k filas)**
+
+1. Ve a **Supabase** → **Table Editor** → tabla `growth_users`
+2. Click en **Insert** → **Import data from CSV**
+3. Selecciona tu CSV preparado
+4. Verifica que el mapeo de columnas sea correcto
+5. Click **Import**
+
+**Opcion B: Si el CSV es muy grande (> 100MB)**
+
+Divide el CSV en chunks de 50k filas y sube cada uno por separado. O usa esta alternativa con `psql`:
+
+```bash
+# Conectar a Supabase via psql (la conexion string esta en Settings → Database)
+psql "postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres"
+
+# Importar CSV
+\copy growth_users(bubble_user_id, email, country, origin, created_date, last_login, subscription_start, subscription_end, plan_free, plan_paid, cancelled, plan_id, eventos_valor, referral_count) FROM '/ruta/al/archivo.csv' WITH CSV HEADER;
+```
+
+### Paso 4: Verificar la carga
+
+Ejecuta estas queries en Supabase SQL Editor:
+
+```sql
+-- Total de usuarios cargados
+SELECT COUNT(*) as total FROM growth_users;
+
+-- Debe dar ~340,000
+
+-- Verificar que no haya duplicados
+SELECT bubble_user_id, COUNT(*)
+FROM growth_users
+GROUP BY bubble_user_id
+HAVING COUNT(*) > 1;
+-- Debe dar 0 filas
+
+-- Muestra de datos
+SELECT bubble_user_id, email, country, origin, plan_paid, eventos_valor
+FROM growth_users
+LIMIT 10;
+
+-- Distribucion por pais (top 10)
+SELECT country, COUNT(*) as total
+FROM growth_users
+WHERE country IS NOT NULL
+GROUP BY country
+ORDER BY total DESC
+LIMIT 10;
+
+-- Pagados vs gratuitos
+SELECT
+  CASE WHEN plan_paid THEN 'Pagado' ELSE 'Gratuito' END as tipo,
+  COUNT(*) as total
+FROM growth_users
+GROUP BY plan_paid;
+```
+
+---
+
+## FASE B: Sync Incremental (pipeline n8n)
+
+Este pipeline solo trae usuarios **modificados desde la ultima sincronizacion**.
+
+### Arquitectura del flujo
+
+```
+[Schedule Trigger]  →  [Leer ultima sync]  →  [Loop: API Bubble con filtro Modified Date]
+      (4h)               (sync_logs)              (solo cambios recientes)
+                                                         |
+                                                         v
+                                              [Transformar datos]  →  [Supabase Upsert]  →  [Log sync]
+                                                  (mapeo campos)       (growth_users)       (sync_logs)
+```
+
+### Paso 1: Schedule Trigger
 
 - **Nodo:** Schedule Trigger
-- **Configuracion:**
-  - Trigger interval: Every 4 hours
-  - (O usa Cron: `0 */4 * * *`)
+- **Intervalo:** Every 4 hours
+- **Cron:** `0 */4 * * *`
 
----
+### Paso 2: Leer fecha de ultima sync
 
-## Paso 2: Obtener usuarios de Bubble (con paginacion)
+**Nodo:** Supabase (o HTTP Request)
 
-Bubble devuelve maximo 100 registros por request. Necesitas paginar.
+```sql
+SELECT created_at FROM sync_logs
+WHERE source = 'bubble_users' AND status = 'success'
+ORDER BY created_at DESC
+LIMIT 1;
+```
 
-### Nodo: HTTP Request (dentro de un Loop)
+Si no hay registros previos (primera ejecucion del incremental), usa la fecha de la carga historica como fallback, por ejemplo: `2026-03-01T00:00:00Z`.
+
+Guarda el resultado en una variable: `lastSyncDate`
+
+### Paso 3: API de Bubble con filtro Modified Date
+
+**Nodo:** HTTP Request (dentro de un Loop)
 
 **URL:**
 ```
@@ -38,23 +194,25 @@ https://TU-APP.bubbleapps.io/api/1.1/obj/user
 **Method:** GET
 
 **Query Parameters:**
-| Parametro | Valor | Descripcion |
-|---|---|---|
-| `cursor` | `0` (primera vez), luego el cursor del response anterior | Posicion de paginacion |
-| `limit` | `100` | Registros por pagina |
-| `sort_field` | `Created Date` | Ordenar por fecha de creacion |
-| `sort_order` | `desc` | Mas recientes primero |
+
+| Parametro | Valor |
+|---|---|
+| `constraints` | `[{"key":"Modified Date","constraint_type":"greater than","value":"{{lastSyncDate}}"}]` |
+| `limit` | `100` |
+| `cursor` | `0` (primera pagina), luego incrementar |
 
 **Headers:**
 | Header | Valor |
 |---|---|
 | `Authorization` | `Bearer TU_BUBBLE_API_TOKEN` |
 
-**Autenticacion:** Usa credencial tipo "Header Auth" con:
-- Name: `Authorization`
-- Value: `Bearer TU_BUBBLE_API_TOKEN`
+**IMPORTANTE:** El parametro `constraints` debe ir URL-encoded. En n8n, puedes usar una expresion:
 
-### Response de Bubble (estructura)
+```
+{{ encodeURIComponent('[{"key":"Modified Date","constraint_type":"greater than","value":"' + $json.lastSyncDate + '"}]') }}
+```
+
+### Respuesta esperada de Bubble
 
 ```json
 {
@@ -62,96 +220,71 @@ https://TU-APP.bubbleapps.io/api/1.1/obj/user
     "cursor": 100,
     "results": [
       {
-        "_id": "1234567890x...",
+        "_id": "1694638573805x...",
         "Created Date": "2025-06-15T14:30:00.000Z",
+        "Modified Date": "2026-03-01T08:15:00.000Z",
         "email": "usuario@ejemplo.com",
         "Evento de Valor": 3,
         "Ultima Conexion": "2026-02-28T10:00:00.000Z",
-        "Subscription_start": "2025-07-01T00:00:00.000Z",
-        "Subscription_end": "2026-07-01T00:00:00.000Z",
-        "plan gratuito": true,
-        "plan pagado": false,
-        "Cancelado": false,
-        "Origen": "Facebook",
-        "Pais": "Chile",
-        "PlanID": "Anual",
-        "Numero Invitados": 2
+        ...
       }
     ],
-    "remaining": 250,
-    "count": 350
+    "remaining": 50,
+    "count": 150
   }
 }
 ```
 
 ### Logica de paginacion
 
-Usa un **Loop** (nodo "Loop Over Items" o "IF" con loop manual):
-
 1. Primera llamada: `cursor=0`
-2. Leer `response.remaining` del resultado
-3. Si `remaining > 0`: hacer otra llamada con `cursor = cursor_anterior + 100`
+2. Leer `response.remaining`
+3. Si `remaining > 0`: cursor = cursor + 100, repetir
 4. Si `remaining = 0`: salir del loop
-5. Acumular todos los `results` en un array
 
-**Alternativa simple:** Si tienes menos de 10,000 usuarios, puedes hacer un loop fijo de N iteraciones (ej: 100 iteraciones = 10,000 usuarios max).
+Con cambios frecuentes (diarios), espera entre **500 y 5,000 usuarios** por sync (no 340k).
 
----
+### Paso 4: Transformar datos
 
-## Paso 3: Transformar datos (nodo Code / Set)
-
-Este es el paso MAS IMPORTANTE. Aqui mapeas campos de Bubble a columnas de Supabase.
-
-### Nodo: Code (JavaScript)
+**Nodo: Code (JavaScript)**
 
 ```javascript
-// Recibe items de Bubble y los transforma para Supabase
 const results = [];
 
 for (const item of $input.all()) {
-  const bubbleUser = item.json;
+  const u = item.json;
 
-  // --- MAPEO DE CAMPOS ---
   const mapped = {
-    // Identificador unico de Bubble (OBLIGATORIO - es la clave del upsert)
-    bubble_user_id: bubbleUser._id,
+    // === CLAVE UNICA (para upsert) ===
+    bubble_user_id: u._id,
 
-    // Email
-    email: bubbleUser.email || null,
+    // === CAMPOS DE TEXTO ===
+    email: u.email || null,
+    country: u["Pais"] || u["País"] || null,
+    origin: u["Origen"] || null,
+    plan_id: u["PlanID"] || null,
 
-    // Pais - viene directo de Bubble
-    country: bubbleUser["Pais"] || bubbleUser["País"] || null,
+    // === FECHAS ===
+    // Bubble envia ISO 8601 → Supabase lo acepta directo
+    // NO necesitan transformacion
+    created_date: u["Created Date"] || null,
+    last_login: u["Ultima Conexion"] || u["Última Conexión"] || null,
+    subscription_start: u["Subscription_start"] || null,
+    subscription_end: u["Subscription_end"] || null,
 
-    // Canal de adquisicion
-    origin: bubbleUser["Origen"] || null,
+    // === BOOLEANOS ===
+    // Bubble puede enviar true, false, null o ""
+    // Usar === true para limpiar
+    plan_free: u["plan gratuito"] === true,
+    plan_paid: u["plan pagado"] === true,
+    cancelled: u["Cancelado"] === true,
 
-    // Fecha de registro en Bubble
-    // Bubble envia ISO 8601: "2025-06-15T14:30:00.000Z" → NO necesita transformacion
-    created_date: bubbleUser["Created Date"] || null,
+    // === NUMEROS ===
+    // parseInt con fallback a 0
+    eventos_valor: parseInt(u["Evento de Valor"]) || 0,
+    referral_count: parseInt(u["Numero Invitados"]) || 0,
 
-    // Ultima conexion
-    last_login: bubbleUser["Ultima Conexion"] || bubbleUser["Última Conexión"] || null,
-
-    // Fechas de suscripcion
-    subscription_start: bubbleUser["Subscription_start"] || null,
-    subscription_end: bubbleUser["Subscription_end"] || null,
-
-    // Booleanos de plan
-    plan_free: bubbleUser["plan gratuito"] === true,
-    plan_paid: bubbleUser["plan pagado"] === true,
-    cancelled: bubbleUser["Cancelado"] === true,
-
-    // Nombre del plan (texto exacto)
-    plan_id: bubbleUser["PlanID"] || null,
-
-    // Contador de eventos de valor (entero)
-    eventos_valor: parseInt(bubbleUser["Evento de Valor"]) || 0,
-
-    // Numero de invitados referidos
-    referral_count: parseInt(bubbleUser["Numero Invitados"]) || 0,
-
-    // Timestamps de sync
-    imported_at: new Date().toISOString(),
+    // === TIMESTAMPS DE SYNC ===
     updated_at: new Date().toISOString()
   };
 
@@ -161,53 +294,29 @@ for (const item of $input.all()) {
 return results;
 ```
 
-### Tabla de mapeo campo por campo
+### Tabla de mapeo rapido
 
-| Campo Bubble (exacto) | Columna Supabase | Tipo | Transformacion | Ejemplo |
-|---|---|---|---|---|
-| `_id` | `bubble_user_id` | text | Ninguna, pasa directo | `"1694638573805x..."` |
-| `email` | `email` | text | Ninguna | `"user@email.com"` |
-| `Pais` o `País` | `country` | text | Ninguna | `"Chile"` |
-| `Origen` | `origin` | text | Ninguna | `"Facebook"` |
-| `Created Date` | `created_date` | timestamptz | Ninguna (ya es ISO 8601) | `"2025-06-15T14:30:00.000Z"` |
-| `Ultima Conexion` | `last_login` | timestamptz | Ninguna (ya es ISO 8601) | `"2026-02-28T10:00:00.000Z"` |
-| `Subscription_start` | `subscription_start` | timestamptz | Ninguna (ya es ISO 8601) | `"2025-07-01T00:00:00.000Z"` |
-| `Subscription_end` | `subscription_end` | timestamptz | Ninguna (ya es ISO 8601) | `"2026-07-01T00:00:00.000Z"` |
-| `plan gratuito` | `plan_free` | boolean | Comparar `=== true` | `true` / `false` |
-| `plan pagado` | `plan_paid` | boolean | Comparar `=== true` | `true` / `false` |
-| `Cancelado` | `cancelled` | boolean | Comparar `=== true` | `true` / `false` |
-| `PlanID` | `plan_id` | text | Ninguna | `"Anual"`, `"1 Mes"` |
-| `Evento de Valor` | `eventos_valor` | integer | `parseInt()` o `\|\| 0` | `3` |
-| `Numero Invitados` | `referral_count` | integer | `parseInt()` o `\|\| 0` | `2` |
-| *(generado)* | `imported_at` | timestamptz | `new Date().toISOString()` | `"2026-03-01T..."` |
-| *(generado)* | `updated_at` | timestamptz | `new Date().toISOString()` | `"2026-03-01T..."` |
+| Campo Bubble | Columna Supabase | Transformacion |
+|---|---|---|
+| `_id` | `bubble_user_id` | Ninguna |
+| `email` | `email` | `\|\| null` |
+| `Pais` / `País` | `country` | Intentar ambos nombres |
+| `Origen` | `origin` | `\|\| null` |
+| `Created Date` | `created_date` | Ninguna (ya es ISO) |
+| `Ultima Conexion` | `last_login` | Intentar ambos nombres |
+| `Subscription_start` | `subscription_start` | Ninguna |
+| `Subscription_end` | `subscription_end` | Ninguna |
+| `plan gratuito` | `plan_free` | `=== true` |
+| `plan pagado` | `plan_paid` | `=== true` |
+| `Cancelado` | `cancelled` | `=== true` |
+| `PlanID` | `plan_id` | `\|\| null` |
+| `Evento de Valor` | `eventos_valor` | `parseInt() \|\| 0` |
+| `Numero Invitados` | `referral_count` | `parseInt() \|\| 0` |
+| *(generado)* | `updated_at` | `new Date().toISOString()` |
 
-### Notas sobre transformaciones
+### Paso 5: Upsert a Supabase
 
-1. **Fechas:** Bubble envia fechas en formato ISO 8601 (`"2025-06-15T14:30:00.000Z"`). Supabase acepta este formato directamente en columnas `timestamptz`. **NO necesitas transformar fechas.**
-
-2. **Booleanos:** Bubble puede enviar `true`, `false`, `null`, o `""`. Usa `=== true` para asegurar un booleano limpio. Si el campo no existe, sera `false`.
-
-3. **Enteros:** `Evento de Valor` y `Numero Invitados` pueden venir como string o number. Usa `parseInt()` con fallback `|| 0`.
-
-4. **Campos con acentos:** Bubble puede tener el campo como `"Pais"` o `"País"`, `"Ultima Conexion"` o `"Última Conexión"`. El codigo maneja ambos. **Verifica en tu API de Bubble como se llaman exactamente** haciendo una llamada de prueba.
-
-5. **Nulls:** Si un campo no existe en Bubble, enviar `null` a Supabase. No envies `undefined` ni `""` para fechas (Supabase rechazara strings vacios en columnas timestamptz).
-
----
-
-## Paso 4: Upsert a Supabase
-
-### Nodo: Supabase (o HTTP Request)
-
-**Opcion A: Nodo Supabase nativo de n8n**
-
-- **Operation:** Upsert
-- **Table:** `growth_users`
-- **Conflict column:** `bubble_user_id`
-- **Columns to send:** Todas las del mapeo anterior
-
-**Opcion B: HTTP Request (si el nodo nativo da problemas)**
+**Nodo: HTTP Request**
 
 **URL:**
 ```
@@ -217,6 +326,7 @@ https://TU-PROJECT.supabase.co/rest/v1/growth_users
 **Method:** POST
 
 **Headers:**
+
 | Header | Valor |
 |---|---|
 | `apikey` | `TU_SUPABASE_ANON_KEY` |
@@ -224,151 +334,119 @@ https://TU-PROJECT.supabase.co/rest/v1/growth_users
 | `Content-Type` | `application/json` |
 | `Prefer` | `resolution=merge-duplicates` |
 
-**Body:** El array de objetos mapeados del paso anterior.
+**Body:** Array de objetos del paso anterior.
 
-El header `Prefer: resolution=merge-duplicates` convierte el POST en un UPSERT. Supabase detecta conflicto en `bubble_user_id` (tiene constraint UNIQUE) y actualiza el registro existente.
+El header `Prefer: resolution=merge-duplicates` hace que Supabase:
+- Si `bubble_user_id` **no existe** → INSERT (usuario nuevo)
+- Si `bubble_user_id` **ya existe** → UPDATE (actualiza todos los campos)
 
-**IMPORTANTE:** Usa el `SERVICE_ROLE_KEY` (no el anon key) para bypasear RLS. El anon key no tiene permisos de escritura en `growth_users`.
+**Batching:** Si un sync trae > 500 usuarios, usa "Split In Batches" con batch size = 500.
 
-### Batching
+### Paso 6: Log de sincronizacion
 
-Si tienes muchos usuarios (1000+), envia en lotes de 500:
-- Usa un nodo "Split In Batches" antes del upsert
-- Batch size: 500
-- Esto evita timeouts y limites de tamano de body
+**Nodo: Supabase Insert**
 
----
-
-## Paso 5: Log de sincronizacion
-
-### Nodo: Supabase Insert (o HTTP Request)
-
-**Table:** `sync_logs`
+**Tabla:** `sync_logs`
 
 ```json
 {
   "source": "bubble_users",
-  "records_processed": {{ $items.length }},
+  "records_processed": 1523,
   "status": "success",
-  "created_at": "{{ new Date().toISOString() }}"
+  "created_at": "2026-03-01T12:00:00Z"
 }
 ```
 
-Si ya tienes una tabla `sync_logs` con otras columnas, adapta los nombres. La idea es registrar cuantos usuarios se sincronizaron y cuando.
+### Paso 7: Error handling
 
----
+Agrega un nodo **Error Trigger** que inserte en `sync_logs`:
 
-## Paso 6: Manejo de errores
-
-Agrega un nodo **Error Trigger** al final del flujo que:
-1. Registre el error en `sync_logs` con `status: "error"` y el mensaje de error
-2. (Opcional) Envie una notificacion por email/Slack
-
----
-
-## Verificacion post-implementacion
-
-Despues de ejecutar el pipeline por primera vez, corre estas queries en Supabase SQL Editor para verificar:
-
-```sql
--- Cuantos usuarios se sincronizaron?
-SELECT COUNT(*) FROM growth_users;
-
--- Distribucion por pais
-SELECT country, COUNT(*) as total
-FROM growth_users
-GROUP BY country
-ORDER BY total DESC;
-
--- Distribucion por origen (canal)
-SELECT origin, COUNT(*) as total
-FROM growth_users
-GROUP BY origin
-ORDER BY total DESC;
-
--- Usuarios pagados vs gratuitos
-SELECT
-  plan_paid,
-  COUNT(*) as total
-FROM growth_users
-GROUP BY plan_paid;
-
--- Usuarios con eventos de valor
-SELECT
-  CASE
-    WHEN eventos_valor = 0 THEN 'Sin activar'
-    WHEN eventos_valor >= 1 THEN 'Activados (1+)'
-  END as status,
-  COUNT(*) as total
-FROM growth_users
-GROUP BY CASE
-    WHEN eventos_valor = 0 THEN 'Sin activar'
-    WHEN eventos_valor >= 1 THEN 'Activados (1+)'
-  END;
-
--- Proximas renovaciones (7 dias)
-SELECT email, plan_id, subscription_end
-FROM growth_users
-WHERE subscription_end BETWEEN now() AND now() + interval '7 days'
-  AND cancelled = false
-ORDER BY subscription_end;
+```json
+{
+  "source": "bubble_users",
+  "records_processed": 0,
+  "status": "error",
+  "error_message": "{{ $json.error.message }}",
+  "created_at": "2026-03-01T12:00:00Z"
+}
 ```
 
 ---
 
-## Resumen visual del flujo n8n
+## Diagrama visual del flujo n8n
 
 ```
-1. [Schedule Trigger] - Cada 4 horas
-        |
-2. [Set Variable] - cursor = 0
-        |
-3. [Loop Start] ←←←←←←←←←←←←←←←←←←←|
-        |                               |
-4. [HTTP Request] - GET Bubble API      |
-   URL: .../api/1.1/obj/user            |
-   ?cursor={{cursor}}&limit=100         |
-        |                               |
-5. [Code] - Transformar campos          |
-   (mapeo Bubble → Supabase)            |
-        |                               |
-6. [Supabase] - Upsert growth_users     |
-   Conflict: bubble_user_id             |
-        |                               |
-7. [IF] - remaining > 0?  ──SI──→ cursor += 100 ──→|
-        |
-       NO
-        |
-8. [Supabase] - Insert sync_logs
-   source: "bubble_users"
-   records_processed: total
-        |
-9. [End]
+1. [Schedule Trigger] ─── Cada 4 horas
+         │
+2. [Supabase] ─── SELECT ultima sync de sync_logs
+         │               WHERE source = 'bubble_users'
+         │               → lastSyncDate
+         │
+3. [Set Variable] ─── cursor = 0, totalProcessed = 0
+         │
+4. [Loop Start] ←←←←←←←←←←←←←←←←←←←←←←|
+         │                                 │
+5. [HTTP Request] ─── GET Bubble API       │
+         │   ?constraints=[Modified Date   │
+         │    > lastSyncDate]              │
+         │   &limit=100&cursor={{cursor}}   │
+         │                                 │
+6. [Code] ─── Transformar campos           │
+         │     (mapeo Bubble → Supabase)   │
+         │                                 │
+7. [HTTP Request] ─── POST Supabase        │
+         │   upsert growth_users           │
+         │   Prefer: merge-duplicates      │
+         │                                 │
+8. [IF] ─── remaining > 0?                 │
+         │        │                        │
+        NO       SI → cursor += 100 ──────→|
+         │
+9. [Supabase] ─── INSERT sync_logs
+         │         source: bubble_users
+         │         records_processed: total
+         │
+10. [End]
 ```
 
 ---
 
-## Checklist antes de activar
+## Checklist
 
-- [ ] Token API de Bubble configurado en n8n (credencial Header Auth)
-- [ ] URL de Supabase y Service Role Key configurados
-- [ ] Verificar nombres exactos de campos en Bubble (hacer 1 llamada de prueba)
-- [ ] Ejecutar manualmente 1 vez y revisar datos en Supabase
-- [ ] Verificar que las queries de verificacion devuelven datos correctos
-- [ ] Activar el schedule (cada 4 horas)
+### Carga historica (1 sola vez)
+- [ ] Exportar CSV de Bubble con los 14 campos listados
+- [ ] Renombrar columnas segun tabla de mapeo
+- [ ] Convertir fechas a ISO 8601 si es necesario
+- [ ] Convertir booleanos yes/no a true/false
+- [ ] Rellenar numeros vacios con 0
+- [ ] Importar CSV en Supabase (Table Editor → Import CSV)
+- [ ] Ejecutar queries de verificacion
+- [ ] Confirmar ~340k registros en `growth_users`
+
+### Pipeline incremental (n8n)
+- [ ] Token API de Bubble configurado en n8n
+- [ ] URL de Supabase + Service Role Key configurados
+- [ ] Verificar nombre exacto del campo `Modified Date` en API de Bubble
+- [ ] Verificar nombres exactos de todos los campos (hacer 1 GET de prueba)
+- [ ] Crear el flujo con los nodos del diagrama
+- [ ] Ejecutar manualmente 1 vez y revisar datos
+- [ ] Activar schedule (cada 4 horas)
 
 ---
 
 ## FAQ
 
-**P: Que pasa si un usuario se elimina en Bubble?**
-R: No se elimina de `growth_users`. El pipeline solo hace upsert (crear o actualizar). Si necesitas detectar eliminados, tendrias que comparar IDs, pero por ahora no es necesario.
+**P: Cuantos usuarios traera cada sync incremental?**
+R: Solo los modificados desde la ultima sync. Con cambios frecuentes, estimamos 500-5,000 por sync. Mucho menos que los 340k totales.
 
-**P: Que pasa si cambio un nombre de campo en Bubble?**
-R: El pipeline dejara de mapear ese campo (sera `null`). Actualiza el mapeo en el nodo Code.
+**P: Que pasa si la sync falla a mitad de camino?**
+R: El upsert es idempotente. Si falla y se re-ejecuta, simplemente procesa los mismos usuarios de nuevo sin duplicar. Los que ya se insertaron se actualizan.
 
-**P: Cuanto tarda la sincronizacion?**
-R: Depende de la cantidad de usuarios. ~100 usuarios/segundo es tipico. 5,000 usuarios ≈ 50 segundos.
+**P: Necesito crear la tabla sync_logs?**
+R: Si ya la tienes del pipeline de pagos, no. Solo asegura que tenga las columnas `source`, `records_processed`, `status`, `error_message`, `created_at`.
 
-**P: Puedo ejecutar manualmente?**
-R: Si. En n8n, abre el flujo y haz click en "Execute Workflow". Util para la primera carga.
+**P: Que pasa con usuarios eliminados en Bubble?**
+R: No se eliminan de `growth_users`. El filtro por `Modified Date` no detecta eliminaciones. Si necesitas purgar, hazlo manualmente.
+
+**P: Puedo ejecutar la sync incremental antes de la carga historica?**
+R: Si, pero tendras pocos datos. Lo ideal es: primero CSV, luego activar el pipeline.
