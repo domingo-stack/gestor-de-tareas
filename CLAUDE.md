@@ -64,7 +64,7 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 
 ### Supabase Edge Functions (`supabase/functions/`)
 
-Nine Deno/TypeScript edge functions handle email + in-app notifications via Resend:
+Ten Deno/TypeScript edge functions handle email + in-app notifications via Resend:
 - `send-event-notification` — new calendar events (filtered by `get_notification_recipients('event_created')`, excludes creator)
 - `send-assignment-notification` — task assignments + task completed (email + in-app, respects preferences)
 - `notify-mentions` — @mentions in comments (respects preferences)
@@ -74,6 +74,7 @@ Nine Deno/TypeScript edge functions handle email + in-app notifications via Rese
 - `send-approval-notification` — notifies requester when reviewer approves (respects `review_result` preferences)
 - `send-rejection-notification` — notifies requester when reviewer rejects with reason (respects `review_result` preferences)
 - `auto-approve-reviews` — cron-invoked function to auto-approve expired reviews (deployed with `--no-verify-jwt`, protected with `CRON_SECRET` via query param or `x-cron-secret` header)
+- `send-growth-report` — weekly growth report email to configured recipients in `growth_report_config`. Computes metrics from `rev_orders` + `growth_users`, saves snapshot to `growth_weekly_snapshots`, logs to `growth_report_log`. Protected with `CRON_SECRET`. Supports `{ test: true }` body for manual trigger from UI.
 
 **Edge Function patterns:**
 - All functions use shared `_shared/cors.ts` (Allow-Origin: `*`) and `_shared/escapeHtml.ts`.
