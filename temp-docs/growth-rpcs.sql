@@ -134,7 +134,25 @@ END;
 $$;
 
 -- ─── RPC 2: get_churn_renewal ─────────────────────────────────
-CREATE OR REPLACE FUNCTION get_churn_renewal(p_week_start date, p_weeks int DEFAULT 8)
+-- Parámetros:
+--   p_week_start: fecha inicio de la semana más reciente
+--   p_weeks: cantidad de semanas hacia atrás (default 8)
+--   p_plan_filter: 'all' o un plan_id específico para filtrar
+--   p_upcoming_days: días hacia adelante para renovaciones próximas (default 7)
+--
+-- NOTA sobre modelo de datos:
+--   growth_users tiene UNA fila por usuario (snapshot de Bubble).
+--   Cuando un usuario renueva, subscription_start/end se actualizan in-place.
+--   Por eso usamos created_date vs subscription_start para distinguir nuevo vs renovación:
+--     - Nuevo pagado: subscription_start en la semana Y created_date también en la semana
+--     - Renovó: subscription_start en la semana Y created_date ANTES de la semana
+--   Para "due to renew" sumamos renovaciones reales + churned (ambos tenían sub que vencía).
+CREATE OR REPLACE FUNCTION get_churn_renewal(
+  p_week_start date,
+  p_weeks int DEFAULT 8,
+  p_plan_filter text DEFAULT 'all',
+  p_upcoming_days int DEFAULT 7
+)
 RETURNS jsonb
 LANGUAGE plpgsql STABLE
 AS $$
@@ -143,26 +161,33 @@ DECLARE
   churn_arr jsonb := '[]'::jsonb;
   renewal_arr jsonb := '[]'::jsonb;
   upcoming_arr jsonb := '[]'::jsonb;
+  plan_options_arr jsonb := '[]'::jsonb;
   v_has_data boolean;
   i int;
   w_start date;
   w_end date;
   v_starting bigint;
-  v_new bigint;
+  v_new_paid bigint;
+  v_renewed bigint;
   v_churned bigint;
   v_churn_rate numeric;
   v_net bigint;
   v_growth_rate numeric;
   v_due bigint;
-  v_renewed bigint;
+  v_ren bigint;
   v_renewal_rate numeric;
   w_label text;
-  w_end_label text;
 BEGIN
   SELECT EXISTS(SELECT 1 FROM growth_users LIMIT 1) INTO v_has_data;
   IF NOT v_has_data THEN
     RETURN jsonb_build_object('has_data', false);
   END IF;
+
+  -- Collect distinct plan options for the dropdown filter
+  SELECT COALESCE(jsonb_agg(DISTINCT plan_id ORDER BY plan_id), '[]'::jsonb)
+  INTO plan_options_arr
+  FROM growth_users
+  WHERE plan_paid = true AND plan_id IS NOT NULL;
 
   FOR i IN REVERSE (p_weeks - 1)..0 LOOP
     w_start := p_week_start - (i * 7);
@@ -172,67 +197,106 @@ BEGIN
     w_label := EXTRACT(DAY FROM w_start::timestamp)::text || '/' || EXTRACT(MONTH FROM w_start::timestamp)::text
       || ' - ' || EXTRACT(DAY FROM w_end::timestamp)::text || '/' || EXTRACT(MONTH FROM w_end::timestamp)::text;
 
+    -- ═══════════════════════════════════════════════════
+    -- CHURN TABLE
+    -- ═══════════════════════════════════════════════════
+
     -- Starting users: paid, subscription active at start of week, not cancelled
     SELECT COUNT(*) INTO v_starting
     FROM growth_users
     WHERE plan_paid = true
       AND subscription_start::date <= w_start
       AND subscription_end::date >= w_start
-      AND cancelled = false;
+      AND cancelled = false
+      AND (p_plan_filter = 'all' OR plan_id = p_plan_filter);
 
-    -- New users: registered this week
-    SELECT COUNT(*) INTO v_new
+    -- New paid: subscription started this week AND user was CREATED this week too
+    -- (genuinely new customer, not a renewal)
+    SELECT COUNT(*) INTO v_new_paid
     FROM growth_users
-    WHERE created_date::date >= w_start
-      AND created_date::date <= w_end;
+    WHERE plan_paid = true
+      AND subscription_start::date >= w_start
+      AND subscription_start::date <= w_end
+      AND created_date::date >= w_start
+      AND created_date::date <= w_end
+      AND (p_plan_filter = 'all' OR plan_id = p_plan_filter);
 
-    -- Churned: subscription ended this week AND (cancelled or not paid)
+    -- Renewed: subscription started this week BUT user was created BEFORE this week
+    -- (existing user whose subscription renewed — Bubble updates dates in-place)
+    SELECT COUNT(*) INTO v_renewed
+    FROM growth_users
+    WHERE plan_paid = true
+      AND subscription_start::date >= w_start
+      AND subscription_start::date <= w_end
+      AND created_date::date < w_start
+      AND (p_plan_filter = 'all' OR plan_id = p_plan_filter);
+
+    -- Churned: subscription ended this week AND (cancelled OR no longer paid)
+    -- Broader definition: cancelled=true catches explicit cancels,
+    -- plan_paid=false catches users who downgraded/lapsed
     SELECT COUNT(*) INTO v_churned
     FROM growth_users
     WHERE subscription_end::date >= w_start
       AND subscription_end::date <= w_end
-      AND (cancelled = true OR plan_paid = false);
+      AND (cancelled = true OR plan_paid = false)
+      AND (p_plan_filter = 'all' OR plan_id = p_plan_filter);
 
     v_churn_rate := CASE WHEN v_starting > 0 THEN (v_churned::numeric / v_starting) * 100 ELSE 0 END;
-    v_net := v_starting + v_new - v_churned;
+    v_net := v_starting + v_new_paid + v_renewed - v_churned;
     v_growth_rate := CASE WHEN v_starting > 0 THEN ((v_net - v_starting)::numeric / v_starting) * 100 ELSE 0 END;
 
     churn_arr := churn_arr || jsonb_build_object(
       'weekLabel', w_label,
       'startingUsers', v_starting,
-      'newUsers', v_new,
+      'newPaid', v_new_paid,
+      'renewed', v_renewed,
       'churnedUsers', v_churned,
       'churnRate', ROUND(v_churn_rate, 2),
       'netUsers', v_net,
       'growthRate', ROUND(v_growth_rate, 2)
     );
 
-    -- Renewal: due to renew this week (paid + sub ends this week)
-    SELECT COUNT(*) INTO v_due
+    -- ═══════════════════════════════════════════════════
+    -- RENEWAL TABLE
+    -- ═══════════════════════════════════════════════════
+    -- "Due to renew" = existing users who renewed this week (subscription_start
+    -- in this week, created before) PLUS churned users whose sub ended this week.
+    -- This captures both outcomes: renewed successfully vs didn't renew (churned).
+
+    -- Renewed (existing users with new subscription_start this week)
+    SELECT COUNT(*) INTO v_ren
     FROM growth_users
     WHERE plan_paid = true
-      AND subscription_end::date >= w_start
-      AND subscription_end::date <= w_end;
+      AND subscription_start::date >= w_start
+      AND subscription_start::date <= w_end
+      AND created_date::date < w_start
+      AND cancelled = false
+      AND (p_plan_filter = 'all' OR plan_id = p_plan_filter);
 
-    -- Renewed: among those, not cancelled
-    SELECT COUNT(*) INTO v_renewed
-    FROM growth_users
-    WHERE plan_paid = true
-      AND subscription_end::date >= w_start
-      AND subscription_end::date <= w_end
-      AND cancelled = false;
+    -- Due = renewed + those who should have renewed but churned instead
+    -- Churned here = sub ended this week AND (cancelled or not paid) AND user existed before
+    v_due := v_ren + (
+      SELECT COUNT(*)
+      FROM growth_users
+      WHERE subscription_end::date >= w_start
+        AND subscription_end::date <= w_end
+        AND created_date::date < w_start
+        AND (cancelled = true OR plan_paid = false)
+        AND (p_plan_filter = 'all' OR plan_id = p_plan_filter)
+    );
 
-    v_renewal_rate := CASE WHEN v_due > 0 THEN (v_renewed::numeric / v_due) * 100 ELSE 0 END;
+    v_renewal_rate := CASE WHEN v_due > 0 THEN (v_ren::numeric / v_due) * 100 ELSE 0 END;
 
     renewal_arr := renewal_arr || jsonb_build_object(
       'weekLabel', w_label,
       'dueToRenew', v_due,
-      'renewed', v_renewed,
+      'renewed', v_ren,
       'renewalRate', ROUND(v_renewal_rate, 2)
     );
   END LOOP;
 
-  -- Upcoming renewals (next 7 days from now)
+  -- Upcoming renewals (next p_upcoming_days days from now)
+  -- Shows paid, non-cancelled users whose subscription_end is approaching
   SELECT COALESCE(jsonb_agg(
     jsonb_build_object(
       'id', id,
@@ -248,11 +312,13 @@ BEGIN
   WHERE cancelled = false
     AND plan_paid = true
     AND subscription_end::date >= CURRENT_DATE
-    AND subscription_end::date <= (CURRENT_DATE + 7)
-  LIMIT 50;
+    AND subscription_end::date <= (CURRENT_DATE + p_upcoming_days)
+    AND (p_plan_filter = 'all' OR plan_id = p_plan_filter)
+  LIMIT 100;
 
   result := jsonb_build_object(
     'has_data', true,
+    'plan_options', plan_options_arr,
     'churn_weeks', churn_arr,
     'renewal_weeks', renewal_arr,
     'upcoming_renewals', upcoming_arr
