@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import {
   UsersIcon,
@@ -8,7 +8,6 @@ import {
   ArrowTrendingUpIcon,
   ChartBarIcon,
   UserPlusIcon,
-  CreditCardIcon,
   CurrencyDollarIcon,
   ArrowPathIcon,
   EyeIcon,
@@ -17,42 +16,42 @@ import KpiCard from './KpiCard';
 import WeekSelector, { getCurrentWeekStart } from './WeekSelector';
 import { fmtUSD, fmtNum, fmtPct } from './formatters';
 
+interface SummaryData {
+  revenue: number;
+  prev_revenue: number;
+  rev_growth_pct: number;
+  rev_growth_positive: boolean;
+  revenue_new: number;
+  revenue_recurring: number;
+  transactions: number;
+  arpu: number;
+  total_users: number;
+  new_users: number;
+  paid_users: number;
+  activated_users: number;
+  activation_pct: number;
+  conversion_pct: number;
+  has_growth_users: boolean;
+}
+
 export default function ExecutiveSummary() {
   const { supabase } = useAuth();
   const [weekStart, setWeekStart] = useState(getCurrentWeekStart);
   const [loading, setLoading] = useState(true);
-  const [revenueData, setRevenueData] = useState<any[]>([]);
-  const [prevWeekRevenue, setPrevWeekRevenue] = useState<any[]>([]);
-  const [growthUsers, setGrowthUsers] = useState<any[]>([]);
-  const [hasGrowthUsers, setHasGrowthUsers] = useState(false);
+  const [data, setData] = useState<SummaryData | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    weekEnd.setHours(23, 59, 59, 999);
-
-    const prevStart = new Date(weekStart);
-    prevStart.setDate(prevStart.getDate() - 7);
-    const prevEnd = new Date(weekStart);
-    prevEnd.setMilliseconds(-1);
-
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [revRes, prevRevRes, usersRes] = await Promise.all([
-          supabase.from('rev_orders').select('amount_usd, plan_type, client_type, created_at').gte('created_at', weekStart.toISOString()).lte('created_at', weekEnd.toISOString()),
-          supabase.from('rev_orders').select('amount_usd').gte('created_at', prevStart.toISOString()).lte('created_at', prevEnd.toISOString()),
-          supabase.from('growth_users').select('*').limit(1),
-        ]);
-
-        setRevenueData(revRes.data || []);
-        setPrevWeekRevenue(prevRevRes.data || []);
-        setHasGrowthUsers(!usersRes.error && (usersRes.data?.length || 0) > 0);
-
-        if (!usersRes.error && (usersRes.data?.length || 0) > 0) {
-          const { data: allUsers } = await supabase.from('growth_users').select('*');
-          setGrowthUsers(allUsers || []);
+        const weekStr = weekStart.toISOString().split('T')[0];
+        const { data: result, error } = await supabase.rpc('get_executive_summary', { p_week_start: weekStr });
+        if (error) {
+          console.error('RPC get_executive_summary error:', error);
+        } else if (result) {
+          const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+          setData(parsed as SummaryData);
         }
       } catch (err) {
         console.error('Error fetching executive summary:', err);
@@ -63,39 +62,12 @@ export default function ExecutiveSummary() {
     fetchData();
   }, [supabase, weekStart]);
 
-  const kpis = useMemo(() => {
-    const totalRev = revenueData.reduce((s, o) => s + (o.amount_usd || 0), 0);
-    const prevRev = prevWeekRevenue.reduce((s, o) => s + (o.amount_usd || 0), 0);
-    const revGrowth = prevRev > 0 ? ((totalRev - prevRev) / prevRev) * 100 : totalRev > 0 ? 100 : 0;
-
-    const newOrders = revenueData.filter(o => (o.client_type || o.plan_type || '').toLowerCase().includes('nuevo'));
-    const renewOrders = revenueData.filter(o => (o.client_type || o.plan_type || '').toLowerCase().includes('renova'));
-
-    // Growth users KPIs (only if data exists)
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekEnd.getDate() + 6);
-    const weekUsers = growthUsers.filter(u => {
-      const created = new Date(u.created_date);
-      return created >= weekStart && created <= weekEnd;
-    });
-    const activatedUsers = growthUsers.filter(u => (u.eventos_valor || 0) >= 1);
-    const paidUsers = growthUsers.filter(u => u.plan_paid);
-    const totalUsers = growthUsers.length;
-
-    return {
-      revenue: totalRev,
-      revGrowth: { percent: Math.abs(revGrowth), isPositive: revGrowth >= 0 },
-      transactions: revenueData.length,
-      revenueNew: newOrders.reduce((s, o) => s + (o.amount_usd || 0), 0),
-      revenueRecurring: renewOrders.reduce((s, o) => s + (o.amount_usd || 0), 0),
-      arpu: paidUsers.length > 0 ? totalRev / paidUsers.length : revenueData.length > 0 ? totalRev / revenueData.length : 0,
-      newUsers: weekUsers.length,
-      totalUsers,
-      activationPct: totalUsers > 0 ? (activatedUsers.length / totalUsers * 100) : 0,
-      conversionPct: totalUsers > 0 ? (paidUsers.length / totalUsers * 100) : 0,
-      paidUsers: paidUsers.length,
-    };
-  }, [revenueData, prevWeekRevenue, growthUsers, weekStart]);
+  const d = data || {
+    revenue: 0, prev_revenue: 0, rev_growth_pct: 0, rev_growth_positive: true,
+    revenue_new: 0, revenue_recurring: 0, transactions: 0, arpu: 0,
+    total_users: 0, new_users: 0, paid_users: 0, activated_users: 0,
+    activation_pct: 0, conversion_pct: 0, has_growth_users: false,
+  };
 
   return (
     <div className="space-y-6">
@@ -108,22 +80,22 @@ export default function ExecutiveSummary() {
       <div>
         <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Revenue</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <KpiCard title="Revenue Total" value={fmtUSD(kpis.revenue)} growth={kpis.revGrowth} icon={BanknotesIcon} colorClass="bg-green-500" loading={loading} />
-          <KpiCard title="Revenue Nuevo" value={fmtUSD(kpis.revenueNew)} subtext="Clientes nuevos" icon={UserPlusIcon} colorClass="bg-blue-500" loading={loading} />
-          <KpiCard title="Revenue Recurrente" value={fmtUSD(kpis.revenueRecurring)} subtext="Renovaciones" icon={ArrowPathIcon} colorClass="bg-emerald-500" loading={loading} />
-          <KpiCard title="ARPU" value={fmtUSD(kpis.arpu)} subtext="Promedio por usuario" icon={CurrencyDollarIcon} colorClass="bg-purple-500" loading={loading} />
+          <KpiCard title="Revenue Total" value={fmtUSD(d.revenue)} growth={{ percent: Math.abs(d.rev_growth_pct), isPositive: d.rev_growth_positive }} icon={BanknotesIcon} colorClass="bg-green-500" loading={loading} />
+          <KpiCard title="Revenue Nuevo" value={fmtUSD(d.revenue_new)} subtext="Clientes nuevos" icon={UserPlusIcon} colorClass="bg-blue-500" loading={loading} />
+          <KpiCard title="Revenue Recurrente" value={fmtUSD(d.revenue_recurring)} subtext="Renovaciones" icon={ArrowPathIcon} colorClass="bg-emerald-500" loading={loading} />
+          <KpiCard title="ARPU" value={fmtUSD(d.arpu)} subtext="Promedio por usuario" icon={CurrencyDollarIcon} colorClass="bg-purple-500" loading={loading} />
         </div>
       </div>
 
       {/* Users KPIs (from growth_users) */}
-      {hasGrowthUsers ? (
+      {d.has_growth_users ? (
         <div>
           <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Usuarios</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <KpiCard title="Nuevos Registros" value={fmtNum(kpis.newUsers)} subtext="Esta semana" icon={UserPlusIcon} colorClass="bg-blue-500" loading={loading} />
-            <KpiCard title="Total Registrados" value={fmtNum(kpis.totalUsers)} subtext="Acumulado" icon={UsersIcon} colorClass="bg-gray-500" loading={loading} />
-            <KpiCard title="% Activacion" value={fmtPct(kpis.activationPct)} subtext="1+ evento de valor" icon={ArrowTrendingUpIcon} colorClass="bg-amber-500" loading={loading} />
-            <KpiCard title="% Conversion" value={fmtPct(kpis.conversionPct)} subtext="Registrados que pagaron" icon={ChartBarIcon} colorClass="bg-red-500" loading={loading} />
+            <KpiCard title="Nuevos Registros" value={fmtNum(d.new_users)} subtext="Esta semana" icon={UserPlusIcon} colorClass="bg-blue-500" loading={loading} />
+            <KpiCard title="Total Registrados" value={fmtNum(d.total_users)} subtext="Acumulado" icon={UsersIcon} colorClass="bg-gray-500" loading={loading} />
+            <KpiCard title="% Activacion" value={fmtPct(d.activation_pct)} subtext="1+ evento de valor" icon={ArrowTrendingUpIcon} colorClass="bg-amber-500" loading={loading} />
+            <KpiCard title="% Conversion" value={fmtPct(d.conversion_pct)} subtext="Registrados que pagaron" icon={ChartBarIcon} colorClass="bg-red-500" loading={loading} />
           </div>
         </div>
       ) : (

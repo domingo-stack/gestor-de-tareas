@@ -1,20 +1,10 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { ExclamationTriangleIcon, EyeIcon } from '@heroicons/react/24/outline';
 import { fmtNum, fmtPct } from './formatters';
 import WeekSelector, { getCurrentWeekStart } from './WeekSelector';
-
-interface GrowthUser {
-  id: string;
-  email: string;
-  created_date: string;
-  plan_free: boolean;
-  plan_paid: boolean;
-  cancelled: boolean;
-  eventos_valor: number;
-}
 
 interface FunnelStep {
   label: string;
@@ -23,112 +13,55 @@ interface FunnelStep {
   pctOfPrev: number;
 }
 
-interface WeeklyConversion {
+interface WeeklyRow {
   weekLabel: string;
   registered: number;
   activated: number;
   paid: number;
+  free: number;
   activationPct: number;
   conversionPct: number;
-  freeVsPaid: { free: number; paid: number };
 }
 
-function getMonday(d: Date): Date {
-  const date = new Date(d);
-  const day = date.getDay();
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-  date.setDate(diff);
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
-
-function formatWeekLabel(d: Date): string {
-  const end = new Date(d);
-  end.setDate(end.getDate() + 6);
-  return `${d.getDate()}/${d.getMonth() + 1} - ${end.getDate()}/${end.getMonth() + 1}`;
+interface ConversionData {
+  has_data: boolean;
+  funnel?: FunnelStep[];
+  weekly?: WeeklyRow[];
 }
 
 const FUNNEL_COLORS = ['#3B82F6', '#8B5CF6', '#10B981'];
 
 export default function ConversionFunnel() {
   const { supabase } = useAuth();
-  const [users, setUsers] = useState<GrowthUser[]>([]);
-  const [hasData, setHasData] = useState(false);
+  const [data, setData] = useState<ConversionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [weekStart, setWeekStart] = useState(getCurrentWeekStart);
 
   useEffect(() => {
     if (!supabase) return;
-    const fetchUsers = async () => {
+    const fetchData = async () => {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('growth_users')
-        .select('id, email, created_date, plan_free, plan_paid, cancelled, eventos_valor');
-      if (!error && data && data.length > 0) {
-        setUsers(data);
-        setHasData(true);
+      const weekStr = weekStart.toISOString().split('T')[0];
+      const { data: result, error } = await supabase.rpc('get_conversion_funnel', { p_week_start: weekStr, p_weeks: 8 });
+      if (error) {
+        console.error('RPC get_conversion_funnel error:', error);
+        setData({ has_data: false });
+      } else if (result) {
+        const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+        setData(parsed as ConversionData);
       } else {
-        setHasData(false);
+        setData({ has_data: false });
       }
       setLoading(false);
     };
-    fetchUsers();
-  }, [supabase]);
-
-  // Overall funnel
-  const funnel = useMemo((): FunnelStep[] => {
-    if (!users.length) return [];
-    const total = users.length;
-    const activated = users.filter(u => (u.eventos_valor || 0) >= 1).length;
-    const paid = users.filter(u => u.plan_paid).length;
-
-    return [
-      { label: 'Registrados', count: total, pctOfTotal: 100, pctOfPrev: 100 },
-      { label: 'Activados (1+ evento)', count: activated, pctOfTotal: total > 0 ? (activated / total) * 100 : 0, pctOfPrev: total > 0 ? (activated / total) * 100 : 0 },
-      { label: 'Pagaron', count: paid, pctOfTotal: total > 0 ? (paid / total) * 100 : 0, pctOfPrev: activated > 0 ? (paid / activated) * 100 : 0 },
-    ];
-  }, [users]);
-
-  // Weekly conversion table (8 weeks)
-  const weeklyData = useMemo((): WeeklyConversion[] => {
-    if (!users.length) return [];
-    const weeks: WeeklyConversion[] = [];
-
-    for (let i = 7; i >= 0; i--) {
-      const wStart = new Date(weekStart);
-      wStart.setDate(wStart.getDate() - i * 7);
-      const wEnd = new Date(wStart);
-      wEnd.setDate(wEnd.getDate() + 6);
-      wEnd.setHours(23, 59, 59, 999);
-
-      const weekUsers = users.filter(u => {
-        const created = new Date(u.created_date);
-        return created >= wStart && created <= wEnd;
-      });
-
-      const registered = weekUsers.length;
-      const activated = weekUsers.filter(u => (u.eventos_valor || 0) >= 1).length;
-      const paid = weekUsers.filter(u => u.plan_paid).length;
-      const free = weekUsers.filter(u => !u.plan_paid).length;
-
-      weeks.push({
-        weekLabel: formatWeekLabel(wStart),
-        registered,
-        activated,
-        paid,
-        activationPct: registered > 0 ? (activated / registered) * 100 : 0,
-        conversionPct: registered > 0 ? (paid / registered) * 100 : 0,
-        freeVsPaid: { free, paid },
-      });
-    }
-    return weeks;
-  }, [users, weekStart]);
+    fetchData();
+  }, [supabase, weekStart]);
 
   if (loading) {
     return <div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
   }
 
-  if (!hasData) {
+  if (!data?.has_data) {
     return (
       <div className="space-y-6">
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-8 text-center">
@@ -141,6 +74,9 @@ export default function ConversionFunnel() {
       </div>
     );
   }
+
+  const funnel = data.funnel || [];
+  const weeklyData = data.weekly || [];
 
   return (
     <div className="space-y-8">
@@ -220,7 +156,7 @@ export default function ConversionFunnel() {
                       {fmtPct(w.conversionPct)}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-500">{fmtNum(w.freeVsPaid.free)}</td>
+                  <td className="px-4 py-3 text-right text-gray-500">{fmtNum(w.free)}</td>
                 </tr>
               ))}
             </tbody>

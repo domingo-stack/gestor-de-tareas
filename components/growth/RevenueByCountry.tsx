@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { fmtUSD, fmtUSDShort, fmtNum } from './formatters';
 
@@ -12,33 +12,37 @@ interface CountryRow {
   total: number;
 }
 
+interface RevenueByCountryData {
+  rows: CountryRow[];
+  period_keys: string[];
+  totals: Record<string, number>;
+  prev_year_data: { country: string; periods: Record<string, number> }[];
+}
+
 export default function RevenueByCountry() {
   const { supabase } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [allOrders, setAllOrders] = useState<any[]>([]);
+  const [data, setData] = useState<RevenueByCountryData | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('monthly');
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [showYoY, setShowYoY] = useState(false);
-  const [prevYearOrders, setPrevYearOrders] = useState<any[]>([]);
 
-  // Fetch orders for selected year + previous year for YoY
   useEffect(() => {
     if (!supabase) return;
     const fetchData = async () => {
       setLoading(true);
       try {
-        const startCurrent = `${selectedYear}-01-01T00:00:00`;
-        const endCurrent = `${selectedYear}-12-31T23:59:59`;
-        const startPrev = `${selectedYear - 1}-01-01T00:00:00`;
-        const endPrev = `${selectedYear - 1}-12-31T23:59:59`;
-
-        const [currentRes, prevRes] = await Promise.all([
-          supabase.from('rev_orders').select('amount_usd, country, created_at').gte('created_at', startCurrent).lte('created_at', endCurrent).order('created_at', { ascending: true }),
-          supabase.from('rev_orders').select('amount_usd, country, created_at').gte('created_at', startPrev).lte('created_at', endPrev).order('created_at', { ascending: true }),
-        ]);
-
-        setAllOrders(currentRes.data || []);
-        setPrevYearOrders(prevRes.data || []);
+        const { data: result, error } = await supabase.rpc('get_revenue_by_country', {
+          p_year: selectedYear,
+          p_granularity: viewMode,
+          p_prev_year_yoy: showYoY,
+        });
+        if (error) {
+          console.error('RPC get_revenue_by_country error:', error);
+        } else if (result) {
+          const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+          setData(parsed as RevenueByCountryData);
+        }
       } catch (err) {
         console.error('Error fetching country data:', err);
       } finally {
@@ -46,64 +50,19 @@ export default function RevenueByCountry() {
       }
     };
     fetchData();
-  }, [supabase, selectedYear]);
+  }, [supabase, selectedYear, viewMode, showYoY]);
 
-  // Compute table data
-  const { rows, periodKeys, totalsRow, prevYearMap } = useMemo(() => {
-    const getPeriodKey = (dateStr: string): string => {
-      const d = new Date(dateStr);
-      if (viewMode === 'monthly') {
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      } else if (viewMode === 'weekly') {
-        const start = new Date(d);
-        const day = start.getDay();
-        const diff = start.getDate() - day + (day === 0 ? -6 : 1);
-        start.setDate(diff);
-        return start.toISOString().split('T')[0];
-      }
-      return d.toISOString().split('T')[0];
-    };
+  const rows = data?.rows || [];
+  const periodKeys = data?.period_keys || [];
+  const totalsRow = data?.totals || {};
 
-    // Build country→period map
-    const countryMap = new Map<string, Record<string, number>>();
-    const allPeriods = new Set<string>();
-
-    allOrders.forEach((order) => {
-      const country = order.country || 'Desconocido';
-      const period = getPeriodKey(order.created_at);
-      allPeriods.add(period);
-      if (!countryMap.has(country)) countryMap.set(country, {});
-      const entry = countryMap.get(country)!;
-      entry[period] = (entry[period] || 0) + (order.amount_usd || 0);
+  // Build prev year lookup for YoY
+  const prevYearMap = new Map<string, Record<string, number>>();
+  if (data?.prev_year_data) {
+    data.prev_year_data.forEach(item => {
+      prevYearMap.set(item.country, item.periods);
     });
-
-    const periodKeys = Array.from(allPeriods).sort();
-
-    // Build prev year map for YoY
-    const prevMap = new Map<string, Record<string, number>>();
-    prevYearOrders.forEach((order) => {
-      const country = order.country || 'Desconocido';
-      const period = getPeriodKey(order.created_at);
-      if (!prevMap.has(country)) prevMap.set(country, {});
-      const entry = prevMap.get(country)!;
-      entry[period] = (entry[period] || 0) + (order.amount_usd || 0);
-    });
-
-    // Build rows
-    const rows: CountryRow[] = Array.from(countryMap.entries()).map(([country, periods]) => ({
-      country,
-      periods,
-      total: Object.values(periods).reduce((s, v) => s + v, 0),
-    })).sort((a, b) => b.total - a.total);
-
-    // Totals row
-    const totalsRow: Record<string, number> = {};
-    periodKeys.forEach((p) => {
-      totalsRow[p] = rows.reduce((s, r) => s + (r.periods[p] || 0), 0);
-    });
-
-    return { rows, periodKeys, totalsRow, prevYearMap: prevMap };
-  }, [allOrders, prevYearOrders, viewMode]);
+  }
 
   const formatPeriodLabel = (key: string): string => {
     if (viewMode === 'monthly') {
@@ -112,17 +71,16 @@ export default function RevenueByCountry() {
       return months[parseInt(m) - 1] || key;
     }
     if (viewMode === 'weekly') {
-      const d = new Date(key);
+      const d = new Date(key + 'T00:00:00');
       return `${d.getDate()}/${d.getMonth() + 1}`;
     }
-    const d = new Date(key);
+    const d = new Date(key + 'T00:00:00');
     return `${d.getDate()}/${d.getMonth() + 1}`;
   };
 
   const getYoYGrowth = (country: string, period: string): number | null => {
-    if (!showYoY) return null;
+    if (!showYoY || !data?.prev_year_data?.length) return null;
     const current = rows.find(r => r.country === country)?.periods[period] || 0;
-    // Map period to previous year
     const prevPeriod = period.replace(String(selectedYear), String(selectedYear - 1));
     const prev = prevYearMap.get(country)?.[prevPeriod] || 0;
     if (prev === 0 && current === 0) return null;

@@ -1,30 +1,13 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { ExclamationTriangleIcon, CalendarDaysIcon, EnvelopeIcon } from '@heroicons/react/24/outline';
 import { fmtNum, fmtPct } from './formatters';
 import WeekSelector, { getCurrentWeekStart } from './WeekSelector';
 
-interface GrowthUser {
-  id: string;
-  email: string;
-  country: string;
-  origin: string;
-  created_date: string;
-  last_login: string;
-  subscription_start: string;
-  subscription_end: string;
-  plan_free: boolean;
-  plan_paid: boolean;
-  cancelled: boolean;
-  plan_id: string;
-  eventos_valor: number;
-}
-
-interface WeeklyChurnRow {
+interface ChurnWeek {
   weekLabel: string;
-  weekStart: Date;
   startingUsers: number;
   newUsers: number;
   churnedUsers: number;
@@ -33,153 +16,60 @@ interface WeeklyChurnRow {
   growthRate: number;
 }
 
-interface RenewalRow {
+interface RenewalWeek {
   weekLabel: string;
   dueToRenew: number;
   renewed: number;
   renewalRate: number;
 }
 
-function getMonday(d: Date): Date {
-  const date = new Date(d);
-  const day = date.getDay();
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-  date.setDate(diff);
-  date.setHours(0, 0, 0, 0);
-  return date;
+interface UpcomingRenewal {
+  id: string;
+  email: string;
+  plan_id: string;
+  country: string;
+  subscription_end: string;
+  days_left: number;
 }
 
-function formatWeekLabel(d: Date): string {
-  const end = new Date(d);
-  end.setDate(end.getDate() + 6);
-  return `${d.getDate()}/${d.getMonth() + 1} - ${end.getDate()}/${end.getMonth() + 1}`;
+interface ChurnData {
+  has_data: boolean;
+  churn_weeks?: ChurnWeek[];
+  renewal_weeks?: RenewalWeek[];
+  upcoming_renewals?: UpcomingRenewal[];
 }
 
 export default function ChurnRenewal() {
   const { supabase } = useAuth();
-  const [users, setUsers] = useState<GrowthUser[]>([]);
-  const [hasData, setHasData] = useState(false);
+  const [data, setData] = useState<ChurnData | null>(null);
   const [loading, setLoading] = useState(true);
   const [weekStart, setWeekStart] = useState(getCurrentWeekStart);
 
   useEffect(() => {
     if (!supabase) return;
-    const fetchUsers = async () => {
+    const fetchData = async () => {
       setLoading(true);
-      const { data, error } = await supabase.from('growth_users').select('*');
-      if (!error && data && data.length > 0) {
-        setUsers(data);
-        setHasData(true);
+      const weekStr = weekStart.toISOString().split('T')[0];
+      const { data: result, error } = await supabase.rpc('get_churn_renewal', { p_week_start: weekStr, p_weeks: 8 });
+      if (error) {
+        console.error('RPC get_churn_renewal error:', error);
+        setData({ has_data: false });
+      } else if (result) {
+        const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+        setData(parsed as ChurnData);
       } else {
-        setHasData(false);
+        setData({ has_data: false });
       }
       setLoading(false);
     };
-    fetchUsers();
-  }, [supabase]);
-
-  // Build 8 weeks of churn data ending at selected week
-  const churnWeeks = useMemo(() => {
-    if (!users.length) return [];
-
-    const weeks: WeeklyChurnRow[] = [];
-    for (let i = 7; i >= 0; i--) {
-      const wStart = new Date(weekStart);
-      wStart.setDate(wStart.getDate() - i * 7);
-      const wEnd = new Date(wStart);
-      wEnd.setDate(wEnd.getDate() + 6);
-      wEnd.setHours(23, 59, 59, 999);
-
-      // Starting users: paid users whose subscription was active at start of week
-      const startingUsers = users.filter(u =>
-        u.plan_paid &&
-        new Date(u.subscription_start) <= wStart &&
-        new Date(u.subscription_end) >= wStart &&
-        !u.cancelled
-      ).length;
-
-      // New users: registered this week
-      const newUsers = users.filter(u => {
-        const created = new Date(u.created_date);
-        return created >= wStart && created <= wEnd;
-      }).length;
-
-      // Churned: subscription ended this week AND cancelled or not renewed
-      const churnedUsers = users.filter(u => {
-        const subEnd = new Date(u.subscription_end);
-        return subEnd >= wStart && subEnd <= wEnd && (u.cancelled || !u.plan_paid);
-      }).length;
-
-      const churnRate = startingUsers > 0 ? (churnedUsers / startingUsers) * 100 : 0;
-      const netUsers = startingUsers + newUsers - churnedUsers;
-      const growthRate = startingUsers > 0 ? ((netUsers - startingUsers) / startingUsers) * 100 : 0;
-
-      weeks.push({
-        weekLabel: formatWeekLabel(wStart),
-        weekStart: wStart,
-        startingUsers,
-        newUsers,
-        churnedUsers,
-        churnRate,
-        netUsers,
-        growthRate,
-      });
-    }
-    return weeks;
-  }, [users, weekStart]);
-
-  // Renewal data: same 8 weeks
-  const renewalWeeks = useMemo(() => {
-    if (!users.length) return [];
-
-    const weeks: RenewalRow[] = [];
-    for (let i = 7; i >= 0; i--) {
-      const wStart = new Date(weekStart);
-      wStart.setDate(wStart.getDate() - i * 7);
-      const wEnd = new Date(wStart);
-      wEnd.setDate(wEnd.getDate() + 6);
-      wEnd.setHours(23, 59, 59, 999);
-
-      // Due to renew: subscription_end falls in this week
-      const dueToRenew = users.filter(u => {
-        const subEnd = new Date(u.subscription_end);
-        return u.plan_paid && subEnd >= wStart && subEnd <= wEnd;
-      });
-
-      // Renewed: among those, still paid and not cancelled
-      const renewed = dueToRenew.filter(u => !u.cancelled && u.plan_paid);
-
-      weeks.push({
-        weekLabel: formatWeekLabel(wStart),
-        dueToRenew: dueToRenew.length,
-        renewed: renewed.length,
-        renewalRate: dueToRenew.length > 0 ? (renewed.length / dueToRenew.length) * 100 : 0,
-      });
-    }
-    return weeks;
-  }, [users, weekStart]);
-
-  // Upcoming renewals (next 7 days)
-  const upcomingRenewals = useMemo(() => {
-    if (!users.length) return [];
-    const now = new Date();
-    const nextWeek = new Date();
-    nextWeek.setDate(nextWeek.getDate() + 7);
-
-    return users
-      .filter(u => {
-        if (!u.subscription_end || u.cancelled) return false;
-        const subEnd = new Date(u.subscription_end);
-        return subEnd >= now && subEnd <= nextWeek && u.plan_paid;
-      })
-      .sort((a, b) => new Date(a.subscription_end).getTime() - new Date(b.subscription_end).getTime());
-  }, [users]);
+    fetchData();
+  }, [supabase, weekStart]);
 
   if (loading) {
     return <div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
   }
 
-  if (!hasData) {
+  if (!data?.has_data) {
     return (
       <div className="space-y-6">
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-8 text-center">
@@ -193,6 +83,10 @@ export default function ChurnRenewal() {
       </div>
     );
   }
+
+  const churnWeeks = data.churn_weeks || [];
+  const renewalWeeks = data.renewal_weeks || [];
+  const upcomingRenewals = data.upcoming_renewals || [];
 
   return (
     <div className="space-y-8">
@@ -302,29 +196,26 @@ export default function ChurnRenewal() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {upcomingRenewals.map((u) => {
-                  const daysLeft = Math.ceil((new Date(u.subscription_end).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                  return (
-                    <tr key={u.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3 text-gray-900 font-medium flex items-center gap-2">
-                        <EnvelopeIcon className="w-4 h-4 text-gray-400" />
-                        {u.email || 'Sin email'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
-                          {u.plan_id || 'N/A'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-600">{u.country || '-'}</td>
-                      <td className="px-4 py-3 text-gray-600">{new Date(u.subscription_end).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
-                      <td className="px-4 py-3 text-right">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${daysLeft <= 2 ? 'bg-red-100 text-red-700' : daysLeft <= 4 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
-                          {daysLeft} {daysLeft === 1 ? 'dia' : 'dias'}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {upcomingRenewals.map((u) => (
+                  <tr key={u.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3 text-gray-900 font-medium flex items-center gap-2">
+                      <EnvelopeIcon className="w-4 h-4 text-gray-400" />
+                      {u.email || 'Sin email'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
+                        {u.plan_id || 'N/A'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">{u.country || '-'}</td>
+                    <td className="px-4 py-3 text-gray-600">{new Date(u.subscription_end).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                    <td className="px-4 py-3 text-right">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold ${u.days_left <= 2 ? 'bg-red-100 text-red-700' : u.days_left <= 4 ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+                        {u.days_left} {u.days_left === 1 ? 'dia' : 'dias'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

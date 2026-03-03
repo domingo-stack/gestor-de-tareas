@@ -91,6 +91,7 @@ export default function RevenueTab() {
 
   // Data
   const [allData, setAllData] = useState<RevenueOrder[]>([]);
+  const [lastYearData, setLastYearData] = useState<RevenueOrder[]>([]);
   const [orders, setOrders] = useState<RevenueOrder[]>([]);
   const [metrics, setMetrics] = useState<Metrics>({ totalRevenue: 0, totalTransactions: 0, averageTicket: 0 });
   const [loading, setLoading] = useState(true);
@@ -104,7 +105,7 @@ export default function RevenueTab() {
   // Sync status
   useEffect(() => {
     if (!supabase) return;
-    supabase.from('sync_logs').select('*').order('created_at', { ascending: false }).limit(1).single()
+    supabase.from('sync_logs').select('*').eq('source', 'n8n').order('created_at', { ascending: false }).limit(1).single()
       .then(({ data }) => {
         if (data) setSyncStatus({ date: data.created_at, count: data.records_processed });
       });
@@ -177,6 +178,7 @@ export default function RevenueTab() {
 
         setMetrics({ totalRevenue: totalRev, totalTransactions: data.length, averageTicket: data.length > 0 ? totalRev / data.length : 0, growth: growthParams });
         setAllData(data as RevenueOrder[]);
+        setLastYearData((lastYearRes.data || []) as RevenueOrder[]);
         setOrders((tableDataRes.data || []) as RevenueOrder[]);
         setTotalRecords(allDataRes.count || 0);
       } catch (err) {
@@ -193,8 +195,19 @@ export default function RevenueTab() {
   const chartData = useMemo(() => {
     if (!allData.length) return [];
 
-    // Also build lastYear map from allData (simplified - we use the data we have)
-    const bucketMap = new Map<string, { date: string; total: number; nuevo: number; renovacion: number; suscripcion: number; prepago: number }>();
+    const bucketMap = new Map<string, { date: string; total: number; nuevo: number; renovacion: number; suscripcion: number; prepago: number; lastYear: number }>();
+
+    // Build last year lookup: shift dates +1 year to align with current period
+    const lastYearBuckets = new Map<string, number>();
+    lastYearData.forEach((order) => {
+      const d = new Date(order.created_at);
+      d.setFullYear(d.getFullYear() + 1); // shift to current year for alignment
+      let key: string;
+      if (granularity === 'weekly') key = getWeekKey(d);
+      else if (granularity === 'monthly') key = getMonthKey(d);
+      else key = d.toISOString().split('T')[0];
+      lastYearBuckets.set(key, (lastYearBuckets.get(key) || 0) + (order.amount_usd || 0));
+    });
 
     allData.forEach((order) => {
       const d = new Date(order.created_at);
@@ -204,7 +217,7 @@ export default function RevenueTab() {
       else key = d.toISOString().split('T')[0];
 
       if (!bucketMap.has(key)) {
-        bucketMap.set(key, { date: key, total: 0, nuevo: 0, renovacion: 0, suscripcion: 0, prepago: 0 });
+        bucketMap.set(key, { date: key, total: 0, nuevo: 0, renovacion: 0, suscripcion: 0, prepago: 0, lastYear: 0 });
       }
       const entry = bucketMap.get(key)!;
       const amt = order.amount_usd || 0;
@@ -221,8 +234,13 @@ export default function RevenueTab() {
       else if (cat.includes('prepago')) entry.prepago += amt;
     });
 
+    // Merge last year data into buckets
+    bucketMap.forEach((entry, key) => {
+      entry.lastYear = lastYearBuckets.get(key) || 0;
+    });
+
     return Array.from(bucketMap.values()).sort((a, b) => a.date.localeCompare(b.date));
-  }, [allData, granularity]);
+  }, [allData, lastYearData, granularity]);
 
   // Distribution data
   const distributionData = useMemo(() => {
@@ -291,6 +309,19 @@ export default function RevenueTab() {
             <div className="flex justify-between items-center">
               <div className="flex items-center"><span className="w-3 h-3 rounded-sm bg-[#F59E0B] mr-2"></span><span className="text-gray-500">Prepago</span></div>
               <span className="font-medium text-gray-700">{fmtUSD(data.prepago)}</span>
+            </div>
+          )}
+          {data.lastYear > 0 && (
+            <div className="flex justify-between items-center border-t border-gray-100 pt-1.5 mt-1">
+              <div className="flex items-center"><span className="w-3 h-0.5 bg-gray-400 mr-2" style={{ borderTop: '2px dashed #9CA3AF', background: 'none' }}></span><span className="text-gray-500">Año anterior</span></div>
+              <div className="text-right">
+                <span className="font-medium text-gray-500">{fmtUSD(data.lastYear)}</span>
+                {data.total > 0 && (
+                  <span className={`block text-[10px] font-bold ${data.total >= data.lastYear ? 'text-green-600' : 'text-red-500'}`}>
+                    {data.total >= data.lastYear ? '+' : ''}{((data.total - data.lastYear) / data.lastYear * 100).toFixed(0)}% YoY
+                  </span>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -381,6 +412,7 @@ export default function RevenueTab() {
                 <Tooltip content={<CustomTooltip />} cursor={{ fill: '#F3F4F6' }} />
                 <Bar dataKey="nuevo" stackId="a" fill="#3B82F6" barSize={30} name="Nuevo" />
                 <Bar dataKey="renovacion" stackId="a" fill="#10B981" radius={[4, 4, 0, 0]} barSize={30} name="Renovacion" />
+                <Line dataKey="lastYear" stroke="#9CA3AF" strokeWidth={1.5} strokeDasharray="5 5" dot={false} name="Año anterior" />
               </ComposedChart>
             </ResponsiveContainer>
           ) : (
