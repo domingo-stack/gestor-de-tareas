@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { ExclamationTriangleIcon, EyeIcon } from '@heroicons/react/24/outline';
 import { fmtNum, fmtPct } from './formatters';
+import WeekSelector, { getCurrentWeekStart } from './WeekSelector';
 
 interface CrossTableRow {
   key: string;
@@ -12,6 +13,7 @@ interface CrossTableRow {
   noActivado: number;
   total: number;
   conversionPct: number;
+  pctOfGrandTotal: number;
 }
 
 interface ChannelPlanRow {
@@ -36,29 +38,39 @@ interface AcquisitionData {
   plan_names?: string[];
 }
 
+function toISODate(d: Date): string {
+  return d.toISOString().split('T')[0];
+}
+
 export default function AcquisitionTab() {
   const { supabase } = useAuth();
   const [data, setData] = useState<AcquisitionData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [weekStart, setWeekStart] = useState<Date>(getCurrentWeekStart);
+  const [showAllTime, setShowAllTime] = useState(false);
+
+  const fetchData = useCallback(async () => {
+    if (!supabase) return;
+    setLoading(true);
+    const params: Record<string, string | null> = {
+      p_week_start: showAllTime ? null : toISODate(weekStart),
+    };
+    const { data: result, error } = await supabase.rpc('get_acquisition_stats', params);
+    if (error) {
+      console.error('RPC get_acquisition_stats error:', error);
+      setData({ has_data: false });
+    } else if (result) {
+      const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+      setData(parsed as AcquisitionData);
+    } else {
+      setData({ has_data: false });
+    }
+    setLoading(false);
+  }, [supabase, weekStart, showAllTime]);
 
   useEffect(() => {
-    if (!supabase) return;
-    const fetchData = async () => {
-      setLoading(true);
-      const { data: result, error } = await supabase.rpc('get_acquisition_stats');
-      if (error) {
-        console.error('RPC get_acquisition_stats error:', error);
-        setData({ has_data: false });
-      } else if (result) {
-        const parsed = typeof result === 'string' ? JSON.parse(result) : result;
-        setData(parsed as AcquisitionData);
-      } else {
-        setData({ has_data: false });
-      }
-      setLoading(false);
-    };
     fetchData();
-  }, [supabase]);
+  }, [fetchData]);
 
   if (loading) {
     return <div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
@@ -67,6 +79,21 @@ export default function AcquisitionTab() {
   if (!data?.has_data) {
     return (
       <div className="space-y-6">
+        {/* Header even when no data */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <h2 className="text-lg font-semibold text-gray-800">Adquisicion</h2>
+          <div className="flex items-center gap-4">
+            {!showAllTime && (
+              <WeekSelector weekStart={weekStart} onWeekChange={setWeekStart} />
+            )}
+            <button
+              onClick={() => setShowAllTime(!showAllTime)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${showAllTime ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+            >
+              {showAllTime ? 'Ver semanal' : 'Ver acumulado'}
+            </button>
+          </div>
+        </div>
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-8 text-center">
           <ExclamationTriangleIcon className="w-10 h-10 text-amber-400 mx-auto mb-3" />
           <h3 className="text-lg font-semibold text-amber-800 mb-2">Datos pendientes</h3>
@@ -98,6 +125,7 @@ export default function AcquisitionTab() {
               <th className="px-4 py-3 text-right">Gratis Activado</th>
               <th className="px-4 py-3 text-right">No Activado</th>
               <th className="px-4 py-3 text-right">Total</th>
+              <th className="px-4 py-3 text-right">% Total</th>
               <th className="px-4 py-3 text-right">% Conversion</th>
             </tr>
           </thead>
@@ -109,6 +137,9 @@ export default function AcquisitionTab() {
                 <td className="px-4 py-3 text-right text-purple-600">{fmtNum(row.gratisActivado)}</td>
                 <td className="px-4 py-3 text-right text-gray-400">{fmtNum(row.noActivado)}</td>
                 <td className="px-4 py-3 text-right font-bold text-gray-900">{fmtNum(row.total)}</td>
+                <td className="px-4 py-3 text-right">
+                  <span className="text-xs text-gray-500">{row.pctOfGrandTotal != null ? `${row.pctOfGrandTotal}%` : '-'}</span>
+                </td>
                 <td className="px-4 py-3 text-right">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${row.conversionPct >= 10 ? 'bg-green-50 text-green-700' : row.conversionPct >= 5 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
                     {fmtPct(row.conversionPct)}
@@ -123,6 +154,7 @@ export default function AcquisitionTab() {
               <td className="px-4 py-3 text-right text-purple-700">{fmtNum(tableData.reduce((s, r) => s + r.gratisActivado, 0))}</td>
               <td className="px-4 py-3 text-right text-gray-500">{fmtNum(tableData.reduce((s, r) => s + r.noActivado, 0))}</td>
               <td className="px-4 py-3 text-right text-gray-900">{fmtNum(tableData.reduce((s, r) => s + r.total, 0))}</td>
+              <td className="px-4 py-3 text-right text-xs text-gray-500">100%</td>
               <td className="px-4 py-3 text-right">
                 {(() => {
                   const totalAll = tableData.reduce((s, r) => s + r.total, 0);
@@ -139,7 +171,21 @@ export default function AcquisitionTab() {
 
   return (
     <div className="space-y-8">
-      <h2 className="text-lg font-semibold text-gray-800">Adquisicion</h2>
+      {/* Header with WeekSelector + toggle */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <h2 className="text-lg font-semibold text-gray-800">Adquisicion</h2>
+        <div className="flex items-center gap-4">
+          {!showAllTime && (
+            <WeekSelector weekStart={weekStart} onWeekChange={setWeekStart} />
+          )}
+          <button
+            onClick={() => setShowAllTime(!showAllTime)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${showAllTime ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+          >
+            {showAllTime ? 'Ver semanal' : 'Ver acumulado'}
+          </button>
+        </div>
+      </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
