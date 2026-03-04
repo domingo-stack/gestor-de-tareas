@@ -7,10 +7,10 @@ import {
   MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
 
-const COUNTRIES_LIST = ['Chile', 'Peru', 'Mexico', 'Colombia', 'Argentina', 'Ecuador', 'Costa Rica', 'Panama', 'El Salvador', 'Honduras', 'Guatemala', 'Venezuela', 'Bolivia', 'Uruguay', 'Paraguay', 'Republica Dominicana', 'Puerto Rico', 'Nicaragua', 'Espana'];
+const COUNTRIES_FALLBACK = ['Chile', 'Peru', 'Mexico', 'Colombia', 'Argentina', 'Ecuador', 'Costa Rica', 'Panama', 'El Salvador', 'Honduras', 'Guatemala', 'Venezuela', 'Bolivia', 'Uruguay', 'Paraguay', 'Republica Dominicana', 'Puerto Rico', 'Nicaragua', 'Espana'];
 const PROVIDERS_LIST = ['Stripe', 'Dlocal', 'MercadoPago', 'Paypal', 'Manual'];
 const TYPES_LIST = ['Nuevo', 'Renovacion'];
-const PLANS = ['Mensual', 'Anual'];
+const PLANS_FALLBACK = ['Mensual', 'Anual'];
 
 interface GrowthFiltersProps {
   selectedCountries: string[];
@@ -24,6 +24,8 @@ interface GrowthFiltersProps {
   searchTerm: string;
   setSearchTerm: (v: string) => void;
   onFilterChange: () => void;
+  planOptions?: string[];
+  countryOptions?: string[];
 }
 
 export default function GrowthFilters({
@@ -33,6 +35,8 @@ export default function GrowthFilters({
   selectedPlan, setSelectedPlan,
   searchTerm, setSearchTerm,
   onFilterChange,
+  planOptions,
+  countryOptions,
 }: GrowthFiltersProps) {
   const [isCountryOpen, setIsCountryOpen] = useState(false);
   const [isProviderOpen, setIsProviderOpen] = useState(false);
@@ -57,6 +61,8 @@ export default function GrowthFilters({
     else setList([...list, item]);
     onFilterChange();
   };
+
+  const countries = countryOptions && countryOptions.length > 0 ? countryOptions : COUNTRIES_FALLBACK;
 
   const MultiSelect = ({ label, items, selected, setSelected, isOpen, setIsOpen, refEl }: {
     label: string; items: string[]; selected: string[]; setSelected: (v: string[]) => void;
@@ -92,13 +98,13 @@ export default function GrowthFilters({
         <span className="text-xs font-semibold uppercase tracking-wide">Filtros:</span>
       </div>
 
-      <MultiSelect label="Todos los Paises" items={COUNTRIES_LIST} selected={selectedCountries} setSelected={setSelectedCountries} isOpen={isCountryOpen} setIsOpen={setIsCountryOpen} refEl={countryRef} />
+      <MultiSelect label="Todos los Paises" items={countries} selected={selectedCountries} setSelected={setSelectedCountries} isOpen={isCountryOpen} setIsOpen={setIsCountryOpen} refEl={countryRef} />
       <MultiSelect label="Medio de Pago" items={PROVIDERS_LIST} selected={selectedProviders} setSelected={setSelectedProviders} isOpen={isProviderOpen} setIsOpen={setIsProviderOpen} refEl={providerRef} />
       <MultiSelect label="Tipo Cliente" items={TYPES_LIST} selected={selectedTypes} setSelected={setSelectedTypes} isOpen={isTypeOpen} setIsOpen={setIsTypeOpen} refEl={typeRef} />
 
       <select className="block w-full md:w-40 rounded-md border-gray-300 shadow-sm sm:text-sm py-2 px-3 border bg-gray-50" value={selectedPlan} onChange={(e) => { setSelectedPlan(e.target.value); onFilterChange(); }}>
         <option value="all">Planes</option>
-        {PLANS.map(p => <option key={p} value={p}>{p}</option>)}
+        {(planOptions && planOptions.length > 0 ? planOptions : PLANS_FALLBACK).map(p => <option key={p} value={p}>{p}</option>)}
       </select>
 
       <div className="relative flex-grow w-full md:w-auto">
