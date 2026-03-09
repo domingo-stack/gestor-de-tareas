@@ -50,6 +50,8 @@ export default function ChurnRenewal() {
   const [weekStart, setWeekStart] = useState(getCurrentWeekStart);
   const [planFilter, setPlanFilter] = useState('all');
   const [upcomingDays, setUpcomingDays] = useState<number>(7);
+  const [upcomingPlanFilter, setUpcomingPlanFilter] = useState('all');
+  const [upcomingCountryFilter, setUpcomingCountryFilter] = useState('all');
 
   useEffect(() => {
     if (!supabase) return;
@@ -76,27 +78,6 @@ export default function ChurnRenewal() {
     fetchData();
   }, [supabase, weekStart, planFilter, upcomingDays]);
 
-  const downloadCSV = () => {
-    const rows = data?.upcoming_renewals || [];
-    if (rows.length === 0) return;
-    const headers = ['Email', 'Plan', 'Pais', 'Vence', 'Dias restantes'];
-    const csvRows = rows.map(u => [
-      u.email || 'Sin email',
-      u.plan_id || 'N/A',
-      u.country || '-',
-      u.subscription_end ? new Date(u.subscription_end).toLocaleDateString('es-ES') : '-',
-      u.days_left.toString(),
-    ]);
-    const csv = [headers, ...csvRows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `renovaciones-proximas-${upcomingDays}d.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   if (loading) {
     return <div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
   }
@@ -120,6 +101,37 @@ export default function ChurnRenewal() {
   const renewalWeeks = data.renewal_weeks || [];
   const upcomingRenewals = data.upcoming_renewals || [];
   const planOptions = data.plan_options || [];
+
+  // Opciones únicas para filtros de renovaciones próximas
+  const upcomingPlanOptions = Array.from(new Set(upcomingRenewals.map(u => u.plan_id).filter(Boolean))).sort();
+  const upcomingCountryOptions = Array.from(new Set(upcomingRenewals.map(u => u.country).filter(Boolean))).sort();
+
+  const filteredUpcomingRenewals = upcomingRenewals.filter(u => {
+    if (upcomingPlanFilter !== 'all' && u.plan_id !== upcomingPlanFilter) return false;
+    if (upcomingCountryFilter !== 'all' && u.country !== upcomingCountryFilter) return false;
+    return true;
+  });
+
+  const downloadCSV = () => {
+    const rows = filteredUpcomingRenewals;
+    if (rows.length === 0) return;
+    const headers = ['Email', 'Plan', 'Pais', 'Vence', 'Dias restantes'];
+    const csvRows = rows.map(u => [
+      u.email || 'Sin email',
+      u.plan_id || 'N/A',
+      u.country || '-',
+      u.subscription_end ? new Date(u.subscription_end).toLocaleDateString('es-ES') : '-',
+      u.days_left.toString(),
+    ]);
+    const csv = [headers, ...csvRows].map(r => r.map(c => `"${c}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `renovaciones-proximas-${upcomingDays}d.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="space-y-8">
@@ -222,41 +234,72 @@ export default function ChurnRenewal() {
       {/* Upcoming Renewals */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 bg-amber-50">
-          <div className="flex items-center justify-between flex-wrap gap-3">
-            <h3 className="font-semibold text-amber-800 flex items-center gap-2">
-              <CalendarDaysIcon className="w-5 h-5" />
-              Renovaciones proximas
-            </h3>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center bg-white border border-amber-200 rounded-lg overflow-hidden">
-                {UPCOMING_DAYS_OPTIONS.map((d) => (
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <h3 className="font-semibold text-amber-800 flex items-center gap-2">
+                <CalendarDaysIcon className="w-5 h-5" />
+                Renovaciones proximas
+              </h3>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center bg-white border border-amber-200 rounded-lg overflow-hidden">
+                  {UPCOMING_DAYS_OPTIONS.map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => setUpcomingDays(d)}
+                      className={`px-3 py-1 text-xs font-medium transition-colors ${
+                        upcomingDays === d
+                          ? 'bg-amber-600 text-white'
+                          : 'text-amber-700 hover:bg-amber-100'
+                      }`}
+                    >
+                      {d}d
+                    </button>
+                  ))}
+                </div>
+                <span className="text-sm font-bold text-amber-700">
+                  {fmtNum(filteredUpcomingRenewals.length)}
+                  {filteredUpcomingRenewals.length !== upcomingRenewals.length && (
+                    <span className="font-normal text-amber-600"> de {fmtNum(upcomingRenewals.length)}</span>
+                  )}
+                  {' '}usuarios
+                </span>
+                {filteredUpcomingRenewals.length > 0 && (
                   <button
-                    key={d}
-                    onClick={() => setUpcomingDays(d)}
-                    className={`px-3 py-1 text-xs font-medium transition-colors ${
-                      upcomingDays === d
-                        ? 'bg-amber-600 text-white'
-                        : 'text-amber-700 hover:bg-amber-100'
-                    }`}
+                    onClick={downloadCSV}
+                    className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-amber-700 bg-white border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors"
                   >
-                    {d}d
+                    <ArrowDownTrayIcon className="w-3.5 h-3.5" />
+                    CSV
                   </button>
-                ))}
+                )}
               </div>
-              <span className="text-sm font-bold text-amber-700">{fmtNum(upcomingRenewals.length)} usuarios</span>
-              {upcomingRenewals.length > 0 && (
-                <button
-                  onClick={downloadCSV}
-                  className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-amber-700 bg-white border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors"
-                >
-                  <ArrowDownTrayIcon className="w-3.5 h-3.5" />
-                  CSV
-                </button>
-              )}
+            </div>
+            {/* Filtros de país y plan */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={upcomingCountryFilter}
+                onChange={(e) => setUpcomingCountryFilter(e.target.value)}
+                className="text-xs border border-amber-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
+              >
+                <option value="all">Todos los paises</option>
+                {upcomingCountryOptions.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <select
+                value={upcomingPlanFilter}
+                onChange={(e) => setUpcomingPlanFilter(e.target.value)}
+                className="text-xs border border-amber-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-amber-400 focus:border-amber-400"
+              >
+                <option value="all">Todos los planes</option>
+                {upcomingPlanOptions.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
             </div>
           </div>
         </div>
-        {upcomingRenewals.length > 0 ? (
+        {filteredUpcomingRenewals.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-500 font-medium border-b">
@@ -269,7 +312,7 @@ export default function ChurnRenewal() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {upcomingRenewals.map((u) => (
+                {filteredUpcomingRenewals.map((u) => (
                   <tr key={u.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 text-gray-900 font-medium flex items-center gap-2">
                       <EnvelopeIcon className="w-4 h-4 text-gray-400" />
@@ -294,7 +337,9 @@ export default function ChurnRenewal() {
           </div>
         ) : (
           <div className="p-8 text-center text-gray-400">
-            No hay renovaciones pendientes en los proximos {upcomingDays} dias
+            {upcomingRenewals.length > 0
+              ? 'No hay resultados con los filtros aplicados'
+              : `No hay renovaciones pendientes en los proximos ${upcomingDays} dias`}
           </div>
         )}
       </div>

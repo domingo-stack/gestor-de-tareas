@@ -18,6 +18,7 @@ CREATE INDEX IF NOT EXISTS idx_rev_orders_created_at ON rev_orders (created_at);
 CREATE INDEX IF NOT EXISTS idx_rev_orders_country ON rev_orders (country);
 
 -- ─── RPC 1: get_executive_summary ─────────────────────────────
+-- Retorna KPIs semanales + weekly_trend (8 semanas) + country_registrations (top 15)
 CREATE OR REPLACE FUNCTION get_executive_summary(p_week_start date)
 RETURNS jsonb
 LANGUAGE plpgsql STABLE
@@ -36,11 +37,26 @@ DECLARE
   v_arpu numeric := 0;
   v_total_users bigint := 0;
   v_new_users bigint := 0;
+  v_week_paid_users bigint := 0;
   v_paid_users bigint := 0;
   v_activated_users bigint := 0;
   v_activation_pct numeric := 0;
   v_conversion_pct numeric := 0;
   v_has_growth_users boolean := false;
+  -- Trend variables
+  v_trend_arr jsonb := '[]'::jsonb;
+  i int;
+  t_start date;
+  t_end date;
+  t_end_ts timestamp;
+  t_label text;
+  t_regs bigint;
+  t_rev_new numeric;
+  t_rev_renew numeric;
+  t_tx_new bigint;
+  t_tx_renew bigint;
+  -- Country variables
+  v_country_arr jsonb := '[]'::jsonb;
 BEGIN
   v_week_end := (p_week_start + 6)::timestamp + interval '23 hours 59 minutes 59 seconds';
   v_prev_start := (p_week_start - 7)::timestamp;
@@ -95,13 +111,25 @@ BEGIN
     WHERE created_date::date >= p_week_start
       AND created_date::date <= (p_week_start + 6);
 
+    -- Paid users from this week's cohort (registered this week AND plan_paid = true)
+    SELECT COUNT(*) INTO v_week_paid_users
+    FROM growth_users
+    WHERE created_date::date >= p_week_start
+      AND created_date::date <= (p_week_start + 6)
+      AND plan_paid = true;
+
     IF v_total_users > 0 THEN
       v_activation_pct := (v_activated_users::numeric / v_total_users) * 100;
-      v_conversion_pct := (v_paid_users::numeric / v_total_users) * 100;
     END IF;
 
-    IF v_paid_users > 0 THEN
-      v_arpu := v_total_rev / v_paid_users;
+    -- Conversion: % of this week's registrations that converted to paid
+    IF v_new_users > 0 THEN
+      v_conversion_pct := (v_week_paid_users::numeric / v_new_users) * 100;
+    END IF;
+
+    -- ARPU: revenue this week / new users this week
+    IF v_new_users > 0 THEN
+      v_arpu := v_total_rev / v_new_users;
     ELSIF v_transactions > 0 THEN
       v_arpu := v_total_rev / v_transactions;
     END IF;
@@ -109,6 +137,88 @@ BEGIN
     IF v_transactions > 0 THEN
       v_arpu := v_total_rev / v_transactions;
     END IF;
+  END IF;
+
+  -- ═══════════════════════════════════════════════════
+  -- WEEKLY TREND: últimas 8 semanas hacia atrás
+  -- ═══════════════════════════════════════════════════
+  FOR i IN REVERSE 7..0 LOOP
+    t_start := p_week_start - (i * 7);
+    t_end := t_start + 6;
+    t_end_ts := t_end::timestamp + interval '23 hours 59 minutes 59 seconds';
+    t_label := EXTRACT(DAY FROM t_start::timestamp)::text || '/' || EXTRACT(MONTH FROM t_start::timestamp)::text
+      || ' - ' || EXTRACT(DAY FROM t_end::timestamp)::text || '/' || EXTRACT(MONTH FROM t_end::timestamp)::text;
+
+    -- Registrations from growth_users
+    IF v_has_growth_users THEN
+      SELECT COUNT(*) INTO t_regs
+      FROM growth_users
+      WHERE created_date::date >= t_start AND created_date::date <= t_end;
+    ELSE
+      t_regs := 0;
+    END IF;
+
+    -- Revenue new (rev_orders)
+    SELECT COALESCE(SUM(amount_usd), 0), COUNT(*)
+    INTO t_rev_new, t_tx_new
+    FROM rev_orders
+    WHERE created_at >= t_start::timestamp AND created_at <= t_end_ts
+      AND LOWER(COALESCE(client_type, plan_type, '')) LIKE '%nuevo%';
+
+    -- Revenue renewal (rev_orders)
+    SELECT COALESCE(SUM(amount_usd), 0), COUNT(*)
+    INTO t_rev_renew, t_tx_renew
+    FROM rev_orders
+    WHERE created_at >= t_start::timestamp AND created_at <= t_end_ts
+      AND LOWER(COALESCE(client_type, plan_type, '')) LIKE '%renova%';
+
+    v_trend_arr := v_trend_arr || jsonb_build_object(
+      'weekLabel', t_label,
+      'registrations', t_regs,
+      'revenue_new', ROUND(t_rev_new, 2),
+      'revenue_renewal', ROUND(t_rev_renew, 2),
+      'tx_new', t_tx_new,
+      'tx_renewal', t_tx_renew
+    );
+  END LOOP;
+
+  -- ═══════════════════════════════════════════════════
+  -- COUNTRY REGISTRATIONS: top 15 de la semana seleccionada
+  -- ═══════════════════════════════════════════════════
+  IF v_has_growth_users THEN
+    SELECT COALESCE(jsonb_agg(row_data ORDER BY (row_data->>'registrations')::int DESC), '[]'::jsonb)
+    INTO v_country_arr
+    FROM (
+      SELECT jsonb_build_object(
+        'country', gu_country,
+        'registrations', reg_count,
+        'paid', COALESCE(paid_count, 0),
+        'conversion_pct', CASE WHEN reg_count > 0
+          THEN ROUND((COALESCE(paid_count, 0)::numeric / reg_count) * 100, 1)
+          ELSE 0 END
+      ) AS row_data
+      FROM (
+        SELECT
+          COALESCE(g.country, 'Sin pais') AS gu_country,
+          COUNT(*) AS reg_count
+        FROM growth_users g
+        WHERE g.created_date::date >= p_week_start
+          AND g.created_date::date <= (p_week_start + 6)
+        GROUP BY COALESCE(g.country, 'Sin pais')
+      ) regs
+      LEFT JOIN (
+        SELECT
+          COALESCE(r.country, 'Sin pais') AS ro_country,
+          COUNT(*) AS paid_count
+        FROM rev_orders r
+        WHERE r.created_at >= p_week_start::timestamp
+          AND r.created_at <= v_week_end
+          AND LOWER(COALESCE(r.client_type, r.plan_type, '')) LIKE '%nuevo%'
+        GROUP BY COALESCE(r.country, 'Sin pais')
+      ) pays ON regs.gu_country = pays.ro_country
+      ORDER BY reg_count DESC
+      LIMIT 15
+    ) sub;
   END IF;
 
   result := jsonb_build_object(
@@ -126,7 +236,9 @@ BEGIN
     'activated_users', v_activated_users,
     'activation_pct', ROUND(v_activation_pct, 2),
     'conversion_pct', ROUND(v_conversion_pct, 2),
-    'has_growth_users', v_has_growth_users
+    'has_growth_users', v_has_growth_users,
+    'weekly_trend', v_trend_arr,
+    'country_registrations', v_country_arr
   );
 
   RETURN result;
@@ -304,17 +416,33 @@ END;
 $$;
 
 -- ─── RPC 3: get_conversion_funnel ─────────────────────────────
-CREATE OR REPLACE FUNCTION get_conversion_funnel(p_week_start date, p_weeks int DEFAULT 8)
+-- Filtros cruzados: eventos_valor, plan status, plan_id
+-- Retorna: funnel_week (semana seleccionada), funnel_general (acumulado), weekly (tabla), plan_options
+CREATE OR REPLACE FUNCTION get_conversion_funnel(
+  p_week_start date,
+  p_weeks int DEFAULT 8,
+  p_eventos_filter text DEFAULT 'all',
+  p_plan_status text DEFAULT 'all',
+  p_plan_id text DEFAULT 'all'
+)
 RETURNS jsonb
 LANGUAGE plpgsql STABLE
 AS $$
 DECLARE
   result jsonb;
   v_has_data boolean;
+  -- General funnel (acumulado, con filtros de eventos/plan pero sin filtro de semana)
   v_total bigint;
   v_activated bigint;
   v_paid bigint;
-  funnel_arr jsonb;
+  v_activation_pct numeric;
+  v_conversion_pct numeric;
+  -- Week funnel
+  funnel_week_arr jsonb;
+  v_wk_total bigint;
+  v_wk_activated bigint;
+  v_wk_paid bigint;
+  -- Weekly table
   weekly_arr jsonb := '[]'::jsonb;
   i int;
   w_start date;
@@ -324,53 +452,113 @@ DECLARE
   v_act bigint;
   v_p bigint;
   v_free bigint;
+  -- Plan options
+  plan_options_arr jsonb;
+  -- Base filter SQL fragment (built dynamically via conditions)
+  v_ev_filter text := '';
+  v_plan_filter text := '';
 BEGIN
   SELECT EXISTS(SELECT 1 FROM growth_users LIMIT 1) INTO v_has_data;
   IF NOT v_has_data THEN
     RETURN jsonb_build_object('has_data', false);
   END IF;
 
-  -- Overall funnel
-  SELECT COUNT(*) INTO v_total FROM growth_users;
-  SELECT COUNT(*) INTO v_activated FROM growth_users WHERE COALESCE(eventos_valor, 0) >= 1;
-  SELECT COUNT(*) INTO v_paid FROM growth_users WHERE plan_paid = true;
+  -- ═══ Plan options (always unfiltered) ═══
+  SELECT COALESCE(jsonb_agg(DISTINCT plan_id ORDER BY plan_id), '[]'::jsonb)
+  INTO plan_options_arr
+  FROM growth_users
+  WHERE plan_paid = true AND plan_id IS NOT NULL AND plan_id != '';
 
-  funnel_arr := jsonb_build_array(
+  -- ═══ FUNNEL GENERAL (acumulado, respeta filtros eventos/plan, NO filtro semana) ═══
+  SELECT COUNT(*),
+         COUNT(*) FILTER (WHERE COALESCE(eventos_valor, 0) >= 1),
+         COUNT(*) FILTER (WHERE plan_paid = true)
+  INTO v_total, v_activated, v_paid
+  FROM growth_users
+  WHERE (p_eventos_filter = 'all' OR
+         (p_eventos_filter = '0' AND COALESCE(eventos_valor, 0) = 0) OR
+         (p_eventos_filter = '1' AND COALESCE(eventos_valor, 0) = 1) OR
+         (p_eventos_filter = '2' AND COALESCE(eventos_valor, 0) = 2) OR
+         (p_eventos_filter = '3' AND COALESCE(eventos_valor, 0) = 3) OR
+         (p_eventos_filter = '4' AND COALESCE(eventos_valor, 0) = 4) OR
+         (p_eventos_filter = '5+' AND COALESCE(eventos_valor, 0) > 4))
+    AND (p_plan_status = 'all' OR
+         (p_plan_status = 'free' AND plan_paid = false AND cancelled = false) OR
+         (p_plan_status = 'paid' AND plan_paid = true) OR
+         (p_plan_status = 'cancelled' AND cancelled = true))
+    AND (p_plan_id = 'all' OR plan_id = p_plan_id);
+
+  v_activation_pct := CASE WHEN v_total > 0 THEN ROUND((v_activated::numeric / v_total) * 100, 1) ELSE 0 END;
+  v_conversion_pct := CASE WHEN v_total > 0 THEN ROUND((v_paid::numeric / v_total) * 100, 1) ELSE 0 END;
+
+  -- ═══ FUNNEL SEMANAL (semana seleccionada + todos los filtros) ═══
+  SELECT COUNT(*),
+         COUNT(*) FILTER (WHERE COALESCE(eventos_valor, 0) >= 1),
+         COUNT(*) FILTER (WHERE plan_paid = true)
+  INTO v_wk_total, v_wk_activated, v_wk_paid
+  FROM growth_users
+  WHERE created_date::date >= p_week_start
+    AND created_date::date <= (p_week_start + 6)
+    AND (p_eventos_filter = 'all' OR
+         (p_eventos_filter = '0' AND COALESCE(eventos_valor, 0) = 0) OR
+         (p_eventos_filter = '1' AND COALESCE(eventos_valor, 0) = 1) OR
+         (p_eventos_filter = '2' AND COALESCE(eventos_valor, 0) = 2) OR
+         (p_eventos_filter = '3' AND COALESCE(eventos_valor, 0) = 3) OR
+         (p_eventos_filter = '4' AND COALESCE(eventos_valor, 0) = 4) OR
+         (p_eventos_filter = '5+' AND COALESCE(eventos_valor, 0) > 4))
+    AND (p_plan_status = 'all' OR
+         (p_plan_status = 'free' AND plan_paid = false AND cancelled = false) OR
+         (p_plan_status = 'paid' AND plan_paid = true) OR
+         (p_plan_status = 'cancelled' AND cancelled = true))
+    AND (p_plan_id = 'all' OR plan_id = p_plan_id);
+
+  funnel_week_arr := jsonb_build_array(
     jsonb_build_object(
       'label', 'Registrados',
-      'count', v_total,
+      'count', v_wk_total,
       'pctOfTotal', 100,
       'pctOfPrev', 100
     ),
     jsonb_build_object(
       'label', 'Activados (1+ evento)',
-      'count', v_activated,
-      'pctOfTotal', CASE WHEN v_total > 0 THEN ROUND((v_activated::numeric / v_total) * 100, 2) ELSE 0 END,
-      'pctOfPrev', CASE WHEN v_total > 0 THEN ROUND((v_activated::numeric / v_total) * 100, 2) ELSE 0 END
+      'count', v_wk_activated,
+      'pctOfTotal', CASE WHEN v_wk_total > 0 THEN ROUND((v_wk_activated::numeric / v_wk_total) * 100, 2) ELSE 0 END,
+      'pctOfPrev', CASE WHEN v_wk_total > 0 THEN ROUND((v_wk_activated::numeric / v_wk_total) * 100, 2) ELSE 0 END
     ),
     jsonb_build_object(
       'label', 'Pagaron',
-      'count', v_paid,
-      'pctOfTotal', CASE WHEN v_total > 0 THEN ROUND((v_paid::numeric / v_total) * 100, 2) ELSE 0 END,
-      'pctOfPrev', CASE WHEN v_activated > 0 THEN ROUND((v_paid::numeric / v_activated) * 100, 2) ELSE 0 END
+      'count', v_wk_paid,
+      'pctOfTotal', CASE WHEN v_wk_total > 0 THEN ROUND((v_wk_paid::numeric / v_wk_total) * 100, 2) ELSE 0 END,
+      'pctOfPrev', CASE WHEN v_wk_activated > 0 THEN ROUND((v_wk_paid::numeric / v_wk_activated) * 100, 2) ELSE 0 END
     )
   );
 
-  -- Weekly conversion by registration cohort
+  -- ═══ WEEKLY TABLE (8 semanas, con filtros) ═══
   FOR i IN REVERSE (p_weeks - 1)..0 LOOP
     w_start := p_week_start - (i * 7);
     w_end := w_start + 6;
     w_label := EXTRACT(DAY FROM w_start::timestamp)::text || '/' || EXTRACT(MONTH FROM w_start::timestamp)::text
       || ' - ' || EXTRACT(DAY FROM w_end::timestamp)::text || '/' || EXTRACT(MONTH FROM w_end::timestamp)::text;
 
-    SELECT COUNT(*) INTO v_reg
-    FROM growth_users WHERE created_date::date >= w_start AND created_date::date <= w_end;
-
-    SELECT COUNT(*) INTO v_act
-    FROM growth_users WHERE created_date::date >= w_start AND created_date::date <= w_end AND COALESCE(eventos_valor, 0) >= 1;
-
-    SELECT COUNT(*) INTO v_p
-    FROM growth_users WHERE created_date::date >= w_start AND created_date::date <= w_end AND plan_paid = true;
+    SELECT COUNT(*),
+           COUNT(*) FILTER (WHERE COALESCE(eventos_valor, 0) >= 1),
+           COUNT(*) FILTER (WHERE plan_paid = true)
+    INTO v_reg, v_act, v_p
+    FROM growth_users
+    WHERE created_date::date >= w_start
+      AND created_date::date <= w_end
+      AND (p_eventos_filter = 'all' OR
+           (p_eventos_filter = '0' AND COALESCE(eventos_valor, 0) = 0) OR
+           (p_eventos_filter = '1' AND COALESCE(eventos_valor, 0) = 1) OR
+           (p_eventos_filter = '2' AND COALESCE(eventos_valor, 0) = 2) OR
+           (p_eventos_filter = '3' AND COALESCE(eventos_valor, 0) = 3) OR
+           (p_eventos_filter = '4' AND COALESCE(eventos_valor, 0) = 4) OR
+           (p_eventos_filter = '5+' AND COALESCE(eventos_valor, 0) > 4))
+      AND (p_plan_status = 'all' OR
+           (p_plan_status = 'free' AND plan_paid = false AND cancelled = false) OR
+           (p_plan_status = 'paid' AND plan_paid = true) OR
+           (p_plan_status = 'cancelled' AND cancelled = true))
+      AND (p_plan_id = 'all' OR plan_id = p_plan_id);
 
     v_free := v_reg - v_p;
 
@@ -387,7 +575,15 @@ BEGIN
 
   result := jsonb_build_object(
     'has_data', true,
-    'funnel', funnel_arr,
+    'plan_options', plan_options_arr,
+    'funnel_week', funnel_week_arr,
+    'funnel_general', jsonb_build_object(
+      'total', v_total,
+      'activated', v_activated,
+      'paid', v_paid,
+      'activationPct', v_activation_pct,
+      'conversionPct', v_conversion_pct
+    ),
     'weekly', weekly_arr
   );
 
@@ -396,7 +592,10 @@ END;
 $$;
 
 -- ─── RPC 4: get_acquisition_stats ─────────────────────────────
-CREATE OR REPLACE FUNCTION get_acquisition_stats()
+-- p_week_start: NULL = acumulado (all-time), con valor = filtra created_date a esa semana (lun-dom)
+CREATE OR REPLACE FUNCTION get_acquisition_stats(
+  p_week_start date DEFAULT NULL
+)
 RETURNS jsonb
 LANGUAGE plpgsql STABLE
 AS $$
@@ -405,6 +604,7 @@ DECLARE
   v_has_data boolean;
   v_total bigint;
   v_paid bigint;
+  v_week_end date;
   country_arr jsonb;
   channel_arr jsonb;
   channel_plan_arr jsonb;
@@ -415,6 +615,11 @@ DECLARE
   v_best_conv_channel text;
   v_best_conv_pct numeric;
 BEGIN
+  -- Week end = p_week_start + 6 days (Mon-Sun)
+  IF p_week_start IS NOT NULL THEN
+    v_week_end := p_week_start + 6;
+  END IF;
+
   SELECT EXISTS(SELECT 1 FROM growth_users LIMIT 1) INTO v_has_data;
   IF NOT v_has_data THEN
     RETURN jsonb_build_object('has_data', false);
@@ -422,7 +627,8 @@ BEGIN
 
   SELECT COUNT(*), COUNT(*) FILTER (WHERE plan_paid = true)
   INTO v_total, v_paid
-  FROM growth_users;
+  FROM growth_users
+  WHERE (p_week_start IS NULL OR (created_date >= p_week_start AND created_date <= v_week_end));
 
   -- Country x Status
   SELECT COALESCE(jsonb_agg(row_data ORDER BY (row_data->>'total')::int DESC), '[]'::jsonb)
@@ -434,72 +640,138 @@ BEGIN
       'gratisActivado', COUNT(*) FILTER (WHERE plan_paid = false AND COALESCE(eventos_valor, 0) >= 1),
       'noActivado', COUNT(*) FILTER (WHERE plan_paid = false AND COALESCE(eventos_valor, 0) < 1),
       'total', COUNT(*),
-      'conversionPct', CASE WHEN COUNT(*) > 0 THEN ROUND((COUNT(*) FILTER (WHERE plan_paid = true))::numeric / COUNT(*) * 100, 2) ELSE 0 END
+      'conversionPct', CASE WHEN COUNT(*) > 0 THEN ROUND((COUNT(*) FILTER (WHERE plan_paid = true))::numeric / COUNT(*) * 100, 2) ELSE 0 END,
+      'pctOfGrandTotal', CASE WHEN v_total > 0 THEN ROUND(COUNT(*)::numeric / v_total * 100, 1) ELSE 0 END
     ) AS row_data
     FROM growth_users
+    WHERE (p_week_start IS NULL OR (created_date >= p_week_start AND created_date <= v_week_end))
     GROUP BY COALESCE(country, 'Sin pais')
   ) sub;
 
-  -- Channel x Status
+  -- Channel x Status (with grouped channels)
   SELECT COALESCE(jsonb_agg(row_data ORDER BY (row_data->>'total')::int DESC), '[]'::jsonb)
   INTO channel_arr
   FROM (
     SELECT jsonb_build_object(
-      'key', COALESCE(origin, 'Sin canal'),
-      'pago', COUNT(*) FILTER (WHERE plan_paid = true),
-      'gratisActivado', COUNT(*) FILTER (WHERE plan_paid = false AND COALESCE(eventos_valor, 0) >= 1),
-      'noActivado', COUNT(*) FILTER (WHERE plan_paid = false AND COALESCE(eventos_valor, 0) < 1),
+      'key', grouped_channel,
+      'pago', SUM(is_paid)::int,
+      'gratisActivado', SUM(is_free_active)::int,
+      'noActivado', SUM(is_not_active)::int,
       'total', COUNT(*),
-      'conversionPct', CASE WHEN COUNT(*) > 0 THEN ROUND((COUNT(*) FILTER (WHERE plan_paid = true))::numeric / COUNT(*) * 100, 2) ELSE 0 END
+      'conversionPct', CASE WHEN COUNT(*) > 0 THEN ROUND(SUM(is_paid)::numeric / COUNT(*) * 100, 2) ELSE 0 END,
+      'pctOfGrandTotal', CASE WHEN v_total > 0 THEN ROUND(COUNT(*)::numeric / v_total * 100, 1) ELSE 0 END
     ) AS row_data
-    FROM growth_users
-    GROUP BY COALESCE(origin, 'Sin canal')
+    FROM (
+      SELECT
+        CASE
+          WHEN origin ILIKE '%recomend%' OR origin ILIKE '%referr%' THEN 'Recomendación'
+          WHEN origin ILIKE '%face%' OR origin ILIKE '%fb%' THEN 'Facebook'
+          WHEN origin ILIKE '%tiktok%' OR origin ILIKE '%tik%' THEN 'TikTok'
+          WHEN origin ILIKE '%google%' OR origin ILIKE '%goo%' THEN 'Google'
+          WHEN origin ILIKE '%insta%' OR origin ILIKE '%ig %' OR origin ILIKE 'ig' THEN 'Instagram'
+          WHEN origin ILIKE '%youtube%' OR origin ILIKE '%youtu%' OR origin ILIKE '%yt%' THEN 'Youtube'
+          WHEN origin ILIKE '%whats%' OR origin ILIKE '%wpp%' OR origin ILIKE '%wa %' OR origin ILIKE 'wa' THEN 'Whatsapp'
+          ELSE 'Otros'
+        END AS grouped_channel,
+        CASE WHEN plan_paid = true THEN 1 ELSE 0 END AS is_paid,
+        CASE WHEN plan_paid = false AND COALESCE(eventos_valor, 0) >= 1 THEN 1 ELSE 0 END AS is_free_active,
+        CASE WHEN plan_paid = false AND COALESCE(eventos_valor, 0) < 1 THEN 1 ELSE 0 END AS is_not_active
+      FROM growth_users
+      WHERE (p_week_start IS NULL OR (created_date >= p_week_start AND created_date <= v_week_end))
+    ) classified
+    GROUP BY grouped_channel
   ) sub;
 
-  -- Channel x Plan (paid users only)
+  -- Channel x Plan (paid users only, grouped channels)
   SELECT COALESCE(jsonb_agg(DISTINCT COALESCE(plan_id, 'Sin plan') ORDER BY COALESCE(plan_id, 'Sin plan')), '[]'::jsonb)
   INTO plan_names_arr
   FROM growth_users
-  WHERE plan_paid = true;
+  WHERE plan_paid = true
+    AND (p_week_start IS NULL OR (created_date >= p_week_start AND created_date <= v_week_end));
 
   SELECT COALESCE(jsonb_agg(row_data ORDER BY (row_data->>'total')::int DESC), '[]'::jsonb)
   INTO channel_plan_arr
   FROM (
     SELECT jsonb_build_object(
-      'channel', COALESCE(origin, 'Sin canal'),
+      'channel', grouped_channel,
       'plans', jsonb_object_agg(COALESCE(plan_id, 'Sin plan'), cnt),
       'total', SUM(cnt)
     ) AS row_data
     FROM (
-      SELECT origin, plan_id, COUNT(*) AS cnt
-      FROM growth_users
-      WHERE plan_paid = true
-      GROUP BY origin, plan_id
+      SELECT grouped_channel, plan_id, COUNT(*) AS cnt
+      FROM (
+        SELECT
+          CASE
+            WHEN origin ILIKE '%recomend%' OR origin ILIKE '%referr%' THEN 'Recomendación'
+            WHEN origin ILIKE '%face%' OR origin ILIKE '%fb%' THEN 'Facebook'
+            WHEN origin ILIKE '%tiktok%' OR origin ILIKE '%tik%' THEN 'TikTok'
+            WHEN origin ILIKE '%google%' OR origin ILIKE '%goo%' THEN 'Google'
+            WHEN origin ILIKE '%insta%' OR origin ILIKE '%ig %' OR origin ILIKE 'ig' THEN 'Instagram'
+            WHEN origin ILIKE '%youtube%' OR origin ILIKE '%youtu%' OR origin ILIKE '%yt%' THEN 'Youtube'
+            WHEN origin ILIKE '%whats%' OR origin ILIKE '%wpp%' OR origin ILIKE '%wa %' OR origin ILIKE 'wa' THEN 'Whatsapp'
+            ELSE 'Otros'
+          END AS grouped_channel,
+          plan_id
+        FROM growth_users
+        WHERE plan_paid = true
+          AND (p_week_start IS NULL OR (created_date >= p_week_start AND created_date <= v_week_end))
+      ) inner_classified
+      GROUP BY grouped_channel, plan_id
     ) inner_q
-    GROUP BY origin
+    GROUP BY grouped_channel
   ) sub;
 
-  -- Top country, top channel, best conversion channel
+  -- Top country, top channel, best conversion channel (all filtered by week)
   SELECT COALESCE(country, 'Sin pais') INTO v_top_country
   FROM growth_users
+  WHERE (p_week_start IS NULL OR (created_date >= p_week_start AND created_date <= v_week_end))
   GROUP BY COALESCE(country, 'Sin pais')
   ORDER BY COUNT(*) DESC LIMIT 1;
 
-  SELECT COALESCE(origin, 'Sin canal') INTO v_top_channel
-  FROM growth_users
-  GROUP BY COALESCE(origin, 'Sin canal')
+  SELECT sub.grouped_ch INTO v_top_channel
+  FROM (
+    SELECT
+      CASE
+        WHEN origin ILIKE '%recomend%' OR origin ILIKE '%referr%' THEN 'Recomendación'
+        WHEN origin ILIKE '%face%' OR origin ILIKE '%fb%' THEN 'Facebook'
+        WHEN origin ILIKE '%tiktok%' OR origin ILIKE '%tik%' THEN 'TikTok'
+        WHEN origin ILIKE '%google%' OR origin ILIKE '%goo%' THEN 'Google'
+        WHEN origin ILIKE '%insta%' OR origin ILIKE '%ig %' OR origin ILIKE 'ig' THEN 'Instagram'
+        WHEN origin ILIKE '%youtube%' OR origin ILIKE '%youtu%' OR origin ILIKE '%yt%' THEN 'Youtube'
+        WHEN origin ILIKE '%whats%' OR origin ILIKE '%wpp%' OR origin ILIKE '%wa %' OR origin ILIKE 'wa' THEN 'Whatsapp'
+        ELSE 'Otros'
+      END AS grouped_ch
+    FROM growth_users
+    WHERE (p_week_start IS NULL OR (created_date >= p_week_start AND created_date <= v_week_end))
+  ) sub
+  GROUP BY sub.grouped_ch
   ORDER BY COUNT(*) DESC LIMIT 1;
 
-  SELECT sub.origin_key, sub.conv_pct INTO v_best_conv_channel, v_best_conv_pct
+  SELECT sub2.grouped_ch, sub2.conv_pct INTO v_best_conv_channel, v_best_conv_pct
   FROM (
-    SELECT COALESCE(origin, 'Sin canal') AS origin_key,
-           CASE WHEN COUNT(*) > 0 THEN ROUND((COUNT(*) FILTER (WHERE plan_paid = true))::numeric / COUNT(*) * 100, 2) ELSE 0 END AS conv_pct
-    FROM growth_users
-    GROUP BY COALESCE(origin, 'Sin canal')
-    HAVING COUNT(*) >= 10
+    SELECT grouped_ch,
+           CASE WHEN COUNT(*) > 0 THEN ROUND((COUNT(*) FILTER (WHERE is_paid = 1))::numeric / COUNT(*) * 100, 2) ELSE 0 END AS conv_pct
+    FROM (
+      SELECT
+        CASE
+          WHEN origin ILIKE '%recomend%' OR origin ILIKE '%referr%' THEN 'Recomendación'
+          WHEN origin ILIKE '%face%' OR origin ILIKE '%fb%' THEN 'Facebook'
+          WHEN origin ILIKE '%tiktok%' OR origin ILIKE '%tik%' THEN 'TikTok'
+          WHEN origin ILIKE '%google%' OR origin ILIKE '%goo%' THEN 'Google'
+          WHEN origin ILIKE '%insta%' OR origin ILIKE '%ig %' OR origin ILIKE 'ig' THEN 'Instagram'
+          WHEN origin ILIKE '%youtube%' OR origin ILIKE '%youtu%' OR origin ILIKE '%yt%' THEN 'Youtube'
+          WHEN origin ILIKE '%whats%' OR origin ILIKE '%wpp%' OR origin ILIKE '%wa %' OR origin ILIKE 'wa' THEN 'Whatsapp'
+          ELSE 'Otros'
+        END AS grouped_ch,
+        CASE WHEN plan_paid = true THEN 1 ELSE 0 END AS is_paid
+      FROM growth_users
+      WHERE (p_week_start IS NULL OR (created_date >= p_week_start AND created_date <= v_week_end))
+    ) inner_sub
+    GROUP BY grouped_ch
+    HAVING COUNT(*) >= 5
     ORDER BY conv_pct DESC
     LIMIT 1
-  ) sub;
+  ) sub2;
 
   summary_obj := jsonb_build_object(
     'total_users', v_total,
