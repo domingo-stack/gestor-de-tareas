@@ -1,9 +1,700 @@
 'use client';
 
-export default function Campanias() {
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import { toast } from 'sonner';
+
+interface CommTemplate {
+  id: number;
+  nombre: string;
+  body: string;
+  variables: string[];
+  categoria: 'utility' | 'marketing' | null;
+  estado: string;
+}
+
+interface Broadcast {
+  id: number;
+  nombre: string;
+  template_id: number | null;
+  segmento_filtros: Record<string, unknown>;
+  total_destinatarios: number;
+  enviados: number;
+  entregados: number;
+  leidos: number;
+  clickeados: number;
+  estado: 'borrador' | 'enviando' | 'completado' | 'error';
+  created_at: string;
+  template_nombre?: string;
+}
+
+interface Filters {
+  pais: string;
+  suscripcion: string;
+  fecha_desde: string;
+  fecha_hasta: string;
+  eventos_min: string;
+}
+
+const PAISES = ['Todos', 'Perú', 'México', 'Chile', 'Colombia', 'Argentina', 'Ecuador', 'Bolivia', 'Guatemala', 'Paraguay', 'Uruguay'];
+const SUSCRIPCIONES = [
+  { value: 'todos', label: 'Todas' },
+  { value: 'free', label: 'Gratuito' },
+  { value: 'paid', label: 'Pagado' },
+  { value: 'cancelled', label: 'Cancelado' },
+];
+
+// Estimated Meta rates by country (USD per message)
+const META_RATES: Record<string, number> = {
+  Perú: 0.02, México: 0.0085, Chile: 0.02, Colombia: 0.0008,
+  Argentina: 0.02, Ecuador: 0.018, Bolivia: 0.018,
+  Guatemala: 0.018, Paraguay: 0.018, Uruguay: 0.018,
+  Todos: 0.015,
+};
+
+function EstadoBadge({ estado }: { estado: Broadcast['estado'] }) {
+  const map = {
+    borrador:   { label: 'Borrador',   cls: 'bg-gray-100 text-gray-600' },
+    enviando:   { label: 'Enviando…',  cls: 'bg-blue-100 text-blue-700' },
+    completado: { label: 'Completado', cls: 'bg-green-100 text-green-700' },
+    error:      { label: 'Error',      cls: 'bg-red-100 text-red-600' },
+  };
+  const { label, cls } = map[estado];
+  return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${cls}`}>{label}</span>;
+}
+
+function PctBar({ val, total, color = '#059669' }: { val: number; total: number; color?: string }) {
+  const pct = total > 0 ? Math.round(val / total * 100) : 0;
   return (
-    <div className="flex items-center justify-center py-20 text-gray-400">
-      <p className="text-sm">Campañas — próximamente</p>
+    <div>
+      <span className="text-sm font-bold" style={{ color }}>{pct}%</span>
+      <div className="h-1 bg-gray-200 rounded mt-1 w-14">
+        <div className="h-1 rounded transition-all" style={{ background: color, width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────
+// Step indicator
+// ──────────────────────────────────────────
+function Steps({ current }: { current: 1 | 2 | 3 }) {
+  const steps = ['Segmentación', 'Template', 'Confirmar'];
+  return (
+    <div className="flex items-center gap-2">
+      {steps.map((s, i) => {
+        const n = i + 1;
+        const done = n < current;
+        const active = n === current;
+        return (
+          <div key={s} className="flex items-center gap-2">
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
+              active ? 'bg-[#ff8080] text-white' : done ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400'
+            }`}>
+              {done ? '✓' : n}
+            </div>
+            <span className={`text-xs font-semibold ${active ? 'text-[#383838]' : 'text-gray-400'}`}>{s}</span>
+            {i < 2 && <div className="w-6 h-px bg-gray-200" />}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────
+// Step 1: Segmentation
+// ──────────────────────────────────────────
+function Step1({ filters, setFilters, contactCount, loading, onNext, onBack }: {
+  filters: Filters;
+  setFilters: (f: Filters) => void;
+  contactCount: number;
+  loading: boolean;
+  onNext: () => void;
+  onBack: () => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-4 mb-6">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 font-medium px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+          ← Volver
+        </button>
+        <div>
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Paso 1 de 3</p>
+          <h2 className="text-lg font-bold text-[#383838]">Segmentación</h2>
+        </div>
+        <div className="ml-auto">
+          <Steps current={1} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-5 mb-6">
+        {/* País */}
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">País</label>
+          <select
+            value={filters.pais}
+            onChange={e => setFilters({ ...filters, pais: e.target.value })}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors"
+          >
+            {PAISES.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+
+        {/* Suscripción */}
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Tipo de suscripción</label>
+          <select
+            value={filters.suscripcion}
+            onChange={e => setFilters({ ...filters, suscripcion: e.target.value })}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors"
+          >
+            {SUSCRIPCIONES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+        </div>
+
+        {/* Fecha desde */}
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+            Fin suscripción — desde
+          </label>
+          <input
+            type="date"
+            value={filters.fecha_desde}
+            onChange={e => setFilters({ ...filters, fecha_desde: e.target.value })}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors"
+          />
+        </div>
+
+        {/* Fecha hasta */}
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+            Fin suscripción — hasta
+          </label>
+          <input
+            type="date"
+            value={filters.fecha_hasta}
+            onChange={e => setFilters({ ...filters, fecha_hasta: e.target.value })}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors"
+          />
+        </div>
+
+        {/* Eventos mínimos */}
+        <div className="col-span-2">
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+            Eventos mínimos en Bubble
+          </label>
+          <input
+            type="number"
+            min={0}
+            placeholder="Sin filtro de eventos"
+            value={filters.eventos_min}
+            onChange={e => setFilters({ ...filters, eventos_min: e.target.value })}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors"
+          />
+        </div>
+      </div>
+
+      {/* Counter */}
+      <div className={`rounded-xl p-4 mb-6 flex items-center justify-between ${
+        contactCount > 0 ? 'bg-green-50 border border-green-200' : 'bg-gray-100'
+      }`}>
+        <div>
+          <p className={`text-2xl font-black ${contactCount > 0 ? 'text-green-600' : 'text-gray-400'}`}>
+            {loading ? '...' : contactCount.toLocaleString('es')}
+          </p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            contactos con teléfono WhatsApp válido
+          </p>
+        </div>
+        {contactCount > 0 && (
+          <div className="text-right">
+            <p className="text-xs text-gray-500">Costo estimado Meta</p>
+            <p className="text-sm font-bold text-gray-700">
+              ${(contactCount * (META_RATES[filters.pais] || 0.015)).toFixed(2)} USD
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          onClick={onNext}
+          disabled={contactCount === 0 || loading}
+          className="px-5 py-2 bg-[#ff8080] hover:bg-[#ff6b6b] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50"
+        >
+          Siguiente →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────
+// Step 2: Template selection
+// ──────────────────────────────────────────
+function Step2({ templates, selectedId, onSelect, onNext, onBack }: {
+  templates: CommTemplate[];
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+  onNext: () => void;
+  onBack: () => void;
+}) {
+  const [previewId, setPreviewId] = useState<number | null>(null);
+  const preview = templates.find(t => t.id === (previewId ?? selectedId));
+
+  return (
+    <div>
+      <div className="flex items-center gap-4 mb-6">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 font-medium px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+          ← Volver
+        </button>
+        <div>
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Paso 2 de 3</p>
+          <h2 className="text-lg font-bold text-[#383838]">Seleccionar template</h2>
+        </div>
+        <div className="ml-auto">
+          <Steps current={2} />
+        </div>
+      </div>
+
+      {templates.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 text-gray-400">
+          <p className="text-sm">No hay templates aprobados.</p>
+          <p className="text-xs mt-1">Ve a la pestaña Templates y aprueba uno primero.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          {templates.map(t => {
+            const isMarketing = t.categoria === 'marketing';
+            const selected = selectedId === t.id;
+            return (
+              <div
+                key={t.id}
+                onClick={() => { onSelect(t.id); setPreviewId(t.id); }}
+                className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
+                  selected
+                    ? 'border-[#ff8080] bg-red-50'
+                    : 'border-gray-200 hover:border-gray-300 bg-white'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2 mb-2">
+                  <p className="text-sm font-semibold text-[#383838] leading-tight">{t.nombre}</p>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0 ${
+                    isMarketing ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                  }`}>
+                    {isMarketing ? 'Marketing' : 'Utility'}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{t.body}</p>
+                {t.variables.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {t.variables.slice(0, 3).map(v => (
+                      <span key={v} className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-mono">{v}</span>
+                    ))}
+                  </div>
+                )}
+                {isMarketing && selected && (
+                  <p className="text-xs text-yellow-600 font-medium mt-2">
+                    ⚠ Template Marketing — costo más elevado que Utility
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Preview panel */}
+      {preview && (
+        <div className="bg-[#ECE5DD] rounded-xl p-4 mb-6">
+          <p className="text-xs font-bold text-gray-500 mb-2">Preview — {preview.nombre}</p>
+          <div className="bg-white rounded-xl rounded-tl-none px-3 py-2.5 max-w-xs shadow-sm">
+            <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+              {preview.body.replace(/\{\{(\w+)\}\}/g, (_: string, v: string) => `[${v}]`)}
+            </p>
+            <p className="text-right text-xs text-gray-400 mt-1">12:00 ✓✓</p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <button
+          onClick={onNext}
+          disabled={!selectedId}
+          className="px-5 py-2 bg-[#ff8080] hover:bg-[#ff6b6b] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50"
+        >
+          Siguiente →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────
+// Step 3: Confirm & Send
+// ──────────────────────────────────────────
+function Step3({ filters, template, contactCount, onSend, onBack, sending }: {
+  filters: Filters;
+  template: CommTemplate | undefined;
+  contactCount: number;
+  onSend: (nombre: string) => void;
+  onBack: () => void;
+  sending: boolean;
+}) {
+  const [nombre, setNombre] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const costRate = META_RATES[filters.pais] || 0.015;
+  const estimatedCost = (contactCount * costRate).toFixed(2);
+
+  const filterLabels: string[] = [];
+  if (filters.pais !== 'Todos') filterLabels.push(`País: ${filters.pais}`);
+  if (filters.suscripcion !== 'todos') filterLabels.push(`Suscripción: ${filters.suscripcion}`);
+  if (filters.fecha_desde) filterLabels.push(`Desde: ${filters.fecha_desde}`);
+  if (filters.fecha_hasta) filterLabels.push(`Hasta: ${filters.fecha_hasta}`);
+  if (filters.eventos_min) filterLabels.push(`Eventos mín: ${filters.eventos_min}`);
+
+  return (
+    <div>
+      <div className="flex items-center gap-4 mb-6">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 font-medium px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+          ← Volver
+        </button>
+        <div>
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Paso 3 de 3</p>
+          <h2 className="text-lg font-bold text-[#383838]">Confirmar y enviar</h2>
+        </div>
+        <div className="ml-auto">
+          <Steps current={3} />
+        </div>
+      </div>
+
+      <div className="space-y-4 mb-6">
+        {/* Campaign name */}
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+            Nombre de la campaña
+          </label>
+          <input
+            value={nombre}
+            onChange={e => setNombre(e.target.value)}
+            placeholder={`Campaña ${new Date().toLocaleDateString('es', { month: 'long', year: 'numeric' })}`}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#3c527a] transition-colors"
+          />
+        </div>
+
+        {/* Summary cards */}
+        <div className="grid grid-cols-3 gap-4">
+          <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+            <p className="text-2xl font-black text-green-600">{contactCount.toLocaleString('es')}</p>
+            <p className="text-xs text-gray-500 mt-0.5">Destinatarios</p>
+          </div>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <p className="text-sm font-bold text-[#383838] truncate">{template?.nombre}</p>
+            <p className="text-xs text-gray-500 mt-0.5">Template</p>
+            <span className={`mt-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
+              template?.categoria === 'marketing' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+            }`}>
+              {template?.categoria === 'marketing' ? 'Marketing' : 'Utility'}
+            </span>
+          </div>
+          <div className={`${template?.categoria === 'marketing' ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-200'} border rounded-xl p-4`}>
+            <p className={`text-2xl font-black ${template?.categoria === 'marketing' ? 'text-yellow-600' : 'text-gray-600'}`}>
+              ${estimatedCost}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">Costo estimado USD</p>
+          </div>
+        </div>
+
+        {/* Filters summary */}
+        <div className="bg-gray-50 rounded-xl p-4">
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Segmento</p>
+          {filterLabels.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {filterLabels.map((l, i) => (
+                <span key={i} className="bg-white border border-gray-200 text-gray-600 text-xs px-2.5 py-1 rounded-full font-medium">
+                  {l}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">Todos los contactos con teléfono válido</p>
+          )}
+        </div>
+
+        {template?.categoria === 'marketing' && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-700">
+            ⚠ Los templates Marketing tienen un costo por mensaje más elevado que los Utility. Verifica que el segmento es correcto antes de enviar.
+          </div>
+        )}
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          onClick={() => setConfirming(true)}
+          disabled={sending}
+          className="px-5 py-2.5 bg-[#ff8080] hover:bg-[#ff6b6b] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50"
+        >
+          {sending ? 'Enviando...' : `Enviar a ${contactCount.toLocaleString('es')} contactos`}
+        </button>
+      </div>
+
+      {/* Confirm modal */}
+      {confirming && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl p-6">
+            <h3 className="text-lg font-bold text-[#383838] mb-2">¿Confirmar envío?</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Se enviarán <strong>{contactCount.toLocaleString('es')} mensajes</strong> usando el template{' '}
+              <strong>{template?.nombre}</strong>.
+            </p>
+            <p className="text-sm text-gray-500 mb-6">
+              Costo estimado: <strong>${estimatedCost} USD</strong>
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setConfirming(false)}
+                className="flex-1 px-4 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => { setConfirming(false); onSend(nombre || `Campaña ${new Date().toLocaleDateString('es')}`); }}
+                className="flex-1 px-4 py-2 text-sm font-semibold bg-[#ff8080] hover:bg-[#ff6b6b] text-white rounded-lg transition-colors"
+              >
+                Confirmar envío
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────
+// Main Campañas Component
+// ──────────────────────────────────────────
+export default function Campanias() {
+  const { supabase } = useAuth();
+  const [view, setView] = useState<'list' | 'step1' | 'step2' | 'step3'>('list');
+  const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
+  const [templates, setTemplates] = useState<CommTemplate[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [countLoading, setCountLoading] = useState(false);
+  const [contactCount, setContactCount] = useState(0);
+  const [sending, setSending] = useState(false);
+
+  const [filters, setFilters] = useState<Filters>({
+    pais: 'Todos', suscripcion: 'todos', fecha_desde: '', fecha_hasta: '', eventos_min: '',
+  });
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
+
+  const selectedTemplate = templates.find(t => t.id === selectedTemplateId);
+  const approvedTemplates = useMemo(() => templates.filter(t => t.estado === 'aprobado'), [templates]);
+
+  // Fetch initial data
+  const fetchData = useCallback(async () => {
+    if (!supabase) return;
+    setLoading(true);
+    const [bRes, tRes] = await Promise.all([
+      supabase.from('comm_broadcasts').select('*').order('created_at', { ascending: false }),
+      supabase.from('comm_templates').select('id, nombre, body, variables, categoria, estado').order('nombre'),
+    ]);
+    if (bRes.error) toast.error('Error al cargar campañas');
+    if (tRes.error) toast.error('Error al cargar templates');
+
+    const tplMap = new Map((tRes.data ?? []).map((t: CommTemplate) => [t.id, t.nombre]));
+    const enriched = (bRes.data ?? []).map((b: Broadcast) => ({
+      ...b,
+      template_nombre: tplMap.get(b.template_id ?? 0) ?? '—',
+    }));
+    setBroadcasts(enriched);
+    setTemplates(tRes.data ?? []);
+    setLoading(false);
+  }, [supabase]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Fetch contact count on filter change
+  useEffect(() => {
+    if (view !== 'step1' || !supabase) return;
+    const fetchCount = async () => {
+      setCountLoading(true);
+      let q = supabase.from('growth_users').select('id', { count: 'exact', head: true }).eq('whatsapp_valido', true);
+      if (filters.pais !== 'Todos') q = q.eq('country', filters.pais);
+      if (filters.suscripcion !== 'todos') q = q.eq('plan_status', filters.suscripcion);
+      if (filters.fecha_desde) q = q.gte('fecha_fin_suscripcion', filters.fecha_desde);
+      if (filters.fecha_hasta) q = q.lte('fecha_fin_suscripcion', filters.fecha_hasta);
+      const { count, error } = await q;
+      if (!error) setContactCount(count ?? 0);
+      setCountLoading(false);
+    };
+    const t = setTimeout(fetchCount, 300);
+    return () => clearTimeout(t);
+  }, [filters, view, supabase]);
+
+  const handleSend = async (campañaNombre: string) => {
+    if (!supabase || !selectedTemplateId) return;
+    setSending(true);
+    try {
+      const { data, error } = await supabase
+        .from('comm_broadcasts')
+        .insert({
+          nombre: campañaNombre,
+          template_id: selectedTemplateId,
+          segmento_filtros: filters,
+          total_destinatarios: contactCount,
+          enviados: 0,
+          entregados: 0,
+          leidos: 0,
+          clickeados: 0,
+          estado: 'borrador',
+          created_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+      if (error) throw error;
+
+      setBroadcasts(prev => [{
+        ...data,
+        template_nombre: selectedTemplate?.nombre ?? '—',
+      }, ...prev]);
+      setView('list');
+      setSelectedTemplateId(null);
+      setFilters({ pais: 'Todos', suscripcion: 'todos', fecha_desde: '', fecha_hasta: '', eventos_min: '' });
+      toast.success('Campaña guardada. La integración con Kapso enviará los mensajes próximamente.');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Error al crear campaña';
+      toast.error(msg);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const stats = useMemo(() => ({
+    este_mes: broadcasts.filter(b => b.created_at >= new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()).length,
+    total_enviados: broadcasts.reduce((s, b) => s + b.total_destinatarios, 0),
+    tasa_lectura: broadcasts.length > 0
+      ? Math.round(broadcasts.filter(b => b.entregados > 0).reduce((s, b) => s + b.leidos / b.entregados, 0) / Math.max(1, broadcasts.filter(b => b.entregados > 0).length) * 100)
+      : 0,
+  }), [broadcasts]);
+
+  // ── List view ──
+  if (view === 'list') return (
+    <div>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h2 className="text-xl font-bold text-[#383838]">Campañas</h2>
+          <p className="text-sm text-gray-500 mt-0.5">Broadcasts manuales segmentados para el equipo de marketing</p>
+        </div>
+        <button
+          onClick={() => { setView('step1'); setContactCount(0); }}
+          className="flex items-center gap-2 px-4 py-2 bg-[#ff8080] hover:bg-[#ff6b6b] text-white text-sm font-semibold rounded-lg transition-colors"
+        >
+          <span className="text-lg leading-none">+</span>
+          Nueva campaña
+        </button>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-4 mb-6">
+        <div className="bg-gray-100 rounded-xl p-4">
+          <p className="text-2xl font-black text-gray-600">{stats.este_mes}</p>
+          <p className="text-xs text-gray-500 mt-0.5">Campañas este mes</p>
+        </div>
+        <div className="bg-blue-50 rounded-xl p-4">
+          <p className="text-2xl font-black text-[#3c527a]">{stats.total_enviados.toLocaleString('es')}</p>
+          <p className="text-xs text-gray-500 mt-0.5">Mensajes totales</p>
+        </div>
+        <div className="bg-green-50 rounded-xl p-4">
+          <p className="text-2xl font-black text-green-600">{stats.tasa_lectura}%</p>
+          <p className="text-xs text-gray-500 mt-0.5">Tasa de lectura promedio</p>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-16 text-gray-400 text-sm">Cargando campañas...</div>
+      ) : broadcasts.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+          <p className="text-sm">Aún no hay campañas.</p>
+          <button onClick={() => setView('step1')} className="mt-3 text-sm text-[#ff8080] hover:underline font-medium">
+            Crear la primera
+          </button>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <table className="w-full">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                {['Campaña', 'Template', 'Dest.', 'Entregados', 'Leídos', 'Estado', 'Fecha'].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wide">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {broadcasts.map(b => (
+                <tr key={b.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-3 text-sm font-semibold text-[#383838]">{b.nombre}</td>
+                  <td className="px-4 py-3 text-sm text-gray-500">{b.template_nombre}</td>
+                  <td className="px-4 py-3 text-sm font-bold text-gray-700">{b.total_destinatarios.toLocaleString('es')}</td>
+                  <td className="px-4 py-3">
+                    {b.entregados > 0
+                      ? <PctBar val={b.entregados} total={b.total_destinatarios} color="#3c527a" />
+                      : <span className="text-xs text-gray-400">—</span>
+                    }
+                  </td>
+                  <td className="px-4 py-3">
+                    {b.leidos > 0
+                      ? <PctBar val={b.leidos} total={b.entregados} color="#059669" />
+                      : <span className="text-xs text-gray-400">—</span>
+                    }
+                  </td>
+                  <td className="px-4 py-3"><EstadoBadge estado={b.estado} /></td>
+                  <td className="px-4 py-3 text-xs text-gray-400">
+                    {new Date(b.created_at).toLocaleDateString('es', { day: '2-digit', month: 'short' })}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+
+  // ── Steps ──
+  return (
+    <div className="max-w-2xl">
+      {view === 'step1' && (
+        <Step1
+          filters={filters}
+          setFilters={setFilters}
+          contactCount={contactCount}
+          loading={countLoading}
+          onNext={() => setView('step2')}
+          onBack={() => setView('list')}
+        />
+      )}
+      {view === 'step2' && (
+        <Step2
+          templates={approvedTemplates}
+          selectedId={selectedTemplateId}
+          onSelect={setSelectedTemplateId}
+          onNext={() => setView('step3')}
+          onBack={() => setView('step1')}
+        />
+      )}
+      {view === 'step3' && (
+        <Step3
+          filters={filters}
+          template={selectedTemplate}
+          contactCount={contactCount}
+          onSend={handleSend}
+          onBack={() => setView('step2')}
+          sending={sending}
+        />
+      )}
     </div>
   );
 }
