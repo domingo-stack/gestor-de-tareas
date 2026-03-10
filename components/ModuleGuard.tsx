@@ -2,7 +2,7 @@
 
 import { usePermissions } from '@/context/PermissionsContext'
 
-type ModuleKey = 'mod_tareas' | 'mod_calendario' | 'mod_revenue' | 'mod_finanzas' | 'mod_producto' | 'mod_customer_success';
+type ModuleKey = 'mod_tareas' | 'mod_calendario' | 'mod_revenue' | 'mod_finanzas' | 'mod_producto' | 'mod_customer_success' | 'mod_comunicaciones';
 
 interface ModuleGuardProps {
   module: ModuleKey;
