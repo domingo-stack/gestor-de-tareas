@@ -297,11 +297,15 @@ function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, pla
           </p>
         </div>
         {contactCount > 0 && (
-          <div className="text-right">
-            <p className="text-xs text-gray-500">Costo estimado Meta</p>
-            <p className="text-sm font-bold text-gray-700">
-              ${(contactCount * (META_RATES[filters.pais] || 0.015)).toFixed(2)} USD
-            </p>
+          <div className="flex gap-4 text-right">
+            <div>
+              <p className="text-xs text-blue-500 font-semibold">Utility</p>
+              <p className="text-sm font-black text-blue-700">${(contactCount * 0.005).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            </div>
+            <div>
+              <p className="text-xs text-purple-500 font-semibold">Marketing</p>
+              <p className="text-sm font-black text-purple-700">${(contactCount * 0.013).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+            </div>
           </div>
         )}
       </div>
@@ -322,15 +326,21 @@ function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, pla
 // ──────────────────────────────────────────
 // Step 2: Template selection
 // ──────────────────────────────────────────
-function Step2({ templates, selectedId, onSelect, onNext, onBack }: {
+const RATES = { utility: 0.005, marketing: 0.013 };
+
+function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, pais }: {
   templates: CommTemplate[];
   selectedId: number | null;
   onSelect: (id: number) => void;
   onNext: () => void;
   onBack: () => void;
+  contactCount: number;
+  pais: string;
 }) {
   const [previewId, setPreviewId] = useState<number | null>(null);
   const preview = templates.find(t => t.id === (previewId ?? selectedId));
+  const selectedTemplate = templates.find(t => t.id === selectedId);
+  const countryRate = META_RATES[pais] || 0.015;
 
   return (
     <div>
@@ -407,6 +417,50 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack }: {
         </div>
       )}
 
+      {/* Cost simulation */}
+      {contactCount > 0 && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-6">
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">
+            Simulación de costo — {contactCount.toLocaleString()} contactos
+          </p>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div className={`rounded-xl p-3 border-2 transition-all ${selectedTemplate?.categoria === 'utility' ? 'border-blue-400 bg-blue-50' : 'border-blue-100 bg-blue-50/50'}`}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-bold text-blue-700">Utility</span>
+                {selectedTemplate?.categoria === 'utility' && (
+                  <span className="text-xs text-blue-600 font-semibold">← Este template</span>
+                )}
+              </div>
+              <p className="text-xl font-black text-blue-700">${(contactCount * RATES.utility).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-xs text-blue-400 mt-0.5">@ $0.005/msg</p>
+            </div>
+            <div className={`rounded-xl p-3 border-2 transition-all ${selectedTemplate?.categoria === 'marketing' ? 'border-purple-400 bg-purple-50' : 'border-purple-100 bg-purple-50/50'}`}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-bold text-purple-700">Marketing</span>
+                {selectedTemplate?.categoria === 'marketing' && (
+                  <span className="text-xs text-purple-600 font-semibold">← Este template</span>
+                )}
+              </div>
+              <p className="text-xl font-black text-purple-700">${(contactCount * RATES.marketing).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-xs text-purple-400 mt-0.5">@ $0.013/msg</p>
+            </div>
+          </div>
+          {selectedTemplate ? (
+            <p className="text-xs text-gray-600">
+              Costo estimado con <strong>{selectedTemplate.nombre}</strong> ({selectedTemplate.categoria ?? '—'}):
+              <strong className="text-[#3c527a] ml-1">
+                ${(contactCount * RATES[selectedTemplate.categoria ?? 'utility']).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+              </strong>
+              {pais !== 'Todos' && (
+                <span className="text-gray-400 ml-1">· tarifa por país {pais}: ${countryRate.toFixed(3)}/msg</span>
+              )}
+            </p>
+          ) : (
+            <p className="text-xs text-gray-400">Selecciona un template para ver el costo exacto.</p>
+          )}
+        </div>
+      )}
+
       <div className="flex justify-end">
         <button
           onClick={onNext}
@@ -434,7 +488,7 @@ function Step3({ filters, template, contactCount, onSend, onBack, sending }: {
   const [nombre, setNombre] = useState('');
   const [confirming, setConfirming] = useState(false);
   const costRate = META_RATES[filters.pais] || 0.015;
-  const estimatedCost = (contactCount * costRate).toFixed(2);
+  const estimatedCost = (contactCount * costRate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const filterLabels: string[] = [];
   if (filters.pais !== 'Todos') filterLabels.push(`País: ${filters.pais}`);
@@ -816,6 +870,8 @@ export default function Campanias() {
           onSelect={setSelectedTemplateId}
           onNext={() => setView('step3')}
           onBack={() => setView('step1')}
+          contactCount={contactCount}
+          pais={filters.pais}
         />
       )}
       {view === 'step3' && (

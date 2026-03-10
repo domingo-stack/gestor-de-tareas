@@ -58,7 +58,7 @@ function pct(num: number, den: number) {
 }
 
 function usd(amount: number) {
-  return `$${amount.toFixed(2)}`;
+  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function calcCost(sent: number, categoria: 'utility' | 'marketing' | null) {
@@ -88,15 +88,41 @@ function PctBar({ value, color }: { value: number; color: string }) {
   );
 }
 
+type DateFilter = 'semana' | 'mes' | 'custom';
+
+function getDateRange(filter: DateFilter, customFrom: string, customTo: string) {
+  const now = new Date();
+  if (filter === 'semana') {
+    const from = new Date(now);
+    from.setDate(now.getDate() - 7);
+    return { from: from.toISOString(), to: now.toISOString() };
+  }
+  if (filter === 'mes') {
+    const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from: from.toISOString(), to: now.toISOString() };
+  }
+  return {
+    from: customFrom ? new Date(customFrom).toISOString() : null,
+    to:   customTo   ? new Date(customTo + 'T23:59:59').toISOString() : null,
+  };
+}
+
 export default function Metricas() {
   const { supabase } = useAuth();
   const [data, setData] = useState<MetricsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dateFilter, setDateFilter] = useState<DateFilter>('mes');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
 
   const fetchMetrics = useCallback(async () => {
     if (!supabase) return;
     setLoading(true);
-    const { data: result, error } = await supabase.rpc('get_comm_metrics');
+    const { from, to } = getDateRange(dateFilter, customFrom, customTo);
+    const { data: result, error } = await supabase.rpc('get_comm_metrics', {
+      p_from: from ?? null,
+      p_to:   to   ?? null,
+    });
     if (error) {
       toast.error('Error al cargar métricas');
       console.error(error);
@@ -104,7 +130,7 @@ export default function Metricas() {
       setData(result as MetricsData);
     }
     setLoading(false);
-  }, [supabase]);
+  }, [supabase, dateFilter, customFrom, customTo]);
 
   useEffect(() => { fetchMetrics(); }, [fetchMetrics]);
 
@@ -141,7 +167,7 @@ export default function Metricas() {
     <div className="space-y-6">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-[#383838]">Métricas</h2>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -150,10 +176,54 @@ export default function Metricas() {
         </div>
         <button
           onClick={fetchMetrics}
-          className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors flex-shrink-0"
         >
           <span>↻</span> Actualizar
         </button>
+      </div>
+
+      {/* Date filters */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {(['semana', 'mes'] as DateFilter[]).map(f => (
+          <button
+            key={f}
+            onClick={() => setDateFilter(f)}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+              dateFilter === f
+                ? 'bg-[#3c527a] text-white'
+                : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
+            }`}
+          >
+            {f === 'semana' ? 'Últimos 7 días' : 'Este mes'}
+          </button>
+        ))}
+        <button
+          onClick={() => setDateFilter('custom')}
+          className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+            dateFilter === 'custom'
+              ? 'bg-[#3c527a] text-white'
+              : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
+          }`}
+        >
+          Personalizado
+        </button>
+        {dateFilter === 'custom' && (
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              value={customFrom}
+              onChange={e => setCustomFrom(e.target.value)}
+              className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#3c527a] transition-colors"
+            />
+            <span className="text-xs text-gray-400">→</span>
+            <input
+              type="date"
+              value={customTo}
+              onChange={e => setCustomTo(e.target.value)}
+              className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#3c527a] transition-colors"
+            />
+          </div>
+        )}
       </div>
 
       {/* ── PANEL DE COSTOS ─────────────────────────────── */}
