@@ -185,8 +185,24 @@ function TemplateForm({ template, onClose, onSave }: TemplateFormProps) {
         result = data;
       }
 
+      // If submitting to Meta, call the API route which calls Kapso
       if (submitToMeta) {
-        toast.success('Template enviado a revisión de Meta');
+        const kapsoRes = await fetch('/api/communication/submit-template', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ templateId: result.id }),
+        });
+        if (!kapsoRes.ok) {
+          const errData = await kapsoRes.json();
+          // Template was saved in DB but Kapso submission failed
+          toast.error(`Template guardado pero error al enviar a Meta: ${errData.error}`);
+          onSave(result);
+          return;
+        }
+        const kapsoData = await kapsoRes.json();
+        // Update local result with kapso_template_id
+        result = { ...result, kapso_template_id: kapsoData.kapso_id };
+        toast.success('Template enviado a Meta para revisión (24-72h)');
       } else {
         toast.success(template?.id ? 'Template guardado' : 'Template creado');
       }

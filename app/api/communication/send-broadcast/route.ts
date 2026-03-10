@@ -1,0 +1,152 @@
+// POST /api/communication/send-broadcast
+// Fetches filtered contacts, creates Kapso broadcast, adds recipients in batches, sends.
+
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import { createBroadcast, addBroadcastRecipients, sendBroadcast } from '@/lib/kapso';
+
+const BATCH_SIZE = 1000; // Kapso max per request
+
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
+
+interface Filters {
+  pais: string;
+  suscripcion: string;
+  fecha_desde: string;
+  fecha_hasta: string;
+  eventos_min: string;
+}
+
+export async function POST(req: NextRequest) {
+  const { broadcastId } = await req.json();
+
+  if (!broadcastId) {
+    return NextResponse.json({ error: 'broadcastId required' }, { status: 400 });
+  }
+
+  const supabase = getSupabase();
+
+  // Fetch broadcast record
+  const { data: broadcast, error: bError } = await supabase
+    .from('comm_broadcasts')
+    .select('*, comm_templates(nombre, body, variables, estado, kapso_template_id)')
+    .eq('id', broadcastId)
+    .single();
+
+  if (bError || !broadcast) {
+    return NextResponse.json({ error: 'Broadcast not found' }, { status: 404 });
+  }
+
+  const template = broadcast.comm_templates;
+  if (!template || template.estado !== 'aprobado') {
+    return NextResponse.json({ error: 'Template not approved' }, { status: 400 });
+  }
+
+  // Mark broadcast as sending
+  await supabase
+    .from('comm_broadcasts')
+    .update({ estado: 'enviando', updated_at: new Date().toISOString() })
+    .eq('id', broadcastId);
+
+  // ── Fetch matching contacts ───────────────────────────────
+  const filters: Filters = broadcast.segmento_filtros ?? {};
+
+  let query = supabase
+    .from('growth_users')
+    .select('id, phone, first_name, last_name')
+    .eq('whatsapp_valido', true)
+    .not('phone', 'is', null);
+
+  if (filters.pais && filters.pais !== 'Todos') {
+    query = query.eq('country', filters.pais);
+  }
+  if (filters.suscripcion && filters.suscripcion !== 'todos') {
+    query = query.eq('plan_status', filters.suscripcion);
+  }
+  if (filters.fecha_desde) {
+    query = query.gte('fecha_fin_suscripcion', filters.fecha_desde);
+  }
+  if (filters.fecha_hasta) {
+    query = query.lte('fecha_fin_suscripcion', filters.fecha_hasta);
+  }
+
+  const { data: contacts, error: cError } = await query;
+
+  if (cError || !contacts || contacts.length === 0) {
+    await supabase
+      .from('comm_broadcasts')
+      .update({ estado: 'error', updated_at: new Date().toISOString() })
+      .eq('id', broadcastId);
+    return NextResponse.json({ error: 'No contacts found for segment' }, { status: 400 });
+  }
+
+  try {
+    // ── Create Kapso broadcast ────────────────────────────────
+    const templateName = template.nombre
+      .toLowerCase()
+      .replace(/\s+/g, '_')
+      .replace(/[^a-z0-9_]/g, '');
+
+    const kapsoBroadcast = await createBroadcast(broadcast.nombre, templateName);
+
+    // ── Add recipients in batches of 1000 ────────────────────
+    let totalAdded = 0;
+
+    for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
+      const batch = contacts.slice(i, i + BATCH_SIZE);
+      const recipients = batch.map(c => ({
+        phone_number: c.phone!,
+        variables: { nombre: c.first_name ?? '', apellido: c.last_name ?? '' },
+      }));
+
+      const addResult = await addBroadcastRecipients(kapsoBroadcast.id, recipients);
+      totalAdded += addResult.added;
+
+      // Insert into message_logs for tracking
+      const logRows = batch.map(c => ({
+        contact_id: c.id,
+        template_id: broadcast.template_id,
+        broadcast_id: broadcastId,
+        kapso_message_id: null,
+        estado: 'queued',
+        created_at: new Date().toISOString(),
+      }));
+      await supabase.from('comm_message_logs').insert(logRows);
+    }
+
+    // ── Send the broadcast ────────────────────────────────────
+    await sendBroadcast(kapsoBroadcast.id);
+
+    // Update broadcast record
+    await supabase
+      .from('comm_broadcasts')
+      .update({
+        estado: 'completado',
+        total_destinatarios: totalAdded,
+        enviados: totalAdded,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', broadcastId);
+
+    return NextResponse.json({
+      ok: true,
+      kapso_broadcast_id: kapsoBroadcast.id,
+      recipients_added: totalAdded,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[send-broadcast] error:', message);
+
+    await supabase
+      .from('comm_broadcasts')
+      .update({ estado: 'error', updated_at: new Date().toISOString() })
+      .eq('id', broadcastId);
+
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

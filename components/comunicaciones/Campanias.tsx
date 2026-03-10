@@ -556,14 +556,32 @@ export default function Campanias() {
         .single();
       if (error) throw error;
 
+      // Trigger Kapso broadcast (server-side API route)
+      const kapsoRes = await fetch('/api/communication/send-broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ broadcastId: data.id }),
+      });
+
+      if (!kapsoRes.ok) {
+        const errData = await kapsoRes.json();
+        // Broadcast record created but Kapso failed — show warning
+        setBroadcasts(prev => [{ ...data, template_nombre: selectedTemplate?.nombre ?? '—' }, ...prev]);
+        setView('list');
+        toast.error(`Campaña creada pero error al enviar: ${errData.error}`);
+        return;
+      }
+
+      // Update local state with completado status
       setBroadcasts(prev => [{
         ...data,
+        estado: 'completado',
         template_nombre: selectedTemplate?.nombre ?? '—',
       }, ...prev]);
       setView('list');
       setSelectedTemplateId(null);
       setFilters({ pais: 'Todos', suscripcion: 'todos', fecha_desde: '', fecha_hasta: '', eventos_min: '' });
-      toast.success('Campaña guardada. La integración con Kapso enviará los mensajes próximamente.');
+      toast.success(`Campaña enviada a ${contactCount.toLocaleString('es')} contactos`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Error al crear campaña';
       toast.error(msg);
