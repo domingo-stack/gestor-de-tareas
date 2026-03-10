@@ -107,7 +107,7 @@ serve(async (req: Request) => {
   // ── 1. Cargar reglas activas de vencimiento ──────────────────
   const { data: rules, error: rulesError } = await supabase
     .from('comm_event_rules')
-    .select('id, nombre, timing_dias, template_id, comm_templates(nombre, estado)')
+    .select('id, nombre, timing_dias, timing_direction, template_id, comm_templates(nombre, estado, variables)')
     .eq('evento_tipo', 'vencimiento')
     .eq('activo', true)
 
@@ -115,20 +115,29 @@ serve(async (req: Request) => {
     return new Response(JSON.stringify({ message: 'No active vencimiento rules', rules: 0 }), { status: 200 })
   }
 
-  const summary: Record<number, { rule: string; found: number; sent: number; errors: number }> = {}
+  // Cargar comm_variables para variables estáticas (link_renovacion, etc.)
+  const { data: commVars } = await supabase.from('comm_variables').select('key, value')
+  const staticVars: Record<string, string> = Object.fromEntries(
+    (commVars ?? []).map((v: { key: string; value: string }) => [v.key, v.value])
+  )
+
+  const summary: Record<string, { rule: string; found: number; sent: number; errors: number }> = {}
 
   // ── 2. Para cada regla, buscar usuarios que vencen en timing_dias ──
   for (const rule of rules) {
-    const template = rule.comm_templates as { nombre: string; estado: string } | null
+    const template = rule.comm_templates as { nombre: string; estado: string; variables: string[] } | null
 
     if (!template || template.estado !== 'aprobado') {
       console.log(`[rule ${rule.id}] skipped — template not approved`)
       continue
     }
 
-    // Calcular la fecha objetivo: hoy + timing_dias
+    // Calcular la fecha objetivo según timing_direction
+    // before: buscar usuarios que vencen en timing_dias días (hoy + N)
+    // after:  buscar usuarios que vencieron hace timing_dias días (hoy - N)
     const targetDate = new Date(nowUTC5)
-    targetDate.setDate(targetDate.getDate() + rule.timing_dias)
+    const offset = rule.timing_direction === 'after' ? -rule.timing_dias : rule.timing_dias
+    targetDate.setDate(targetDate.getDate() + offset)
     const targetDateStr = targetDate.toISOString().split('T')[0] // YYYY-MM-DD
 
     // Buscar usuarios pagados, no cancelados, con WhatsApp válido,
@@ -174,12 +183,18 @@ serve(async (req: Request) => {
         continue
       }
 
-      const variables: Record<string, string> = {
-        nombre:          user.first_name ?? '',
-        dias_restantes:  String(rule.timing_dias),
-        fecha_fin:       formatFecha(user.subscription_end),
-        link_renovacion: 'https://califica.ai/renovar',
+      // Todos los valores disponibles — se filtra por lo que el template declara
+      const allVars: Record<string, string> = {
+        ...staticVars,
+        nombre:         user.first_name ?? '',
+        plan_id:        user.plan_id ?? '',
+        dias_restantes: String(rule.timing_dias),
+        fecha_fin:      formatFecha(user.subscription_end),
       }
+      const templateVarKeys: string[] = template.variables ?? []
+      const variables = Object.fromEntries(
+        templateVarKeys.map(key => [key, allVars[key] ?? ''])
+      )
 
       try {
         const kapsoId = await sendKapsoMessage(user.phone!, templateName, variables)

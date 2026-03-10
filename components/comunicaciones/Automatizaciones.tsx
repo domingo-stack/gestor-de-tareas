@@ -8,14 +8,14 @@ type TipoEvento = 'vencimiento' | 'registro_taller' | 'plan_cancelado';
 type TimingDirection = 'before' | 'after';
 
 interface EventRule {
-  id: number;
+  id: string;
   nombre: string;
   evento_tipo: TipoEvento;
   timing_dias: number;
   timing_direction: TimingDirection;
-  template_id: number | null;
+  template_id: string | null;
   activo: boolean;
-  trigger_source: 'n8n' | 'webhook';
+  trigger_source: 'n8n' | 'webhook' | 'cron';
   created_at: string;
   updated_at: string;
   // joined
@@ -23,15 +23,45 @@ interface EventRule {
 }
 
 interface CommTemplate {
-  id: number;
+  id: string;
   nombre: string;
   estado: string;
 }
 
-const TIPOS_EVENTO: { value: TipoEvento; label: string; trigger: string; icon: string; color: string }[] = [
-  { value: 'vencimiento',     label: 'Vencimiento de plan', trigger: 'cron',    icon: '⏳', color: '#D97706' },
-  { value: 'registro_taller', label: 'Registro a taller',  trigger: 'webhook', icon: '🎓', color: '#3c527a' },
-  { value: 'plan_cancelado',  label: 'Plan cancelado',      trigger: 'webhook', icon: '❌', color: '#DC2626' },
+const TIPOS_EVENTO: {
+  value: TipoEvento; label: string; trigger: string; icon: string; color: string;
+  timingLabel: (dias: number, dir: TimingDirection) => string;
+}[] = [
+  {
+    value: 'vencimiento',
+    label: 'Vencimiento de plan',
+    trigger: 'cron',
+    icon: '⏳',
+    color: '#D97706',
+    timingLabel: (dias, dir) => dias === 0
+      ? 'El día del vencimiento'
+      : `${dias} día${dias !== 1 ? 's' : ''} ${dir === 'before' ? 'antes del vencimiento' : 'después del vencimiento'}`,
+  },
+  {
+    value: 'registro_taller',
+    label: 'Registro a taller',
+    trigger: 'webhook',
+    icon: '🎓',
+    color: '#3c527a',
+    timingLabel: (dias, dir) => dias === 0
+      ? 'Inmediatamente al registrarse'
+      : `${dias} día${dias !== 1 ? 's' : ''} ${dir === 'after' ? 'después del registro' : 'antes del taller'}`,
+  },
+  {
+    value: 'plan_cancelado',
+    label: 'Plan cancelado',
+    trigger: 'webhook',
+    icon: '❌',
+    color: '#DC2626',
+    timingLabel: (dias, dir) => dias === 0
+      ? 'Inmediatamente al cancelar'
+      : `${dias} día${dias !== 1 ? 's' : ''} ${dir === 'after' ? 'después de la cancelación' : 'antes de la cancelación'}`,
+  },
 ];
 
 // ──────────────────────────────────────────
@@ -59,12 +89,12 @@ function RuleForm({ rule, templates, onClose, onSave }: {
   onClose: () => void;
   onSave: (r: EventRule) => void;
 }) {
-  const { supabase } = useAuth();
+  const { supabase, user } = useAuth();
   const [nombre, setNombre] = useState(rule?.nombre ?? '');
   const [eventoTipo, setEventoTipo] = useState<TipoEvento>(rule?.evento_tipo ?? 'vencimiento');
   const [timingDias, setTimingDias] = useState(rule?.timing_dias ?? 0);
   const [timingDirection, setTimingDirection] = useState<TimingDirection>(rule?.timing_direction ?? 'before');
-  const [templateId, setTemplateId] = useState<number | null>(rule?.template_id ?? null);
+  const [templateId, setTemplateId] = useState<string | null>(rule?.template_id ?? null);
   const [activo, setActivo] = useState(rule?.activo ?? true);
   const [saving, setSaving] = useState(false);
 
@@ -99,7 +129,7 @@ function RuleForm({ rule, templates, onClose, onSave }: {
       } else {
         const { data, error } = await supabase!
           .from('comm_event_rules')
-          .insert({ ...payload, created_at: new Date().toISOString() })
+          .insert({ ...payload, created_by: user?.id, created_at: new Date().toISOString() })
           .select()
           .single();
         if (error) throw error;
@@ -187,9 +217,9 @@ function RuleForm({ rule, templates, onClose, onSave }: {
                 <option value="after">después del evento</option>
               </select>
             </div>
-            {timingDias === 0 && (
-              <p className="text-xs text-gray-400 mt-1">El mensaje se envía inmediatamente cuando ocurre el evento.</p>
-            )}
+            <p className="text-xs text-gray-400 mt-1">
+              → {tipoInfo?.timingLabel(timingDias, timingDirection)}
+            </p>
           </div>
 
           {/* Template */}
@@ -202,7 +232,7 @@ function RuleForm({ rule, templates, onClose, onSave }: {
             </label>
             <select
               value={templateId ?? ''}
-              onChange={e => setTemplateId(e.target.value ? parseInt(e.target.value) : null)}
+              onChange={e => setTemplateId(e.target.value || null)}
               className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#3c527a] transition-colors bg-white"
             >
               <option value="">Seleccionar template...</option>
@@ -390,10 +420,8 @@ export default function Automatizaciones() {
                         <p className="text-sm font-semibold text-[#383838]">{rule.nombre}</p>
                         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                           <span className="text-xs text-gray-500">
-                            {rule.timing_dias === 0
-                              ? 'Inmediatamente'
-                              : `${rule.timing_dias} día${rule.timing_dias !== 1 ? 's' : ''} ${rule.timing_direction === 'before' ? 'antes' : 'después'}`
-                            }
+                            {TIPOS_EVENTO.find(t => t.value === rule.evento_tipo)
+                              ?.timingLabel(rule.timing_dias, rule.timing_direction)}
                           </span>
                           <span className="text-gray-300">•</span>
                           <span className="text-xs text-[#3c527a] font-medium truncate max-w-[180px]">
