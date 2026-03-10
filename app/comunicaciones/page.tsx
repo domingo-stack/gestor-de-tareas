@@ -7,12 +7,14 @@ import Campanias from '@/components/comunicaciones/Campanias';
 import Templates from '@/components/comunicaciones/Templates';
 import Automatizaciones from '@/components/comunicaciones/Automatizaciones';
 import Metricas from '@/components/comunicaciones/Metricas';
+import Configuracion from '@/components/comunicaciones/Configuracion';
 
 const TABS = [
-  { id: 'campanias',      label: 'Campañas' },
-  { id: 'templates',      label: 'Templates' },
+  { id: 'campanias',        label: 'Campañas' },
+  { id: 'templates',        label: 'Templates' },
   { id: 'automatizaciones', label: 'Automatizaciones' },
-  { id: 'metricas',       label: 'Métricas' },
+  { id: 'metricas',         label: 'Métricas' },
+  { id: 'configuracion',    label: 'Configuración' },
 ] as const;
 
 type TabId = typeof TABS[number]['id'];
@@ -24,10 +26,8 @@ export default function ComunicacionesPage() {
     <AuthGuard>
       <ModuleGuard module="mod_comunicaciones">
         <div className="flex flex-col h-full min-h-screen bg-[#F8F8F8]">
-          {/* Header */}
           <div className="bg-white border-b border-gray-200 px-6 pt-6 pb-0">
             <h1 className="text-xl font-bold text-[#383838] mb-4">Comunicaciones</h1>
-            {/* Tabs */}
             <div className="flex gap-1">
               {TABS.map((tab) => (
                 <button
@@ -45,12 +45,12 @@ export default function ComunicacionesPage() {
             </div>
           </div>
 
-          {/* Content */}
           <div className="flex-1 p-6">
             {activeTab === 'campanias'        && <Campanias />}
             {activeTab === 'templates'        && <Templates />}
             {activeTab === 'automatizaciones' && <Automatizaciones />}
             {activeTab === 'metricas'         && <Metricas />}
+            {activeTab === 'configuracion'    && <Configuracion />}
           </div>
         </div>
       </ModuleGuard>

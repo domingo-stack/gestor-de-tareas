@@ -16,10 +16,15 @@ function getSupabase() {
 
 interface Filters {
   pais: string;
-  suscripcion: string;
+  plan_tipo: string;
+  plan_id: string;
   fecha_desde: string;
   fecha_hasta: string;
+  cancelado_dias: string;
   eventos_min: string;
+  nivel: string;
+  grado: string;
+  colegio: string;
 }
 
 export async function POST(req: NextRequest) {
@@ -62,18 +67,26 @@ export async function POST(req: NextRequest) {
     .eq('whatsapp_valido', true)
     .not('phone', 'is', null);
 
-  if (filters.pais && filters.pais !== 'Todos') {
-    query = query.eq('country', filters.pais);
+  if (filters.pais && filters.pais !== 'Todos')       query = query.eq('country', filters.pais);
+  if (filters.plan_tipo === 'paid')                    query = query.eq('plan_paid', true).eq('cancelled', false);
+  if (filters.plan_tipo === 'free')                    query = query.eq('plan_free', true);
+  if (filters.plan_tipo === 'cancelled') {
+    query = query.eq('cancelled', true);
+    if (filters.cancelado_dias) {
+      const since = new Date();
+      since.setDate(since.getDate() - parseInt(filters.cancelado_dias));
+      query = query.gte('subscription_end', since.toISOString());
+    }
   }
-  if (filters.suscripcion && filters.suscripcion !== 'todos') {
-    query = query.eq('plan_status', filters.suscripcion);
+  if (filters.plan_id && filters.plan_id !== 'todos') query = query.eq('plan_id', filters.plan_id);
+  if (filters.plan_tipo === 'paid') {
+    if (filters.fecha_desde)                           query = query.gte('subscription_end', filters.fecha_desde);
+    if (filters.fecha_hasta)                           query = query.lte('subscription_end', `${filters.fecha_hasta}T23:59:59`);
   }
-  if (filters.fecha_desde) {
-    query = query.gte('fecha_fin_suscripcion', filters.fecha_desde);
-  }
-  if (filters.fecha_hasta) {
-    query = query.lte('fecha_fin_suscripcion', filters.fecha_hasta);
-  }
+  if (filters.eventos_min)                             query = query.gte('eventos_valor', parseInt(filters.eventos_min));
+  if (filters.nivel)                                   query = query.eq('nivel', filters.nivel);
+  if (filters.grado)                                   query = query.ilike('grado', `%${filters.grado}%`);
+  if (filters.colegio)                                 query = query.ilike('colegio', `%${filters.colegio}%`);
 
   const { data: contacts, error: cError } = await query;
 
@@ -89,20 +102,37 @@ export async function POST(req: NextRequest) {
     // ── Create Kapso broadcast ────────────────────────────────
     const templateName = template.nombre
       .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/\s+/g, '_')
       .replace(/[^a-z0-9_]/g, '');
 
     const kapsoBroadcast = await createBroadcast(broadcast.nombre, templateName);
+
+    // Fetch static comm_variables for template variable substitution
+    const { data: commVars } = await supabase.from('comm_variables').select('key, value');
+    const staticVars = Object.fromEntries(
+      (commVars ?? []).map((v: { key: string; value: string }) => [v.key, v.value])
+    );
+
+    // Only pass variables the template declares (Meta rejects extra params)
+    const templateVarKeys: string[] = template.variables ?? [];
 
     // ── Add recipients in batches of 1000 ────────────────────
     let totalAdded = 0;
 
     for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
       const batch = contacts.slice(i, i + BATCH_SIZE);
-      const recipients = batch.map(c => ({
-        phone_number: c.phone!,
-        variables: { nombre: c.first_name ?? '', apellido: c.last_name ?? '' },
-      }));
+      const recipients = batch.map(c => {
+        const allAvailable = {
+          ...staticVars,
+          nombre: c.first_name ?? '',
+          apellido: c.last_name ?? '',
+        };
+        const variables = Object.fromEntries(
+          templateVarKeys.map(key => [key, allAvailable[key] ?? ''])
+        );
+        return { phone_number: c.phone!, variables };
+      });
 
       const addResult = await addBroadcastRecipients(kapsoBroadcast.id, recipients);
       totalAdded += addResult.added;

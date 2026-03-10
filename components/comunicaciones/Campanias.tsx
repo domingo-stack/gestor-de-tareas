@@ -30,18 +30,30 @@ interface Broadcast {
 
 interface Filters {
   pais: string;
-  suscripcion: string;
-  fecha_desde: string;
-  fecha_hasta: string;
+  plan_tipo: string;       // 'todos' | 'free' | 'paid' | 'cancelled'
+  plan_id: string;         // plan_id exacto o 'todos'
+  fecha_desde: string;     // solo para pagados
+  fecha_hasta: string;     // solo para pagados
+  cancelado_dias: string;  // solo para cancelados: '30'|'60'|'90'|'180'|'365'
   eventos_min: string;
+  nivel: string;
+  grado: string;
+  colegio: string;
 }
 
 const PAISES = ['Todos', 'Perú', 'México', 'Chile', 'Colombia', 'Argentina', 'Ecuador', 'Bolivia', 'Guatemala', 'Paraguay', 'Uruguay'];
-const SUSCRIPCIONES = [
-  { value: 'todos', label: 'Todas' },
-  { value: 'free', label: 'Gratuito' },
-  { value: 'paid', label: 'Pagado' },
+const PLAN_TIPOS = [
+  { value: 'todos',     label: 'Todos' },
+  { value: 'paid',      label: 'Pagado' },
+  { value: 'free',      label: 'Gratuito' },
   { value: 'cancelled', label: 'Cancelado' },
+];
+const CANCELADO_DIAS = [
+  { value: '30',  label: 'Últimos 30 días' },
+  { value: '60',  label: 'Últimos 60 días' },
+  { value: '90',  label: 'Últimos 90 días' },
+  { value: '180', label: 'Últimos 180 días' },
+  { value: '365', label: 'Último año' },
 ];
 
 // Estimated Meta rates by country (USD per message)
@@ -105,14 +117,39 @@ function Steps({ current }: { current: 1 | 2 | 3 }) {
 // ──────────────────────────────────────────
 // Step 1: Segmentation
 // ──────────────────────────────────────────
-function Step1({ filters, setFilters, contactCount, loading, onNext, onBack }: {
+// Small info tooltip
+function InfoTip({ text }: { text: string }) {
+  const [show, setShow] = useState(false);
+  return (
+    <span className="relative inline-block ml-1.5 align-middle">
+      <button
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+        className="w-4 h-4 rounded-full bg-gray-200 text-gray-500 text-xs font-bold flex items-center justify-center hover:bg-gray-300 transition-colors"
+      >i</button>
+      {show && (
+        <div className="absolute z-10 bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 bg-gray-800 text-white text-xs rounded-lg px-3 py-2 shadow-lg leading-relaxed">
+          {text}
+          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800" />
+        </div>
+      )}
+    </span>
+  );
+}
+
+function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, planIds }: {
   filters: Filters;
   setFilters: (f: Filters) => void;
   contactCount: number;
   loading: boolean;
   onNext: () => void;
   onBack: () => void;
+  planIds: string[];
 }) {
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const hasAdvanced = filters.nivel || filters.grado || filters.colegio;
+
   return (
     <div>
       <div className="flex items-center gap-4 mb-6">
@@ -128,72 +165,124 @@ function Step1({ filters, setFilters, contactCount, loading, onNext, onBack }: {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-5 mb-6">
+      {/* ── Filtros principales ── */}
+      <div className="grid grid-cols-2 gap-4 mb-4">
         {/* País */}
         <div>
           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">País</label>
-          <select
-            value={filters.pais}
-            onChange={e => setFilters({ ...filters, pais: e.target.value })}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors"
-          >
+          <select value={filters.pais} onChange={e => setFilters({ ...filters, pais: e.target.value })}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors">
             {PAISES.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
 
-        {/* Suscripción */}
+        {/* Tipo suscripción */}
         <div>
           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Tipo de suscripción</label>
-          <select
-            value={filters.suscripcion}
-            onChange={e => setFilters({ ...filters, suscripcion: e.target.value })}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors"
-          >
-            {SUSCRIPCIONES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+          <select value={filters.plan_tipo} onChange={e => setFilters({ ...filters, plan_tipo: e.target.value, plan_id: 'todos' })}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors">
+            {PLAN_TIPOS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
         </div>
 
-        {/* Fecha desde */}
-        <div>
-          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
-            Fin suscripción — desde
-          </label>
-          <input
-            type="date"
-            value={filters.fecha_desde}
-            onChange={e => setFilters({ ...filters, fecha_desde: e.target.value })}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors"
-          />
-        </div>
+        {/* Plan específico — solo si tipo = paid */}
+        {filters.plan_tipo === 'paid' && (
+          <div className="col-span-2">
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Plan específico</label>
+            <select value={filters.plan_id} onChange={e => setFilters({ ...filters, plan_id: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors">
+              <option value="todos">Todos los planes</option>
+              {planIds.map(id => <option key={id} value={id}>{id}</option>)}
+            </select>
+          </div>
+        )}
 
-        {/* Fecha hasta */}
-        <div>
-          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
-            Fin suscripción — hasta
-          </label>
-          <input
-            type="date"
-            value={filters.fecha_hasta}
-            onChange={e => setFilters({ ...filters, fecha_hasta: e.target.value })}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors"
-          />
-        </div>
+        {/* Fechas — solo para pagados */}
+        {filters.plan_tipo === 'paid' && (<>
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              Vence desde
+              <InfoTip text="Filtra usuarios pagados cuya suscripción vence a partir de esta fecha. Ej: para los que vencen esta semana, pon el lunes." />
+            </label>
+            <input type="date" value={filters.fecha_desde} onChange={e => setFilters({ ...filters, fecha_desde: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              Vence hasta
+              <InfoTip text="Combínalo con 'Vence desde' para definir un rango. Ej: desde hoy hasta el domingo = todos los que vencen esta semana." />
+            </label>
+            <input type="date" value={filters.fecha_hasta} onChange={e => setFilters({ ...filters, fecha_hasta: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
+          </div>
+        </>)}
 
-        {/* Eventos mínimos */}
+        {/* Ventana de tiempo — solo para cancelados */}
+        {filters.plan_tipo === 'cancelled' && (
+          <div className="col-span-2">
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              Cancelaron en los...
+              <InfoTip text="Filtra usuarios cuya suscripción venció dentro de este período. Más reciente = más probabilidad de reactivación." />
+            </label>
+            <select value={filters.cancelado_dias} onChange={e => setFilters({ ...filters, cancelado_dias: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors">
+              {CANCELADO_DIAS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+            </select>
+          </div>
+        )}
+
+        {/* Eventos de valor */}
         <div className="col-span-2">
           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
-            Eventos mínimos en Bubble
+            Eventos de valor mínimos
+            <InfoTip text="Talleres u otras actividades completadas por el usuario en Califica. Ej: poner 3 filtra solo usuarios que han participado en al menos 3 actividades. Útil para campañas a usuarios activos." />
           </label>
-          <input
-            type="number"
-            min={0}
-            placeholder="Sin filtro de eventos"
-            value={filters.eventos_min}
-            onChange={e => setFilters({ ...filters, eventos_min: e.target.value })}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors"
-          />
+          <input type="number" min={0} placeholder="Sin filtro — incluye todos los usuarios"
+            value={filters.eventos_min} onChange={e => setFilters({ ...filters, eventos_min: e.target.value })}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
         </div>
       </div>
+
+      {/* ── Más filtros (colapsable) ── */}
+      <button
+        onClick={() => setShowAdvanced(v => !v)}
+        className={`flex items-center gap-2 text-xs font-semibold mb-4 transition-colors ${
+          hasAdvanced ? 'text-[#ff8080]' : 'text-gray-400 hover:text-gray-600'
+        }`}
+      >
+        <span className={`transition-transform ${showAdvanced ? 'rotate-90' : ''}`}>▶</span>
+        Más filtros
+        {hasAdvanced && <span className="bg-[#ff8080] text-white px-1.5 py-0.5 rounded-full text-xs">activos</span>}
+      </button>
+
+      {showAdvanced && (
+        <div className="border border-gray-200 rounded-xl p-4 mb-4 bg-gray-50 space-y-3">
+          <p className="text-xs text-yellow-600 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2">
+            ⚠ Los datos de nivel, grado y colegio provienen de Bubble y pueden ser inconsistentes. Úsalos con precaución.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Nivel</label>
+              <input type="text" placeholder="ej. Primaria"
+                value={filters.nivel} onChange={e => setFilters({ ...filters, nivel: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Grado</label>
+              <input type="text" placeholder="ej. 3° grado"
+                value={filters.grado} onChange={e => setFilters({ ...filters, grado: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Colegio</label>
+              <input type="text" placeholder="Buscar por nombre parcial..."
+                value={filters.colegio} onChange={e => setFilters({ ...filters, colegio: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* Counter */}
       <div className={`rounded-xl p-4 mb-6 flex items-center justify-between ${
@@ -485,8 +574,11 @@ export default function Campanias() {
   const [contactCount, setContactCount] = useState(0);
   const [sending, setSending] = useState(false);
 
+  const [planIds, setPlanIds] = useState<string[]>([]);
   const [filters, setFilters] = useState<Filters>({
-    pais: 'Todos', suscripcion: 'todos', fecha_desde: '', fecha_hasta: '', eventos_min: '',
+    pais: 'Todos', plan_tipo: 'todos', plan_id: 'todos',
+    fecha_desde: '', fecha_hasta: '', cancelado_dias: '90',
+    eventos_min: '', nivel: '', grado: '', colegio: '',
   });
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
 
@@ -497,9 +589,10 @@ export default function Campanias() {
   const fetchData = useCallback(async () => {
     if (!supabase) return;
     setLoading(true);
-    const [bRes, tRes] = await Promise.all([
+    const [bRes, tRes, planRes] = await Promise.all([
       supabase.from('comm_broadcasts').select('*').order('created_at', { ascending: false }),
       supabase.from('comm_templates').select('id, nombre, body, variables, categoria, estado').order('nombre'),
+      supabase.from('growth_users').select('plan_id').not('plan_id', 'is', null).eq('plan_paid', true),
     ]);
     if (bRes.error) toast.error('Error al cargar campañas');
     if (tRes.error) toast.error('Error al cargar templates');
@@ -511,6 +604,11 @@ export default function Campanias() {
     }));
     setBroadcasts(enriched);
     setTemplates(tRes.data ?? []);
+
+    // Unique plan_ids sorted
+    const ids = [...new Set((planRes.data ?? []).map((r: { plan_id: string }) => r.plan_id))].sort();
+    setPlanIds(ids);
+
     setLoading(false);
   }, [supabase]);
 
@@ -522,10 +620,26 @@ export default function Campanias() {
     const fetchCount = async () => {
       setCountLoading(true);
       let q = supabase.from('growth_users').select('id', { count: 'exact', head: true }).eq('whatsapp_valido', true);
-      if (filters.pais !== 'Todos') q = q.eq('country', filters.pais);
-      if (filters.suscripcion !== 'todos') q = q.eq('plan_status', filters.suscripcion);
-      if (filters.fecha_desde) q = q.gte('fecha_fin_suscripcion', filters.fecha_desde);
-      if (filters.fecha_hasta) q = q.lte('fecha_fin_suscripcion', filters.fecha_hasta);
+      if (filters.pais !== 'Todos')          q = q.eq('country', filters.pais);
+      if (filters.plan_tipo === 'paid')      q = q.eq('plan_paid', true).eq('cancelled', false);
+      if (filters.plan_tipo === 'free')      q = q.eq('plan_free', true);
+      if (filters.plan_tipo === 'cancelled') {
+        q = q.eq('cancelled', true);
+        if (filters.cancelado_dias) {
+          const since = new Date();
+          since.setDate(since.getDate() - parseInt(filters.cancelado_dias));
+          q = q.gte('subscription_end', since.toISOString());
+        }
+      }
+      if (filters.plan_id !== 'todos')       q = q.eq('plan_id', filters.plan_id);
+      if (filters.plan_tipo === 'paid') {
+        if (filters.fecha_desde)             q = q.gte('subscription_end', filters.fecha_desde);
+        if (filters.fecha_hasta)             q = q.lte('subscription_end', `${filters.fecha_hasta}T23:59:59`);
+      }
+      if (filters.eventos_min)               q = q.gte('eventos_valor', parseInt(filters.eventos_min));
+      if (filters.nivel)                     q = q.eq('nivel', filters.nivel);
+      if (filters.grado)                     q = q.ilike('grado', `%${filters.grado}%`);
+      if (filters.colegio)                   q = q.ilike('colegio', `%${filters.colegio}%`);
       const { count, error } = await q;
       if (!error) setContactCount(count ?? 0);
       setCountLoading(false);
@@ -580,7 +694,7 @@ export default function Campanias() {
       }, ...prev]);
       setView('list');
       setSelectedTemplateId(null);
-      setFilters({ pais: 'Todos', suscripcion: 'todos', fecha_desde: '', fecha_hasta: '', eventos_min: '' });
+      setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_id: 'todos', fecha_desde: '', fecha_hasta: '', cancelado_dias: '90', eventos_min: '', nivel: '', grado: '', colegio: '' });
       toast.success(`Campaña enviada a ${contactCount.toLocaleString('es')} contactos`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Error al crear campaña';
@@ -692,6 +806,7 @@ export default function Campanias() {
           loading={countLoading}
           onNext={() => setView('step2')}
           onBack={() => setView('list')}
+          planIds={planIds}
         />
       )}
       {view === 'step2' && (

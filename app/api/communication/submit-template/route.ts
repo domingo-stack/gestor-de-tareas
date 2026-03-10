@@ -40,12 +40,13 @@ export async function POST(req: NextRequest) {
       categoria: template.categoria ?? 'utility',
     });
 
-    // Update Supabase: estado → revision, save kapso_template_id
+    // Update Supabase: estado → revision, save kapso_template_id, clear any previous error
     await supabase
       .from('comm_templates')
       .update({
         estado: 'revision',
         kapso_template_id: result.id,
+        submission_error: null,
         updated_at: new Date().toISOString(),
       })
       .eq('id', templateId);
@@ -54,6 +55,30 @@ export async function POST(req: NextRequest) {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[submit-template] error:', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+
+    // Parse a clean user-facing error from Meta's response
+    let userError = message;
+    try {
+      const match = message.match(/\{.*\}/s);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        const metaErr = parsed?.error;
+        if (metaErr?.error_user_title) {
+          userError = `${metaErr.error_user_title}: ${metaErr.error_user_msg}`;
+        }
+      }
+    } catch { /* keep original */ }
+
+    // Save error to DB so it's visible in the Templates list
+    await supabase
+      .from('comm_templates')
+      .update({
+        estado: 'borrador',
+        submission_error: userError,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', templateId);
+
+    return NextResponse.json({ error: userError }, { status: 500 });
   }
 }

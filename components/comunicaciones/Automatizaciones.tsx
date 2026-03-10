@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 
-type TipoEvento = 'vencimiento' | 'registro_taller' | 'bienvenida' | 'plan_cancelado';
+type TipoEvento = 'vencimiento' | 'registro_taller' | 'plan_cancelado';
 type TimingDirection = 'before' | 'after';
 
 interface EventRule {
@@ -29,10 +29,9 @@ interface CommTemplate {
 }
 
 const TIPOS_EVENTO: { value: TipoEvento; label: string; trigger: string; icon: string; color: string }[] = [
-  { value: 'vencimiento',      label: 'Vencimiento de plan',  trigger: 'n8n',     icon: '⏳', color: '#D97706' },
-  { value: 'registro_taller',  label: 'Registro a taller',   trigger: 'webhook', icon: '🎓', color: '#3c527a' },
-  { value: 'bienvenida',       label: 'Nuevo usuario',        trigger: 'webhook', icon: '👋', color: '#059669' },
-  { value: 'plan_cancelado',   label: 'Plan cancelado',       trigger: 'webhook', icon: '❌', color: '#DC2626' },
+  { value: 'vencimiento',     label: 'Vencimiento de plan', trigger: 'cron',    icon: '⏳', color: '#D97706' },
+  { value: 'registro_taller', label: 'Registro a taller',  trigger: 'webhook', icon: '🎓', color: '#3c527a' },
+  { value: 'plan_cancelado',  label: 'Plan cancelado',      trigger: 'webhook', icon: '❌', color: '#DC2626' },
 ];
 
 // ──────────────────────────────────────────
@@ -373,7 +372,7 @@ export default function Automatizaciones() {
                   <div>
                     <p className="text-sm font-bold text-gray-700">{grupo.label}</p>
                     <p className="text-xs text-gray-400">
-                      {grupo.trigger === 'n8n' ? 'Disparado por n8n (consulta diaria)' : 'Disparado por webhook desde Bubble'}
+                      {grupo.trigger === 'cron' ? 'Ejecutado diariamente a las 9am (Edge Function)' : 'Disparado por webhook (n8n)'}
                     </p>
                   </div>
                   <span className="ml-auto text-xs font-semibold text-gray-400 bg-gray-200 px-2 py-0.5 rounded-full">
@@ -426,14 +425,14 @@ export default function Automatizaciones() {
         </div>
       )}
 
-      {/* Info card: webhook contract */}
-      <div className="mt-6 bg-blue-50 border border-blue-200 rounded-xl p-4">
-        <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-1">Webhook desde Bubble</p>
-        <p className="text-xs text-blue-600 font-mono">
-          POST /api/communication/event
+      {/* Info card: how automations work */}
+      <div className="mt-6 bg-amber-50 border border-amber-200 rounded-xl p-4">
+        <p className="text-xs font-bold text-amber-700 uppercase tracking-wide mb-1">Cómo funcionan las automatizaciones</p>
+        <p className="text-xs text-amber-700 mt-1">
+          <strong>Vencimiento:</strong> Edge Function de Supabase corre diariamente a las 9am (UTC-5). Revisa todos los usuarios con plan activo y envía mensajes según el timing configurado.
         </p>
-        <p className="text-xs text-blue-500 mt-1">
-          Bubble debe enviar <code className="bg-blue-100 px-1 rounded">evento_tipo</code> + <code className="bg-blue-100 px-1 rounded">bubble_user_id</code> + <code className="bg-blue-100 px-1 rounded">variables</code> para activar las reglas correspondientes.
+        <p className="text-xs text-amber-600 mt-1.5">
+          <strong>Registro a taller / Plan cancelado:</strong> Disparados desde n8n vía webhook cuando ocurre el evento en Bubble.
         </p>
       </div>
 

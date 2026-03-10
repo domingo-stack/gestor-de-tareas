@@ -101,7 +101,10 @@ export async function POST(req: NextRequest) {
       const msgResult = await sendTemplateMessage({
         phoneNumberId: PHONE_NUMBER_ID,
         to: contact.phone,
-        templateName: template.nombre.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
+        templateName: template.nombre.toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+          .replace(/\s+/g, '_')
+          .replace(/[^a-z0-9_]/g, ''),
         variables: mergedVars,
       });
 

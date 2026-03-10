@@ -59,7 +59,10 @@ export async function submitTemplateToMeta({
       method: 'POST',
       headers: headers(),
       body: JSON.stringify({
-        name: nombre.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
+        name: nombre.toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // á→a, ñ→n, etc.
+          .replace(/\s+/g, '_')
+          .replace(/[^a-z0-9_]/g, ''),
         category: categoria.toUpperCase(),
         language,
         parameter_format: variables.length > 0 ? 'NAMED' : 'POSITIONAL',
@@ -119,7 +122,7 @@ export async function addBroadcastRecipients(
   }>
 ) {
   const mapped = recipients.map(r => ({
-    phone_number: r.phone_number,
+    phone_number: normalizePhone(r.phone_number),
     ...(r.variables && Object.keys(r.variables).length > 0 && {
       components: [
         {
@@ -170,8 +173,42 @@ export async function sendBroadcast(broadcastId: string) {
 }
 
 /**
+ * Gets the current approval status of a template from Meta via Kapso.
+ * Queries the WABA templates list and filters by template ID.
+ */
+export async function getTemplateStatus(kapsoTemplateId: string) {
+  // Use the same WABA-level endpoint as submission, but GET to list templates
+  const res = await fetch(
+    `${KAPSO_BASE_META}/${KAPSO_WABA_ID}/message_templates?fields=id,name,status,rejected_reason&limit=100`,
+    { method: 'GET', headers: headers() }
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Kapso list templates error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  // Meta returns { data: [...templates] }
+  const templates: Array<{ id: string; name: string; status: string; rejected_reason?: string }> =
+    data.data ?? data ?? [];
+
+  const found = templates.find(t => t.id === kapsoTemplateId);
+  if (!found) {
+    throw new Error(`Template ${kapsoTemplateId} not found in Meta account`);
+  }
+
+  return found;
+}
+
+/**
  * Sends a single WhatsApp message using a template (for automations).
  */
+/** Normalizes a phone number to E.164 digits only (no + or spaces). */
+function normalizePhone(phone: string): string {
+  return phone.replace(/\D/g, '');
+}
+
 export async function sendTemplateMessage({
   phoneNumberId,
   to,
@@ -185,6 +222,7 @@ export async function sendTemplateMessage({
   language?: string;
   variables?: Record<string, string>;
 }) {
+  to = normalizePhone(to);
   const components = Object.keys(variables).length > 0
     ? [{
         type: 'body',

@@ -13,6 +13,7 @@ interface CommTemplate {
   body: string;
   variables: string[];
   categoria: TemplateCategoria;
+  submission_error: string | null;
   estado: TemplateEstado;
   kapso_template_id: string | null;
   motivo_rechazo: string | null;
@@ -403,6 +404,13 @@ function TemplateDetail({ template, onClose, onEdit, onDelete }: {
             <CategoriaBadge categoria={template.categoria} />
           </div>
 
+          {template.submission_error && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+              <p className="text-xs font-bold text-red-600 uppercase tracking-wide mb-1">Error al enviar a Meta</p>
+              <p className="text-sm text-red-700">{template.submission_error}</p>
+            </div>
+          )}
+
           {template.motivo_rechazo && (
             <div className="bg-red-50 border border-red-200 rounded-xl p-4">
               <p className="text-xs font-bold text-red-600 uppercase tracking-wide mb-1">Motivo de rechazo</p>
@@ -469,6 +477,154 @@ function TemplateDetail({ template, onClose, onEdit, onDelete }: {
 }
 
 // ──────────────────────────────────────────
+// Send Test Modal
+// ──────────────────────────────────────────
+interface TestContact {
+  id: number;
+  etiqueta: string;
+  phone: string;
+  variables: Record<string, string>;
+}
+
+function SendTestModal({ template, onClose }: { template: CommTemplate; onClose: () => void }) {
+  const { supabase } = useAuth();
+  const [contacts, setContacts] = useState<TestContact[]>([]);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [results, setResults] = useState<Array<{ contactId: number; ok: boolean; error: string | null }> | null>(null);
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.from('comm_test_contacts').select('*').order('etiqueta').then(({ data }) => {
+      setContacts(data ?? []);
+      setLoading(false);
+    });
+  }, [supabase]);
+
+  const toggle = (id: number) => setSelected(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const handleSend = async () => {
+    if (selected.size === 0) { toast.error('Selecciona al menos un contacto'); return; }
+    setSending(true);
+    try {
+      const res = await fetch('/api/communication/send-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templateId: template.id, contactIds: [...selected] }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? 'Error al enviar'); return; }
+      setResults(data.results);
+      const ok = data.results.filter((r: { ok: boolean }) => r.ok).length;
+      toast.success(`${ok}/${data.results.length} mensajes enviados`);
+    } catch {
+      toast.error('Error de red');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden">
+        <div className="bg-[#3c527a] px-6 py-4 flex items-center justify-between flex-shrink-0">
+          <div>
+            <p className="text-blue-200 text-xs font-bold uppercase tracking-wide mb-0.5">Enviar test</p>
+            <h2 className="text-white text-lg font-bold truncate max-w-[280px]">{template.nombre}</h2>
+          </div>
+          <button onClick={onClose} className="bg-white/20 hover:bg-white/30 text-white w-8 h-8 rounded-lg flex items-center justify-center transition-colors">✕</button>
+        </div>
+
+        <div className="p-6 max-h-[60vh] overflow-y-auto">
+          {loading ? (
+            <div className="py-8 text-center text-gray-400 text-sm">Cargando contactos...</div>
+          ) : contacts.length === 0 ? (
+            <div className="py-8 text-center">
+              <p className="text-sm text-gray-500">No hay contactos de prueba.</p>
+              <p className="text-xs text-gray-400 mt-1">
+                Agrégalos desde la pestaña <strong>Configuración</strong>.
+              </p>
+            </div>
+          ) : results ? (
+            <div className="space-y-2">
+              <p className="text-sm font-bold text-gray-700 mb-3">Resultados</p>
+              {results.map(r => {
+                const c = contacts.find(c => c.id === r.contactId);
+                return (
+                  <div key={r.contactId} className={`flex items-start gap-3 p-3 rounded-lg ${r.ok ? 'bg-green-50 border border-green-100' : 'bg-red-50 border border-red-100'}`}>
+                    <span className={`text-lg flex-shrink-0 ${r.ok ? 'text-green-500' : 'text-red-500'}`}>{r.ok ? '✓' : '✗'}</span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-700">{c?.etiqueta ?? `Contacto ${r.contactId}`}</p>
+                      <p className="text-xs font-mono text-gray-400">{c?.phone}</p>
+                      {r.error && <p className="text-xs text-red-600 mt-0.5">{r.error}</p>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-bold text-gray-700">Selecciona destinatarios</p>
+                <div className="flex gap-2 text-xs">
+                  <button onClick={() => setSelected(new Set(contacts.map(c => c.id)))} className="text-[#3c527a] hover:underline">Todos</button>
+                  <span className="text-gray-300">|</span>
+                  <button onClick={() => setSelected(new Set())} className="text-gray-400 hover:text-gray-600">Ninguno</button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                {contacts.map(c => (
+                  <label key={c.id} className="flex items-start gap-3 p-3 rounded-lg border border-gray-100 hover:bg-gray-50 cursor-pointer transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(c.id)}
+                      onChange={() => toggle(c.id)}
+                      className="mt-0.5 accent-[#ff8080]"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-[#383838]">{c.etiqueta}</p>
+                      <p className="text-xs font-mono text-gray-500">{c.phone}</p>
+                      {c.variables?.nombre && (
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          {c.variables.nombre} {c.variables.apellido}
+                          {c.variables.fecha_fin ? ` · vence ${c.variables.fecha_fin}` : ''}
+                        </p>
+                      )}
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-gray-100 px-6 py-4 flex items-center justify-between bg-gray-50">
+          <button onClick={onClose} className="text-sm text-gray-500 hover:text-gray-700 font-medium px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors">
+            {results ? 'Cerrar' : 'Cancelar'}
+          </button>
+          {!results && contacts.length > 0 && (
+            <button
+              onClick={handleSend}
+              disabled={sending || selected.size === 0}
+              className="px-4 py-2 text-sm font-semibold bg-[#ff8080] hover:bg-[#ff6b6b] text-white rounded-lg transition-colors disabled:opacity-50"
+            >
+              {sending
+                ? 'Enviando...'
+                : `Enviar a ${selected.size > 0 ? selected.size : ''} contacto${selected.size !== 1 ? 's' : ''}`}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────
 // Main Templates Component
 // ──────────────────────────────────────────
 export default function Templates() {
@@ -479,6 +635,8 @@ export default function Templates() {
   const [editingTemplate, setEditingTemplate] = useState<CommTemplate | null>(null);
   const [viewingTemplate, setViewingTemplate] = useState<CommTemplate | null>(null);
   const [filterEstado, setFilterEstado] = useState<string>('todos');
+  const [testingTemplate, setTestingTemplate] = useState<CommTemplate | null>(null);
+  const [checkingId, setCheckingId] = useState<number | null>(null);
 
   const fetchTemplates = useCallback(async () => {
     if (!supabase) return;
@@ -521,6 +679,34 @@ export default function Templates() {
       setTemplates(prev => prev.filter(t => t.id !== id));
       setViewingTemplate(null);
       toast.success('Template eliminado');
+    }
+  };
+
+  const handleCheckStatus = async (t: CommTemplate, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!t.kapso_template_id) { toast.error('Este template no tiene ID de Kapso aún'); return; }
+    setCheckingId(t.id);
+    try {
+      const res = await fetch('/api/communication/check-template-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templateId: t.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? 'Error al consultar'); return; }
+      if (data.changed) {
+        setTemplates(prev => prev.map(x => x.id === t.id
+          ? { ...x, estado: data.estado, motivo_rechazo: data.motivo_rechazo }
+          : x
+        ));
+        toast.success(`Estado actualizado: ${data.meta_status}`);
+      } else {
+        toast.info(`Sin cambios — sigue en ${data.meta_status}`);
+      }
+    } catch {
+      toast.error('Error de red');
+    } finally {
+      setCheckingId(null);
     }
   };
 
@@ -654,19 +840,48 @@ export default function Templates() {
                   </td>
                   <td className="px-4 py-3">
                     <EstadoBadge estado={t.estado} />
+                    {t.submission_error && (
+                      <div className="mt-1 flex items-center gap-1 text-xs text-red-500 font-medium">
+                        <span>⚠</span>
+                        <span className="truncate max-w-[220px]" title={t.submission_error}>
+                          {t.submission_error}
+                        </span>
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-400">
                     {new Date(t.updated_at).toLocaleDateString('es', { day: '2-digit', month: 'short' })}
                   </td>
                   <td className="px-4 py-3">
-                    {(t.estado === 'borrador' || t.estado === 'rechazado') && (
-                      <button
-                        onClick={e => { e.stopPropagation(); setEditingTemplate(t); setShowForm(true); }}
-                        className="text-xs text-[#3c527a] hover:underline font-medium"
-                      >
-                        Editar
-                      </button>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {(t.estado === 'borrador' || t.estado === 'rechazado') && (
+                        <button
+                          onClick={e => { e.stopPropagation(); setEditingTemplate(t); setShowForm(true); }}
+                          className="text-xs text-[#3c527a] hover:underline font-medium"
+                        >
+                          Editar
+                        </button>
+                      )}
+                      {t.estado === 'revision' && t.kapso_template_id && (
+                        <button
+                          onClick={e => handleCheckStatus(t, e)}
+                          disabled={checkingId === t.id}
+                          title="Consultar estado actual en Meta"
+                          className="text-xs text-yellow-600 hover:text-yellow-700 font-medium flex items-center gap-1 disabled:opacity-50"
+                        >
+                          <span className={checkingId === t.id ? 'animate-spin inline-block' : ''}>↻</span>
+                          {checkingId === t.id ? 'Consultando...' : 'Actualizar'}
+                        </button>
+                      )}
+                      {t.estado === 'aprobado' && (
+                        <button
+                          onClick={e => { e.stopPropagation(); setTestingTemplate(t); }}
+                          className="text-xs text-green-600 hover:underline font-medium whitespace-nowrap"
+                        >
+                          Enviar test
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -681,6 +896,14 @@ export default function Templates() {
           template={editingTemplate}
           onClose={() => { setShowForm(false); setEditingTemplate(null); }}
           onSave={handleSave}
+        />
+      )}
+
+      {/* Send Test Modal */}
+      {testingTemplate && (
+        <SendTestModal
+          template={testingTemplate}
+          onClose={() => setTestingTemplate(null)}
         />
       )}
 
