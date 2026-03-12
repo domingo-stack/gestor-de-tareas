@@ -21,6 +21,17 @@ function headers() {
 // ─────────────────────────────────────────────────────────────
 
 /**
+ * Button definition for WhatsApp templates.
+ * Meta allows: up to 2 CTA buttons (URL/PHONE_NUMBER) OR up to 3 QUICK_REPLY buttons.
+ */
+export interface TemplateButton {
+  type: 'URL' | 'PHONE_NUMBER' | 'QUICK_REPLY';
+  text: string;
+  url?: string;           // only for URL type
+  phone_number?: string;  // only for PHONE_NUMBER type
+}
+
+/**
  * Submits a template to Meta for approval via Kapso.
  * Returns the Kapso/Meta template id.
  */
@@ -29,12 +40,14 @@ export async function submitTemplateToMeta({
   body,
   variables,
   categoria,
+  buttons = [],
   language = 'es',
 }: {
   nombre: string;
   body: string;
   variables: string[];
   categoria: 'utility' | 'marketing';
+  buttons?: TemplateButton[];
   language?: string;
 }) {
   // Build named parameters examples from variable names
@@ -52,6 +65,23 @@ export async function submitTemplateToMeta({
       }),
     },
   ];
+
+  // Add buttons component if any buttons are defined
+  if (buttons.length > 0) {
+    components.push({
+      type: 'BUTTONS',
+      buttons: buttons.map(btn => {
+        if (btn.type === 'URL') {
+          return { type: 'URL', text: btn.text, url: btn.url };
+        }
+        if (btn.type === 'PHONE_NUMBER') {
+          return { type: 'PHONE_NUMBER', text: btn.text, phone_number: btn.phone_number };
+        }
+        // QUICK_REPLY
+        return { type: 'QUICK_REPLY', text: btn.text };
+      }),
+    });
+  }
 
   const res = await fetch(
     `${KAPSO_BASE_META}/${KAPSO_WABA_ID}/message_templates`,

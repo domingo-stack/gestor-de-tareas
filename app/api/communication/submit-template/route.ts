@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
       body: template.body,
       variables: template.variables ?? [],
       categoria: template.categoria ?? 'utility',
+      buttons: template.buttons ?? [],
     });
 
     // Update Supabase: estado → revision, save kapso_template_id, clear any previous error
