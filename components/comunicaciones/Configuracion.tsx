@@ -587,7 +587,7 @@ export default function Configuracion() {
   };
 
   return (
-    <div className="max-w-3xl">
+    <div className="max-w-4xl">
       <div className="mb-6">
         <h2 className="text-xl font-bold text-[#383838]">Configuración</h2>
         <p className="text-sm text-gray-500 mt-0.5">
@@ -695,7 +695,7 @@ export default function Configuracion() {
       <AutoReplyConfig />
 
       {/* Variables de usuario (solo referencia) */}
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 overflow-hidden">
         <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-2">Variables de usuario — solo referencia</p>
         <p className="text-xs text-blue-600 mb-3">
           Estas variables se rellenan automáticamente con los datos de cada destinatario desde la base de datos. No son editables aquí.

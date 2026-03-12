@@ -25,7 +25,7 @@ export default function ComunicacionesPage() {
   return (
     <AuthGuard>
       <ModuleGuard module="mod_comunicaciones">
-        <div className="flex flex-col h-full min-h-screen bg-[#F8F8F8]">
+        <div className="flex flex-col min-h-screen bg-[#F8F8F8]">
           <div className="bg-white border-b border-gray-200 px-6 pt-6 pb-0">
             <h1 className="text-xl font-bold text-[#383838] mb-4">Comunicaciones</h1>
             <div className="flex gap-1">
@@ -45,7 +45,7 @@ export default function ComunicacionesPage() {
             </div>
           </div>
 
-          <div className="flex-1 p-6">
+          <div className="flex-1 p-6 overflow-auto">
             {activeTab === 'campanias'        && <Campanias />}
             {activeTab === 'templates'        && <Templates />}
             {activeTab === 'automatizaciones' && <Automatizaciones />}
