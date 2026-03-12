@@ -295,12 +295,12 @@ function TestContactForm({ contact, onClose, onSave }: {
 // ──────────────────────────────────────────
 // Auto-reply configuration
 // ──────────────────────────────────────────
-const AUTO_REPLY_KEYS = ['auto_reply_enabled', 'auto_reply_message', 'auto_reply_support_number'];
+const AUTO_REPLY_KEYS = ['auto_reply_enabled', 'auto_reply_message', 'auto_reply_support_number', 'auto_reply_support_url'];
 
 const DEFAULT_AUTO_REPLY =
   'Gracias por tu mensaje 🙏\n\n' +
   'Este es un canal de difusión y no monitoreamos las respuestas.\n\n' +
-  'Para ponerte en contacto con nuestro equipo, escríbenos al número oficial de soporte.\n\n' +
+  'Para ponerte en contacto con nuestro equipo, usa el enlace de abajo.\n\n' +
   'Muchas gracias y disculpa las molestias.';
 
 function AutoReplyConfig() {
@@ -308,6 +308,7 @@ function AutoReplyConfig() {
   const [enabled, setEnabled] = useState(true);
   const [message, setMessage] = useState(DEFAULT_AUTO_REPLY);
   const [supportNumber, setSupportNumber] = useState('');
+  const [supportUrl, setSupportUrl] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -322,6 +323,7 @@ function AutoReplyConfig() {
           if (r.key === 'auto_reply_enabled') setEnabled(r.value !== 'false');
           if (r.key === 'auto_reply_message') setMessage(r.value);
           if (r.key === 'auto_reply_support_number') setSupportNumber(r.value);
+          if (r.key === 'auto_reply_support_url') setSupportUrl(r.value);
         });
         setLoading(false);
       });
@@ -334,6 +336,7 @@ function AutoReplyConfig() {
       { key: 'auto_reply_enabled', value: String(enabled) },
       { key: 'auto_reply_message', value: message },
       { key: 'auto_reply_support_number', value: supportNumber },
+      { key: 'auto_reply_support_url', value: supportUrl },
     ];
     for (const entry of entries) {
       // Upsert: try update first, insert if not exists
@@ -365,10 +368,7 @@ function AutoReplyConfig() {
 
   if (loading) return null;
 
-  // Preview message with support number inserted
-  const previewMsg = supportNumber
-    ? message.replace('número oficial de soporte', `número oficial de soporte: ${supportNumber}`)
-    : message;
+  const previewMsg = message;
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
@@ -409,20 +409,33 @@ function AutoReplyConfig() {
 
       {enabled && (
         <div className="p-5 space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
-              Número oficial de soporte
-            </label>
-            <input
-              value={supportNumber}
-              onChange={e => setSupportNumber(e.target.value)}
-              placeholder="+51 999 999 999"
-              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#3c527a] transition-colors font-mono"
-            />
-            <p className="text-xs text-gray-400 mt-1">
-              Este número se incluirá en el mensaje automático para que el usuario sepa a dónde escribir.
-            </p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+                Número de soporte (referencia)
+              </label>
+              <input
+                value={supportNumber}
+                onChange={e => setSupportNumber(e.target.value)}
+                placeholder="+51 999 999 999"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#3c527a] transition-colors font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+                URL del botón (wa.link)
+              </label>
+              <input
+                value={supportUrl}
+                onChange={e => setSupportUrl(e.target.value)}
+                placeholder="https://wa.link/abc123"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#3c527a] transition-colors font-mono"
+              />
+            </div>
           </div>
+          <p className="text-xs text-gray-400 -mt-2">
+            El mensaje incluirá un botón que redirige al usuario al WhatsApp oficial de soporte.
+          </p>
 
           <div>
             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
@@ -431,7 +444,7 @@ function AutoReplyConfig() {
             <textarea
               value={message}
               onChange={e => setMessage(e.target.value)}
-              rows={5}
+              rows={4}
               className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#3c527a] transition-colors resize-none"
             />
             <p className="text-xs text-gray-400 mt-1">
@@ -456,6 +469,13 @@ function AutoReplyConfig() {
                   <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{previewMsg}</p>
                   <p className="text-right text-xs text-gray-400 mt-1">12:00 ✓✓</p>
                 </div>
+                {/* Button preview */}
+                {supportUrl && (
+                  <div className="bg-white rounded-lg px-3 py-2 text-center shadow-sm ml-auto max-w-[85%] mt-1 flex items-center justify-center gap-1.5">
+                    <svg className="w-3.5 h-3.5 text-[#00A5F4]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                    <span className="text-sm font-medium text-[#00A5F4]">Contactar Soporte</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>

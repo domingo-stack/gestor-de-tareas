@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
   const { data: configRows } = await supabase
     .from('comm_variables')
     .select('key, value')
-    .in('key', ['auto_reply_enabled', 'auto_reply_message', 'auto_reply_support_number']);
+    .in('key', ['auto_reply_enabled', 'auto_reply_message', 'auto_reply_support_number', 'auto_reply_support_url']);
 
   const config: Record<string, string> = {};
   (configRows ?? []).forEach(r => { config[r.key] = r.value; });
@@ -131,11 +131,11 @@ export async function POST(req: NextRequest) {
 
   // Build the auto-reply message
   let replyText = config.auto_reply_message || DEFAULT_AUTO_REPLY;
-  if (config.auto_reply_support_number) {
-    replyText = replyText.replace(
-      'número oficial de soporte',
-      `número oficial de soporte: ${config.auto_reply_support_number}`
-    );
+  // Append support URL if configured
+  if (config.auto_reply_support_url) {
+    replyText += `\n\n👉 ${config.auto_reply_support_url}`;
+  } else if (config.auto_reply_support_number) {
+    replyText += `\n\n📞 ${config.auto_reply_support_number}`;
   }
 
   // Send auto-reply

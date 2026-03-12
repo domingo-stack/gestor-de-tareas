@@ -191,6 +191,7 @@ function TemplateForm({ template, onClose, onSave }: TemplateFormProps) {
   const [nombre, setNombre] = useState(template?.nombre ?? '');
   const [body, setBody] = useState(template?.body ?? '');
   const [buttons, setButtons] = useState<TemplateButton[]>(template?.buttons ?? []);
+  const [categoriaManual, setCategoriaManual] = useState<TemplateCategoria>(template?.categoria ?? null);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -353,7 +354,7 @@ function TemplateForm({ template, onClose, onSave }: TemplateFormProps) {
         body: body.trim(),
         variables: vars,
         buttons: buttons.filter(b => b.text.trim()), // only save buttons with text
-        categoria: validation?.category ?? null,
+        categoria: categoriaManual ?? validation?.category ?? null,
         estado: submitToMeta ? 'revision' : (template?.estado === 'rechazado' ? 'borrador' : (template?.estado ?? 'borrador')),
         updated_at: new Date().toISOString(),
       };
@@ -659,41 +660,42 @@ function TemplateForm({ template, onClose, onSave }: TemplateFormProps) {
             )}
           </div>
 
-          {/* Validator */}
-          {validation && (
-            <div className={`rounded-xl border p-4 ${
-              validation.category === 'utility'
-                ? 'border-blue-200 bg-blue-50'
-                : 'border-purple-200 bg-purple-50'
-            }`}>
-              <div className="flex items-center gap-3 mb-2">
-                <span className="text-sm font-bold text-gray-700">Análisis automático</span>
-                <CategoriaBadge categoria={validation.category} />
-                <span className={`text-xs font-semibold ${
-                  validation.confidence === 'alta' ? 'text-green-600' :
-                  validation.confidence === 'media' ? 'text-yellow-600' : 'text-gray-500'
-                }`}>
-                  Confianza {validation.confidence}
-                </span>
+          {/* Category selector */}
+          {body.trim().length > 0 && (
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+                Categoría
+                {validation && (
+                  <span className="ml-2 font-normal text-gray-400 normal-case">
+                    Sugerencia: {validation.category} ({validation.confidence})
+                    {validation.warnings.length > 0 && ` — ${validation.warnings[0]}`}
+                  </span>
+                )}
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCategoriaManual('utility')}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                    (categoriaManual ?? validation?.category) === 'utility'
+                      ? 'bg-blue-50 border-blue-300 text-blue-700'
+                      : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
+                  }`}
+                >
+                  Utility
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCategoriaManual('marketing')}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold border transition-colors ${
+                    (categoriaManual ?? validation?.category) === 'marketing'
+                      ? 'bg-purple-50 border-purple-300 text-purple-700'
+                      : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
+                  }`}
+                >
+                  Marketing
+                </button>
               </div>
-              {validation.warnings.length > 0 && (
-                <ul className="space-y-1">
-                  {validation.warnings.map((w, i) => (
-                    <li key={i} className="flex items-start gap-2 text-xs text-gray-600">
-                      <span className="text-yellow-500 flex-shrink-0 mt-0.5">⚠</span>
-                      {w}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {validation.warnings.length === 0 && (
-                <p className="text-xs text-green-700 font-medium">
-                  ✓ Sin señales de riesgo. Buena candidatura para Utility.
-                </p>
-              )}
-              <p className="text-xs text-gray-400 mt-2 italic">
-                Este análisis es orientativo. Meta asigna la categoría final al aprobar el template. Usa el botón "Actualizar" para sincronizar.
-              </p>
             </div>
           )}
 
@@ -1110,14 +1112,25 @@ export default function Templates() {
 
   const handleDelete = async (id: number) => {
     if (!supabase) return;
-    if (!confirm('¿Eliminar este template?')) return;
-    const { error } = await supabase.from('comm_templates').delete().eq('id', id);
-    if (error) {
-      toast.error('Error al eliminar');
-    } else {
-      setTemplates(prev => prev.filter(t => t.id !== id));
+    const t = templates.find(x => x.id === id);
+    const hasKapso = t?.kapso_template_id;
+    const msg = hasKapso
+      ? '¿Eliminar este template? Se eliminará también de Meta/Kapso.'
+      : '¿Eliminar este template?';
+    if (!confirm(msg)) return;
+    try {
+      const res = await fetch('/api/communication/delete-template', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ templateId: id }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast.error(data.error ?? 'Error al eliminar'); return; }
+      setTemplates(prev => prev.filter(x => x.id !== id));
       setViewingTemplate(null);
-      toast.success('Template eliminado');
+      toast.success(data.meta_deleted ? 'Template eliminado de Meta y del gestor' : 'Template eliminado');
+    } catch {
+      toast.error('Error de red');
     }
   };
 

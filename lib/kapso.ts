@@ -240,6 +240,24 @@ function normalizePhone(phone: string): string {
 }
 
 /**
+ * Deletes a template from Meta via Kapso.
+ * Uses the template name (not ID) as Meta requires.
+ */
+export async function deleteTemplateFromMeta(templateName: string) {
+  const res = await fetch(
+    `${KAPSO_BASE_META}/${KAPSO_WABA_ID}/message_templates?name=${encodeURIComponent(templateName)}`,
+    { method: 'DELETE', headers: headers() }
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Kapso delete template error ${res.status}: ${err}`);
+  }
+
+  return await res.json();
+}
+
+/**
  * Sends a free-form text message (not a template).
  * Only works within the 24h conversation window (user must have messaged first).
  */
