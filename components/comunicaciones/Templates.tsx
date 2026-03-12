@@ -1118,20 +1118,37 @@ export default function Templates() {
       ? '¿Eliminar este template? Se eliminará también de Meta/Kapso.'
       : '¿Eliminar este template?';
     if (!confirm(msg)) return;
-    try {
-      const res = await fetch('/api/communication/delete-template', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId: id }),
-      });
-      const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? 'Error al eliminar'); return; }
-      setTemplates(prev => prev.filter(x => x.id !== id));
-      setViewingTemplate(null);
-      toast.success(data.meta_deleted ? 'Template eliminado de Meta y del gestor' : 'Template eliminado');
-    } catch {
-      toast.error('Error de red');
+
+    // If submitted to Meta, delete there first via API (needs server-side Kapso key)
+    let metaDeleted = false;
+    if (hasKapso && t) {
+      const metaName = t.nombre
+        .toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, '_')
+        .replace(/[^a-z0-9_]/g, '');
+      try {
+        const res = await fetch('/api/communication/delete-template', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ metaName }),
+        });
+        const data = await res.json();
+        metaDeleted = data.meta_deleted ?? false;
+      } catch {
+        // Don't block local delete if Meta call fails
+      }
     }
+
+    // Delete from local DB using client supabase
+    const { error } = await supabase.from('comm_templates').delete().eq('id', id);
+    if (error) {
+      toast.error('Error al eliminar del gestor');
+      return;
+    }
+    setTemplates(prev => prev.filter(x => x.id !== id));
+    setViewingTemplate(null);
+    toast.success(metaDeleted ? 'Template eliminado de Meta y del gestor' : 'Template eliminado');
   };
 
   const handleCheckStatus = async (t: CommTemplate, e: React.MouseEvent) => {
@@ -1252,10 +1269,18 @@ export default function Templates() {
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <table className="w-full">
+          <table className="w-full" style={{ borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: '30%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '12%' }} />
+            </colgroup>
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                {['Nombre', 'Categoría', 'Variables', 'Botones', 'Estado', 'Actualizado', ''].map(h => (
+                {['Nombre', 'Categoría', 'Variables', 'Estado', 'Actualizado', ''].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wide">
                     {h}
                   </th>
@@ -1269,41 +1294,24 @@ export default function Templates() {
                   className="border-b border-gray-100 last:border-0 hover:bg-gray-50 cursor-pointer transition-colors"
                   onClick={() => setViewingTemplate(t)}
                 >
-                  <td className="px-4 py-3">
-                    <p className="text-sm font-semibold text-[#383838]">{t.nombre}</p>
-                    <p className="text-xs text-gray-400 mt-0.5 line-clamp-1 max-w-xs">{t.body}</p>
+                  <td className="px-4 py-3 overflow-hidden">
+                    <p className="text-sm font-semibold text-[#383838] truncate">{t.nombre}</p>
+                    <p className="text-xs text-gray-400 mt-0.5 truncate">{t.body}</p>
                   </td>
                   <td className="px-4 py-3">
                     <CategoriaBadge categoria={t.categoria} />
                   </td>
                   <td className="px-4 py-3">
-                    {t.variables.length > 0 ? (
+                    {(t.variables ?? []).length > 0 ? (
                       <div className="flex flex-wrap gap-1">
-                        {t.variables.slice(0, 3).map(v => (
+                        {(t.variables ?? []).slice(0, 3).map(v => (
                           <span key={v} className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded font-mono">
                             {v}
                           </span>
                         ))}
-                        {t.variables.length > 3 && (
-                          <span className="text-xs text-gray-400">+{t.variables.length - 3}</span>
+                        {(t.variables ?? []).length > 3 && (
+                          <span className="text-xs text-gray-400">+{(t.variables ?? []).length - 3}</span>
                         )}
-                      </div>
-                    ) : (
-                      <span className="text-xs text-gray-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {(t.buttons ?? []).length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {t.buttons.map((b, i) => (
-                          <span key={i} className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                            b.type === 'URL' ? 'bg-blue-50 text-blue-600' :
-                            b.type === 'PHONE_NUMBER' ? 'bg-green-50 text-green-600' :
-                            'bg-purple-50 text-purple-600'
-                          }`}>
-                            {b.type === 'URL' ? 'URL' : b.type === 'PHONE_NUMBER' ? 'Tel' : 'QR'}
-                          </span>
-                        ))}
                       </div>
                     ) : (
                       <span className="text-xs text-gray-400">—</span>
@@ -1312,12 +1320,9 @@ export default function Templates() {
                   <td className="px-4 py-3">
                     <EstadoBadge estado={t.estado} />
                     {t.submission_error && (
-                      <div className="mt-1 flex items-center gap-1 text-xs text-red-500 font-medium">
-                        <span>⚠</span>
-                        <span className="truncate max-w-[220px]" title={t.submission_error}>
-                          {t.submission_error}
-                        </span>
-                      </div>
+                      <p className="mt-1 text-xs text-red-500 font-medium truncate" title={t.submission_error}>
+                        ⚠ {t.submission_error}
+                      </p>
                     )}
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-400">
