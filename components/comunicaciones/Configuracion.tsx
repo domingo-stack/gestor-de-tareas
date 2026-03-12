@@ -512,7 +512,7 @@ export default function Configuracion() {
       .select('*')
       .order('key');
     if (error) toast.error('Error al cargar variables');
-    else setVariables(data ?? []);
+    else setVariables((data ?? []).filter(v => !v.key.startsWith('auto_reply_')));
     setLoading(false);
   }, [supabase]);
 
@@ -607,7 +607,8 @@ export default function Configuracion() {
         {loading ? (
           <div className="flex items-center justify-center py-10 text-gray-400 text-sm">Cargando...</div>
         ) : (
-          <table className="w-full">
+          <div className="overflow-x-auto">
+          <table className="w-full" style={{ minWidth: '600px' }}>
             <thead>
               <tr className="border-b border-gray-100">
                 {['Variable', 'Valor', 'Descripción', 'Actualizado', ''].map(h => (
@@ -622,6 +623,7 @@ export default function Configuracion() {
               <AddVariableForm onAdd={handleAdd} />
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
