@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { ExclamationTriangleIcon, EyeIcon } from '@heroicons/react/24/outline';
 import { fmtNum, fmtPct } from './formatters';
-import WeekSelector, { getCurrentWeekStart } from './WeekSelector';
+import WeekSelector, { getCurrentWeekStart, toDateStr } from './WeekSelector';
 
 interface CrossTableRow {
   key: string;
@@ -38,9 +38,6 @@ interface AcquisitionData {
   plan_names?: string[];
 }
 
-function toISODate(d: Date): string {
-  return d.toISOString().split('T')[0];
-}
 
 export default function AcquisitionTab() {
   const { supabase } = useAuth();
@@ -53,7 +50,7 @@ export default function AcquisitionTab() {
     if (!supabase) return;
     setLoading(true);
     const params: Record<string, string | null> = {
-      p_week_start: showAllTime ? null : toISODate(weekStart),
+      p_week_start: showAllTime ? null : toDateStr(weekStart),
     };
     const { data: result, error } = await supabase.rpc('get_acquisition_stats', params);
     if (error) {

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { ExclamationTriangleIcon, CalendarDaysIcon, EnvelopeIcon, ArrowDownTrayIcon } from '@heroicons/react/24/outline';
 import { fmtNum, fmtPct } from './formatters';
-import WeekSelector, { getCurrentWeekStart } from './WeekSelector';
+import WeekSelector, { getCurrentWeekStart, toDateStr } from './WeekSelector';
 
 interface ChurnWeek {
   weekLabel: string;
@@ -57,7 +57,7 @@ export default function ChurnRenewal() {
     if (!supabase) return;
     const fetchData = async () => {
       setLoading(true);
-      const weekStr = weekStart.toISOString().split('T')[0];
+      const weekStr = toDateStr(weekStart);
       const { data: result, error } = await supabase.rpc('get_churn_renewal', {
         p_week_start: weekStr,
         p_weeks: 8,

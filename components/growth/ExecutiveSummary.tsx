@@ -18,7 +18,7 @@ import {
   ResponsiveContainer, Legend,
 } from 'recharts';
 import KpiCard from './KpiCard';
-import WeekSelector, { getCurrentWeekStart } from './WeekSelector';
+import WeekSelector, { getCurrentWeekStart, toDateStr } from './WeekSelector';
 import { fmtUSD, fmtNum, fmtPct } from './formatters';
 
 interface WeeklyTrend {
@@ -99,7 +99,7 @@ export default function ExecutiveSummary() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const weekStr = weekStart.toISOString().split('T')[0];
+        const weekStr = toDateStr(weekStart);
         const { data: result, error } = await supabase.rpc('get_executive_summary', { p_week_start: weekStr });
         if (error) {
           console.error('RPC get_executive_summary error:', error);

@@ -14,17 +14,42 @@ function formatWeekRange(start: Date): string {
   return `${start.toLocaleDateString('es-ES', opts)} - ${end.toLocaleDateString('es-ES', opts)}, ${end.getFullYear()}`;
 }
 
-function getMonday(d: Date): Date {
+// Semanas Domingo-Sábado, UTC-5 (Perú)
+function getSunday(d: Date): Date {
   const date = new Date(d);
-  const day = date.getDay();
-  const diff = date.getDate() - day + (day === 0 ? -6 : 1);
-  date.setDate(diff);
-  date.setHours(0, 0, 0, 0);
-  return date;
+  // Ajustar a UTC-5 para que el día se calcule en hora Perú
+  const utc5 = new Date(date.getTime() - 5 * 60 * 60 * 1000);
+  const day = utc5.getUTCDay(); // 0=Dom, 1=Lun, ...
+  utc5.setUTCDate(utc5.getUTCDate() - day); // Retroceder al Domingo
+  utc5.setUTCHours(0, 0, 0, 0);
+  // Devolver como fecha local para display
+  const result = new Date(utc5.getUTCFullYear(), utc5.getUTCMonth(), utc5.getUTCDate());
+  result.setHours(0, 0, 0, 0);
+  return result;
 }
 
 export function getCurrentWeekStart(): Date {
-  return getMonday(new Date());
+  return getSunday(new Date());
+}
+
+/** Convierte fecha local a string YYYY-MM-DD sin depender de timezone del browser */
+export function toDateStr(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/** Convierte fecha local a ISO UTC que representa medianoche UTC-5 */
+export function toUTC5Start(d: Date): string {
+  return `${toDateStr(d)}T05:00:00.000Z`;
+}
+
+/** Convierte fecha local a ISO UTC que representa 23:59:59 UTC-5 */
+export function toUTC5End(d: Date): string {
+  const next = new Date(d);
+  next.setDate(next.getDate() + 1);
+  return `${toDateStr(next)}T04:59:59.999Z`;
 }
 
 export default function WeekSelector({ weekStart, onWeekChange }: WeekSelectorProps) {

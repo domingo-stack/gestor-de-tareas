@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { ExclamationTriangleIcon, EyeIcon } from '@heroicons/react/24/outline';
 import { fmtNum, fmtPct } from './formatters';
-import WeekSelector, { getCurrentWeekStart } from './WeekSelector';
+import WeekSelector, { getCurrentWeekStart, toDateStr } from './WeekSelector';
 
 interface FunnelStep {
   label: string;
@@ -73,7 +73,7 @@ export default function ConversionFunnel() {
     if (!supabase) return;
     const fetchData = async () => {
       setLoading(true);
-      const weekStr = weekStart.toISOString().split('T')[0];
+      const weekStr = toDateStr(weekStart);
       const { data: result, error } = await supabase.rpc('get_conversion_funnel', {
         p_week_start: weekStr,
         p_weeks: 8,

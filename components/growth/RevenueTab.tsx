@@ -25,7 +25,7 @@ import {
 import { toast } from 'sonner';
 import KpiCard from './KpiCard';
 import GrowthFilters from './GrowthFilters';
-import WeekSelector, { getCurrentWeekStart } from './WeekSelector';
+import WeekSelector, { getCurrentWeekStart, toUTC5Start, toUTC5End, toDateStr } from './WeekSelector';
 import { fmtUSD, fmtNum } from './formatters';
 
 // --- TYPES ---
@@ -72,10 +72,10 @@ type SortColumn = 'created_at' | 'country' | 'amount_usd';
 type SortDirection = 'asc' | 'desc';
 
 function getWeekKey(d: Date): string {
+  // Semana Domingo-Sábado
   const start = new Date(d);
-  const day = start.getDay();
-  const diff = start.getDate() - day + (day === 0 ? -6 : 1);
-  start.setDate(diff);
+  const day = start.getDay(); // 0=Dom
+  start.setDate(start.getDate() - day); // Retroceder al Domingo
   return start.toISOString().split('T')[0];
 }
 
@@ -164,41 +164,49 @@ export default function RevenueTab() {
       });
   }, []);
 
-  // Compute date range from mode
+  // Compute date range from mode — UTC-5 (Perú), semanas Domingo-Sábado
   const getDateRange = () => {
     const now = new Date();
     let start: Date;
-    let end: Date = now;
+    let end: Date;
 
     if (dateMode === 'week') {
       start = new Date(weekStart);
-      start.setHours(0, 0, 0, 0);
       end = new Date(start);
-      end.setDate(end.getDate() + 6);
-      end.setHours(23, 59, 59, 999);
+      end.setDate(end.getDate() + 6); // Domingo + 6 = Sábado
     } else if (dateMode === 'this_month') {
       start = new Date(now.getFullYear(), now.getMonth(), 1);
-      start.setHours(0, 0, 0, 0);
+      end = now;
     } else {
       // custom
       if (!customStart || !customEnd) return null;
       start = new Date(`${customStart}T00:00:00`);
-      end = new Date(`${customEnd}T23:59:59`);
+      end = new Date(`${customEnd}T00:00:00`);
     }
 
-    const duration = end.getTime() - start.getTime();
-    const prevStart = new Date(start.getTime() - duration);
-    const prevEnd = new Date(end.getTime() - duration);
-    const lastYearStart = new Date(start); lastYearStart.setFullYear(start.getFullYear() - 1);
-    const lastYearEnd = new Date(end); lastYearEnd.setFullYear(end.getFullYear() - 1);
+    // Usar helpers UTC-5: construye ISO strings que representan medianoche/fin de día en UTC-5
+    const startIso = toUTC5Start(start);
+    const endIso = toUTC5End(end);
+
+    // Periodo anterior (misma duración hacia atrás)
+    const durationMs = end.getTime() - start.getTime();
+    const prevStartDate = new Date(start.getTime() - durationMs - 86400000);
+    const prevEndDate = new Date(start);
+    prevEndDate.setDate(prevEndDate.getDate() - 1);
+
+    // Año anterior
+    const lastYearStart = new Date(start);
+    lastYearStart.setFullYear(start.getFullYear() - 1);
+    const lastYearEnd = new Date(end);
+    lastYearEnd.setFullYear(end.getFullYear() - 1);
 
     return {
-      startIso: start.toISOString(),
-      endIso: end.toISOString(),
-      prevStartIso: prevStart.toISOString(),
-      prevEndIso: prevEnd.toISOString(),
-      lastYearStartIso: lastYearStart.toISOString(),
-      lastYearEndIso: lastYearEnd.toISOString(),
+      startIso,
+      endIso,
+      prevStartIso: toUTC5Start(prevStartDate),
+      prevEndIso: toUTC5End(prevEndDate),
+      lastYearStartIso: toUTC5Start(lastYearStart),
+      lastYearEndIso: toUTC5End(lastYearEnd),
     };
   };
 
@@ -227,9 +235,9 @@ export default function RevenueTab() {
         const to = from + itemsPerPage - 1;
 
         const [allDataRes, prevDataRes, lastYearRes, tableDataRes] = await Promise.all([
-          buildQuery(startIso, endIso).order('created_at', { ascending: true }),
-          buildQuery(prevStartIso, prevEndIso),
-          buildQuery(lastYearStartIso, lastYearEndIso),
+          buildQuery(startIso, endIso).order('created_at', { ascending: true }).limit(10000),
+          buildQuery(prevStartIso, prevEndIso).limit(10000),
+          buildQuery(lastYearStartIso, lastYearEndIso).limit(10000),
           buildQuery(startIso, endIso).order(sortColumn, { ascending: sortDirection === 'asc' }).range(from, to),
         ]);
 
