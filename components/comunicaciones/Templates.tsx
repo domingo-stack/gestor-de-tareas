@@ -692,7 +692,7 @@ function TemplateForm({ template, onClose, onSave }: TemplateFormProps) {
                 </p>
               )}
               <p className="text-xs text-gray-400 mt-2 italic">
-                Este análisis es orientativo. Meta realiza su propia revisión.
+                Este análisis es orientativo. Meta asigna la categoría final al aprobar el template. Usa el botón "Actualizar" para sincronizar.
               </p>
             </div>
           )}
@@ -807,7 +807,7 @@ function TemplateDetail({ template, onClose, onEdit, onDelete }: {
             </div>
           )}
 
-          {template.motivo_rechazo && (
+          {template.motivo_rechazo && template.motivo_rechazo !== 'NONE' && (
             <div className="bg-red-50 border border-red-200 rounded-xl p-4">
               <p className="text-xs font-bold text-red-600 uppercase tracking-wide mb-1">Motivo de rechazo</p>
               <p className="text-sm text-red-700">{template.motivo_rechazo}</p>
@@ -1133,15 +1133,17 @@ export default function Templates() {
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error ?? 'Error al consultar'); return; }
-      if (data.changed) {
-        setTemplates(prev => prev.map(x => x.id === t.id
-          ? { ...x, estado: data.estado, motivo_rechazo: data.motivo_rechazo }
-          : x
-        ));
-        toast.success(`Estado actualizado: ${data.meta_status}`);
-      } else {
-        toast.info(`Sin cambios — sigue en ${data.meta_status}`);
-      }
+      setTemplates(prev => prev.map(x => x.id === t.id
+        ? {
+            ...x,
+            estado: data.estado,
+            motivo_rechazo: data.motivo_rechazo,
+            ...(data.meta_category && { categoria: data.meta_category }),
+          }
+        : x
+      ));
+      const categoryNote = data.meta_category ? ` | Categoría: ${data.meta_category}` : '';
+      toast.success(`Sincronizado con Meta: ${data.meta_status}${categoryNote}`);
     } catch {
       toast.error('Error de red');
     } finally {
@@ -1318,7 +1320,7 @@ export default function Templates() {
                           Editar
                         </button>
                       )}
-                      {t.estado === 'revision' && t.kapso_template_id && (
+                      {(t.estado === 'revision' || t.estado === 'aprobado') && t.kapso_template_id && (
                         <button
                           onClick={e => handleCheckStatus(t, e)}
                           disabled={checkingId === t.id}

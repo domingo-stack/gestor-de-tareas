@@ -209,7 +209,7 @@ export async function sendBroadcast(broadcastId: string) {
 export async function getTemplateStatus(kapsoTemplateId: string) {
   // Use the same WABA-level endpoint as submission, but GET to list templates
   const res = await fetch(
-    `${KAPSO_BASE_META}/${KAPSO_WABA_ID}/message_templates?fields=id,name,status,rejected_reason&limit=100`,
+    `${KAPSO_BASE_META}/${KAPSO_WABA_ID}/message_templates?fields=id,name,status,category,rejected_reason&limit=100`,
     { method: 'GET', headers: headers() }
   );
 
@@ -220,7 +220,7 @@ export async function getTemplateStatus(kapsoTemplateId: string) {
 
   const data = await res.json();
   // Meta returns { data: [...templates] }
-  const templates: Array<{ id: string; name: string; status: string; rejected_reason?: string }> =
+  const templates: Array<{ id: string; name: string; status: string; category?: string; rejected_reason?: string }> =
     data.data ?? data ?? [];
 
   const found = templates.find(t => t.id === kapsoTemplateId);
@@ -237,6 +237,44 @@ export async function getTemplateStatus(kapsoTemplateId: string) {
 /** Normalizes a phone number to E.164 digits only (no + or spaces). */
 function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, '');
+}
+
+/**
+ * Sends a free-form text message (not a template).
+ * Only works within the 24h conversation window (user must have messaged first).
+ */
+export async function sendTextMessage({
+  phoneNumberId,
+  to,
+  text,
+}: {
+  phoneNumberId: string;
+  to: string;
+  text: string;
+}) {
+  to = normalizePhone(to);
+
+  const res = await fetch(
+    `${KAPSO_BASE_META}/${phoneNumberId}/messages`,
+    {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        to,
+        type: 'text',
+        text: { body: text },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Kapso send text error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  return data as { messages: Array<{ id: string }> };
 }
 
 export async function sendTemplateMessage({

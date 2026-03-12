@@ -55,23 +55,30 @@ export async function POST(req: NextRequest) {
   console.log('[check-template-status] Meta response:', metaData);
   const newEstado = STATUS_MAP[metaData.status] ?? 'revision';
 
-  // Only update if status actually changed
-  if (newEstado !== template.estado) {
-    await supabase
-      .from('comm_templates')
-      .update({
-        estado: newEstado,
-        motivo_rechazo: metaData.rejected_reason ?? null,
-        submission_error: null, // clear previous error on successful check
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', templateId);
+  // Map Meta category to our format (Meta returns UTILITY/MARKETING/AUTHENTICATION)
+  const metaCategory = metaData.category?.toLowerCase() as 'utility' | 'marketing' | undefined;
+
+  // Update status and category from Meta (source of truth)
+  const updatePayload: Record<string, unknown> = {
+    estado: newEstado,
+    motivo_rechazo: metaData.rejected_reason ?? null,
+    submission_error: null,
+    updated_at: new Date().toISOString(),
+  };
+  if (metaCategory) {
+    updatePayload.categoria = metaCategory;
   }
+
+  await supabase
+    .from('comm_templates')
+    .update(updatePayload)
+    .eq('id', templateId);
 
   return NextResponse.json({
     meta_status: metaData.status,
+    meta_category: metaCategory ?? null,
     estado: newEstado,
-    changed: newEstado !== template.estado,
+    changed: true,
     motivo_rechazo: metaData.rejected_reason ?? null,
   });
 }

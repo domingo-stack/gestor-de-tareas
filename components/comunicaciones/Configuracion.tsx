@@ -292,6 +292,189 @@ function TestContactForm({ contact, onClose, onSave }: {
   );
 }
 
+// ──────────────────────────────────────────
+// Auto-reply configuration
+// ──────────────────────────────────────────
+const AUTO_REPLY_KEYS = ['auto_reply_enabled', 'auto_reply_message', 'auto_reply_support_number'];
+
+const DEFAULT_AUTO_REPLY =
+  'Gracias por tu mensaje 🙏\n\n' +
+  'Este es un canal de difusión y no monitoreamos las respuestas.\n\n' +
+  'Para ponerte en contacto con nuestro equipo, escríbenos al número oficial de soporte.\n\n' +
+  'Muchas gracias y disculpa las molestias.';
+
+function AutoReplyConfig() {
+  const { supabase } = useAuth();
+  const [enabled, setEnabled] = useState(true);
+  const [message, setMessage] = useState(DEFAULT_AUTO_REPLY);
+  const [supportNumber, setSupportNumber] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase
+      .from('comm_variables')
+      .select('key, value')
+      .in('key', AUTO_REPLY_KEYS)
+      .then(({ data }) => {
+        (data ?? []).forEach(r => {
+          if (r.key === 'auto_reply_enabled') setEnabled(r.value !== 'false');
+          if (r.key === 'auto_reply_message') setMessage(r.value);
+          if (r.key === 'auto_reply_support_number') setSupportNumber(r.value);
+        });
+        setLoading(false);
+      });
+  }, [supabase]);
+
+  const handleSave = async () => {
+    if (!supabase) return;
+    setSaving(true);
+    const entries = [
+      { key: 'auto_reply_enabled', value: String(enabled) },
+      { key: 'auto_reply_message', value: message },
+      { key: 'auto_reply_support_number', value: supportNumber },
+    ];
+    for (const entry of entries) {
+      // Upsert: try update first, insert if not exists
+      const { data: existing } = await supabase
+        .from('comm_variables')
+        .select('id')
+        .eq('key', entry.key)
+        .single();
+      if (existing) {
+        await supabase
+          .from('comm_variables')
+          .update({ value: entry.value, updated_at: new Date().toISOString() })
+          .eq('key', entry.key);
+      } else {
+        await supabase
+          .from('comm_variables')
+          .insert({
+            key: entry.key,
+            value: entry.value,
+            descripcion: `Auto-reply: ${entry.key}`,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
+      }
+    }
+    toast.success('Respuesta automática guardada');
+    setSaving(false);
+  };
+
+  if (loading) return null;
+
+  // Preview message with support number inserted
+  const previewMsg = supportNumber
+    ? message.replace('número oficial de soporte', `número oficial de soporte: ${supportNumber}`)
+    : message;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div>
+          <h3 className="font-bold text-[#383838] text-sm">Respuesta automática</h3>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Responde automáticamente cuando un usuario escribe al número de difusión
+          </p>
+        </div>
+        <button
+          onClick={async () => {
+            if (!supabase) return;
+            const newVal = !enabled;
+            setEnabled(newVal);
+            const { data: existing } = await supabase
+              .from('comm_variables')
+              .select('id')
+              .eq('key', 'auto_reply_enabled')
+              .single();
+            if (existing) {
+              await supabase
+                .from('comm_variables')
+                .update({ value: String(newVal), updated_at: new Date().toISOString() })
+                .eq('key', 'auto_reply_enabled');
+            } else {
+              await supabase
+                .from('comm_variables')
+                .insert({ key: 'auto_reply_enabled', value: String(newVal), descripcion: 'Auto-reply toggle', created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+            }
+            toast.success(newVal ? 'Respuesta automática activada' : 'Respuesta automática desactivada');
+          }}
+          className={`relative w-11 h-6 rounded-full transition-colors ${enabled ? 'bg-green-500' : 'bg-gray-300'}`}
+        >
+          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${enabled ? 'translate-x-5' : ''}`} />
+        </button>
+      </div>
+
+      {enabled && (
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              Número oficial de soporte
+            </label>
+            <input
+              value={supportNumber}
+              onChange={e => setSupportNumber(e.target.value)}
+              placeholder="+51 999 999 999"
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#3c527a] transition-colors font-mono"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              Este número se incluirá en el mensaje automático para que el usuario sepa a dónde escribir.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              Mensaje de respuesta
+            </label>
+            <textarea
+              value={message}
+              onChange={e => setMessage(e.target.value)}
+              rows={5}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#3c527a] transition-colors resize-none"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              Se enviará una sola vez por número cada 24 horas para evitar spam.
+            </p>
+          </div>
+
+          {/* Preview */}
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              Preview
+            </label>
+            <div className="bg-[#ECE5DD] rounded-xl p-4">
+              <div className="max-w-xs">
+                {/* Incoming message */}
+                <div className="bg-white rounded-xl rounded-tl-none px-3 py-2.5 shadow-sm mb-2">
+                  <p className="text-sm text-gray-800">Hola, quisiera renovar mi plan...</p>
+                  <p className="text-right text-xs text-gray-400 mt-1">12:00</p>
+                </div>
+                {/* Auto-reply */}
+                <div className="bg-[#DCF8C6] rounded-xl rounded-tr-none px-3 py-2.5 shadow-sm ml-auto max-w-[85%]">
+                  <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">{previewMsg}</p>
+                  <p className="text-right text-xs text-gray-400 mt-1">12:00 ✓✓</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-4 py-2 text-sm font-semibold bg-[#ff8080] hover:bg-[#ff6b6b] text-white rounded-lg transition-colors disabled:opacity-50"
+            >
+              {saving ? 'Guardando...' : 'Guardar cambios'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Configuracion() {
   const { supabase } = useAuth();
   const [variables, setVariables] = useState<CommVariable[]>([]);
@@ -484,6 +667,9 @@ export default function Configuracion() {
           </div>
         )}
       </div>
+
+      {/* Auto-reply config */}
+      <AutoReplyConfig />
 
       {/* Variables de usuario (solo referencia) */}
       <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
