@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 
-// Meta approximate rates for LATAM (USD per message)
-const RATES = { utility: 0.005, marketing: 0.013 };
+// Meta rates — default Peru (80% audiencia). Se actualizan desde comm_whatsapp_rates.
+const DEFAULT_RATES = { utility: 0.0200, marketing: 0.0703 };
 
 interface OverallStats {
   total: number;
@@ -61,8 +61,8 @@ function usd(amount: number) {
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function calcCost(sent: number, categoria: 'utility' | 'marketing' | null) {
-  return sent * (RATES[categoria ?? 'utility']);
+function calcCost(sent: number, categoria: 'utility' | 'marketing' | null, rates = DEFAULT_RATES) {
+  return sent * (rates[categoria ?? 'utility']);
 }
 
 function KpiCard({ label, value, sub, color }: {
@@ -114,6 +114,20 @@ export default function Metricas() {
   const [dateFilter, setDateFilter] = useState<DateFilter>('mes');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
+  const [rates, setRates] = useState(DEFAULT_RATES);
+
+  // Load weighted rates from DB (Peru = 80% of audience, used as default)
+  useEffect(() => {
+    if (!supabase) return;
+    supabase
+      .from('comm_whatsapp_rates')
+      .select('country, marketing, utility')
+      .eq('country', 'Perú')
+      .single()
+      .then(({ data: row }) => {
+        if (row) setRates({ marketing: row.marketing, utility: row.utility });
+      });
+  }, [supabase]);
 
   const fetchMetrics = useCallback(async () => {
     if (!supabase) return;
@@ -146,9 +160,9 @@ export default function Metricas() {
 
   const { overall, by_category = [], broadcasts = [], automations, by_rule = [] } = data;
 
-  // Cost calculations
+  // Cost calculations (using Peru rates — 80% of audience)
   const costByCategory = by_category.reduce((acc, c) => {
-    const cost = calcCost(c.enviados, c.categoria);
+    const cost = calcCost(c.enviados, c.categoria, rates);
     acc[c.categoria ?? 'utility'] = cost;
     return acc;
   }, {} as Record<string, number>);
@@ -237,12 +251,12 @@ export default function Metricas() {
           <div className="bg-white/10 rounded-xl p-4">
             <p className="text-xl font-black">{usd(utilityCost)}</p>
             <p className="text-xs text-blue-200 mt-1">Utility</p>
-            <p className="text-xs text-blue-300 mt-0.5">@ $0.005/msg</p>
+            <p className="text-xs text-blue-300 mt-0.5">@ ${rates.utility.toFixed(4)}/msg</p>
           </div>
           <div className="bg-white/10 rounded-xl p-4">
             <p className="text-xl font-black">{usd(marketingCost)}</p>
             <p className="text-xs text-blue-200 mt-1">Marketing</p>
-            <p className="text-xs text-blue-300 mt-0.5">@ $0.013/msg</p>
+            <p className="text-xs text-blue-300 mt-0.5">@ ${rates.marketing.toFixed(4)}/msg</p>
           </div>
           <div className="bg-white/10 rounded-xl p-4">
             <div className="flex items-center justify-between mb-2">
@@ -260,7 +274,7 @@ export default function Metricas() {
           </div>
         </div>
         <p className="text-xs text-blue-300 mt-3 italic">
-          * Tarifas aproximadas Meta LATAM. Pueden variar según país y condiciones de la cuenta.
+          * Tarifas Meta oficiales para Perú (80% de audiencia). Editables en Configuración → comm_whatsapp_rates.
         </p>
       </div>
 
@@ -319,7 +333,7 @@ export default function Metricas() {
               </thead>
               <tbody>
                 {broadcasts.map(b => {
-                  const cost = calcCost(b.enviados ?? 0, b.template_categoria);
+                  const cost = calcCost(b.enviados ?? 0, b.template_categoria, rates);
                   return (
                     <tr key={b.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3">
@@ -395,7 +409,7 @@ export default function Metricas() {
               </thead>
               <tbody>
                 {by_rule.map(r => {
-                  const cost = calcCost(r.enviados ?? 0, r.template_categoria);
+                  const cost = calcCost(r.enviados ?? 0, r.template_categoria, rates);
                   return (
                     <tr key={r.regla_id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3">

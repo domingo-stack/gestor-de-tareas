@@ -56,13 +56,24 @@ const CANCELADO_DIAS = [
   { value: '365', label: 'Último año' },
 ];
 
-// Estimated Meta rates by country (USD per message)
-const META_RATES: Record<string, number> = {
-  Perú: 0.02, México: 0.0085, Chile: 0.02, Colombia: 0.0008,
-  Argentina: 0.02, Ecuador: 0.018, Bolivia: 0.018,
-  Guatemala: 0.018, Paraguay: 0.018, Uruguay: 0.018,
-  Todos: 0.015,
+// Fallback rates if DB table not loaded yet — Peru (80% de audiencia)
+const FALLBACK_RATES: Record<string, { marketing: number; utility: number }> = {
+  'Perú':       { marketing: 0.0703, utility: 0.0200 },
+  'México':     { marketing: 0.0305, utility: 0.0085 },
+  'Chile':      { marketing: 0.0889, utility: 0.0200 },
+  'Colombia':   { marketing: 0.0125, utility: 0.0008 },
+  'Argentina':  { marketing: 0.0618, utility: 0.0260 },
+  'Brasil':     { marketing: 0.0625, utility: 0.0068 },
 };
+const DEFAULT_RATE = { marketing: 0.0703, utility: 0.0200 };
+function getRate(
+  country: string,
+  category: 'marketing' | 'utility',
+  dbRates?: Record<string, { marketing: number; utility: number }>
+) {
+  const rates = dbRates ?? FALLBACK_RATES;
+  return (rates[country] ?? DEFAULT_RATE)[category];
+}
 
 function EstadoBadge({ estado }: { estado: Broadcast['estado'] }) {
   const map = {
@@ -137,7 +148,7 @@ function InfoTip({ text }: { text: string }) {
   );
 }
 
-function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, planIds }: {
+function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, planIds, rates }: {
   filters: Filters;
   setFilters: (f: Filters) => void;
   contactCount: number;
@@ -145,6 +156,7 @@ function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, pla
   onNext: () => void;
   onBack: () => void;
   planIds: string[];
+  rates?: Record<string, { marketing: number; utility: number }>;
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -300,11 +312,11 @@ function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, pla
           <div className="flex gap-4 text-right">
             <div>
               <p className="text-xs text-blue-500 font-semibold">Utility</p>
-              <p className="text-sm font-black text-blue-700">${(contactCount * 0.005).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-sm font-black text-blue-700">${(contactCount * getRate(filters.pais, 'utility', rates)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
             </div>
             <div>
               <p className="text-xs text-purple-500 font-semibold">Marketing</p>
-              <p className="text-sm font-black text-purple-700">${(contactCount * 0.013).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-sm font-black text-purple-700">${(contactCount * getRate(filters.pais, 'marketing', rates)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
             </div>
           </div>
         )}
@@ -326,9 +338,7 @@ function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, pla
 // ──────────────────────────────────────────
 // Step 2: Template selection
 // ──────────────────────────────────────────
-const RATES = { utility: 0.005, marketing: 0.013 };
-
-function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, pais }: {
+function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, pais, rates }: {
   templates: CommTemplate[];
   selectedId: number | null;
   onSelect: (id: number) => void;
@@ -336,11 +346,13 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, 
   onBack: () => void;
   contactCount: number;
   pais: string;
+  rates?: Record<string, { marketing: number; utility: number }>;
 }) {
   const [previewId, setPreviewId] = useState<number | null>(null);
   const preview = templates.find(t => t.id === (previewId ?? selectedId));
   const selectedTemplate = templates.find(t => t.id === selectedId);
-  const countryRate = META_RATES[pais] || 0.015;
+  const rateUtility = getRate(pais, 'utility', rates);
+  const rateMarketing = getRate(pais, 'marketing', rates);
 
   return (
     <div>
@@ -431,8 +443,8 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, 
                   <span className="text-xs text-blue-600 font-semibold">← Este template</span>
                 )}
               </div>
-              <p className="text-xl font-black text-blue-700">${(contactCount * RATES.utility).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-              <p className="text-xs text-blue-400 mt-0.5">@ $0.005/msg</p>
+              <p className="text-xl font-black text-blue-700">${(contactCount * rateUtility).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-xs text-blue-400 mt-0.5">@ ${rateUtility.toFixed(4)}/msg</p>
             </div>
             <div className={`rounded-xl p-3 border-2 transition-all ${selectedTemplate?.categoria === 'marketing' ? 'border-purple-400 bg-purple-50' : 'border-purple-100 bg-purple-50/50'}`}>
               <div className="flex items-center justify-between mb-1">
@@ -441,19 +453,17 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, 
                   <span className="text-xs text-purple-600 font-semibold">← Este template</span>
                 )}
               </div>
-              <p className="text-xl font-black text-purple-700">${(contactCount * RATES.marketing).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-              <p className="text-xs text-purple-400 mt-0.5">@ $0.013/msg</p>
+              <p className="text-xl font-black text-purple-700">${(contactCount * rateMarketing).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-xs text-purple-400 mt-0.5">@ ${rateMarketing.toFixed(4)}/msg</p>
             </div>
           </div>
           {selectedTemplate ? (
             <p className="text-xs text-gray-600">
               Costo estimado con <strong>{selectedTemplate.nombre}</strong> ({selectedTemplate.categoria ?? '—'}):
               <strong className="text-[#3c527a] ml-1">
-                ${(contactCount * RATES[selectedTemplate.categoria ?? 'utility']).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                ${(contactCount * getRate(pais, selectedTemplate.categoria ?? 'utility', rates)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
               </strong>
-              {pais !== 'Todos' && (
-                <span className="text-gray-400 ml-1">· tarifa por país {pais}: ${countryRate.toFixed(3)}/msg</span>
-              )}
+              <span className="text-gray-400 ml-1">· tarifa {pais !== 'Todos' ? pais : 'Perú (80% audiencia)'}: ${getRate(pais, selectedTemplate.categoria ?? 'utility', rates).toFixed(4)}/msg</span>
             </p>
           ) : (
             <p className="text-xs text-gray-400">Selecciona un template para ver el costo exacto.</p>
@@ -477,17 +487,18 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, 
 // ──────────────────────────────────────────
 // Step 3: Confirm & Send
 // ──────────────────────────────────────────
-function Step3({ filters, template, contactCount, onSend, onBack, sending }: {
+function Step3({ filters, template, contactCount, onSend, onBack, sending, rates }: {
   filters: Filters;
   template: CommTemplate | undefined;
   contactCount: number;
   onSend: (nombre: string) => void;
   onBack: () => void;
   sending: boolean;
+  rates?: Record<string, { marketing: number; utility: number }>;
 }) {
   const [nombre, setNombre] = useState('');
   const [confirming, setConfirming] = useState(false);
-  const costRate = META_RATES[filters.pais] || 0.015;
+  const costRate = getRate(filters.pais, template?.categoria ?? 'marketing', rates);
   const estimatedCost = (contactCount * costRate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const filterLabels: string[] = [];
@@ -628,6 +639,7 @@ export default function Campanias() {
   const [contactCount, setContactCount] = useState(0);
   const [sending, setSending] = useState(false);
 
+  const [whatsappRates, setWhatsappRates] = useState<Record<string, { marketing: number; utility: number }> | undefined>(undefined);
   const [planIds, setPlanIds] = useState<string[]>([]);
   const [filters, setFilters] = useState<Filters>({
     pais: 'Todos', plan_tipo: 'todos', plan_id: 'todos',
@@ -643,10 +655,11 @@ export default function Campanias() {
   const fetchData = useCallback(async () => {
     if (!supabase) return;
     setLoading(true);
-    const [bRes, tRes, planRes] = await Promise.all([
+    const [bRes, tRes, planRes, ratesRes] = await Promise.all([
       supabase.from('comm_broadcasts').select('*').order('created_at', { ascending: false }),
       supabase.from('comm_templates').select('id, nombre, body, variables, categoria, estado').order('nombre'),
       supabase.from('growth_users').select('plan_id').not('plan_id', 'is', null).eq('plan_paid', true),
+      supabase.from('comm_whatsapp_rates').select('country, marketing, utility'),
     ]);
     if (bRes.error) toast.error('Error al cargar campañas');
     if (tRes.error) toast.error('Error al cargar templates');
@@ -658,6 +671,15 @@ export default function Campanias() {
     }));
     setBroadcasts(enriched);
     setTemplates(tRes.data ?? []);
+
+    // WhatsApp rates from DB
+    if (ratesRes.data && ratesRes.data.length > 0) {
+      const ratesMap: Record<string, { marketing: number; utility: number }> = {};
+      ratesRes.data.forEach((r: { country: string; marketing: number; utility: number }) => {
+        ratesMap[r.country] = { marketing: r.marketing, utility: r.utility };
+      });
+      setWhatsappRates(ratesMap);
+    }
 
     // Unique plan_ids sorted
     const ids = [...new Set((planRes.data ?? []).map((r: { plan_id: string }) => r.plan_id))].sort();
@@ -861,6 +883,7 @@ export default function Campanias() {
           onNext={() => setView('step2')}
           onBack={() => setView('list')}
           planIds={planIds}
+          rates={whatsappRates}
         />
       )}
       {view === 'step2' && (
@@ -872,6 +895,7 @@ export default function Campanias() {
           onBack={() => setView('step1')}
           contactCount={contactCount}
           pais={filters.pais}
+          rates={whatsappRates}
         />
       )}
       {view === 'step3' && (
@@ -882,6 +906,7 @@ export default function Campanias() {
           onSend={handleSend}
           onBack={() => setView('step2')}
           sending={sending}
+          rates={whatsappRates}
         />
       )}
     </div>
