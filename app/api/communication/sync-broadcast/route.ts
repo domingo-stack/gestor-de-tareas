@@ -50,9 +50,9 @@ export async function POST(req: NextRequest) {
 
     if (kapso.status) update.estado = estadoMap[kapso.status] ?? kapso.status;
     if (kapso.total_recipients != null) update.total_destinatarios = kapso.total_recipients;
-    if (kapso.sent != null) update.enviados = kapso.sent;
-    if (kapso.delivered != null) update.entregados = kapso.delivered;
-    if (kapso.read != null) update.leidos = kapso.read;
+    if (kapso.sent_count != null) update.enviados = kapso.sent_count;
+    if (kapso.delivered_count != null) update.entregados = kapso.delivered_count;
+    if (kapso.read_count != null) update.leidos = kapso.read_count;
 
     await supabase
       .from('comm_broadcasts')

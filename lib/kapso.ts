@@ -205,11 +205,13 @@ export async function getBroadcastStatus(broadcastId: string) {
     id: string;
     name: string;
     status: string;
-    total_recipients?: number;
-    sent?: number;
-    delivered?: number;
-    read?: number;
-    failed?: number;
+    total_recipients: number;
+    sent_count: number;
+    delivered_count: number;
+    read_count: number;
+    responded_count: number;
+    failed_count: number;
+    response_rate: number;
   };
 }
 
