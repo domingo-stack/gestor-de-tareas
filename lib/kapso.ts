@@ -119,16 +119,15 @@ export async function submitTemplateToMeta({
 /**
  * Creates a broadcast in Kapso and returns its id.
  */
-export async function createBroadcast(name: string, templateName: string, language = 'es') {
+export async function createBroadcast(name: string, whatsappTemplateId: string) {
   const res = await fetch(`${KAPSO_BASE_PLATFORM}/whatsapp/broadcasts`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
       whatsapp_broadcast: {
         name,
-        template_name: templateName,
-        template_language: language,
         phone_number_id: KAPSO_PHONE_NUMBER_ID,
+        whatsapp_template_id: whatsappTemplateId,
       },
     }),
   });

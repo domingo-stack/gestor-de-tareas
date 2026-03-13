@@ -243,6 +243,8 @@ function TemplateForm({ template, onClose, onSave }: TemplateFormProps) {
   const vars = extractVariables(body);
   const validation = body.length > 0 ? validateTemplate(body) : null;
   const preview = body.replace(/\{\{(\w+)\}\}/g, (_: string, v: string) => `[${v}]`);
+  const knownKeys = new Set(allVariables.map(v => v.key));
+  const unknownVars = vars.filter(v => !knownKeys.has(v));
 
   // Insert text at cursor position in textarea
   const insertAtCursor = (text: string) => {
@@ -345,6 +347,10 @@ function TemplateForm({ template, onClose, onSave }: TemplateFormProps) {
   const handleSave = async (submitToMeta = false) => {
     if (!nombre.trim() || !body.trim()) {
       toast.error('Nombre y cuerpo son obligatorios');
+      return;
+    }
+    if (unknownVars.length > 0) {
+      toast.error(`Variables no reconocidas: ${unknownVars.join(', ')}. Usa las variables del panel derecho.`);
       return;
     }
     setSaving(true);
@@ -559,11 +565,17 @@ function TemplateForm({ template, onClose, onSave }: TemplateFormProps) {
               </label>
               <div className="flex flex-wrap gap-2">
                 {vars.map(v => (
-                  <span key={v} className="bg-blue-50 text-blue-700 text-xs font-semibold px-2.5 py-1 rounded-full font-mono">
+                  <span key={v} className={`text-xs font-semibold px-2.5 py-1 rounded-full font-mono ${unknownVars.includes(v) ? 'bg-red-50 text-red-700 ring-1 ring-red-300' : 'bg-blue-50 text-blue-700'}`}>
                     {'{{'}{v}{'}}'}
+                    {unknownVars.includes(v) && <span className="ml-1">⚠</span>}
                   </span>
                 ))}
               </div>
+              {unknownVars.length > 0 && (
+                <p className="mt-2 text-xs text-red-600 font-medium bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  Variables no reconocidas: <strong>{unknownVars.join(', ')}</strong>. Usa las variables del panel derecho o agrégalas en Configuración → Variables.
+                </p>
+              )}
             </div>
           )}
 
@@ -1078,6 +1090,8 @@ export default function Templates() {
   const [filterEstado, setFilterEstado] = useState<string>('todos');
   const [testingTemplate, setTestingTemplate] = useState<CommTemplate | null>(null);
   const [checkingId, setCheckingId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const fetchTemplates = useCallback(async () => {
     if (!supabase) return;
@@ -1151,6 +1165,74 @@ export default function Templates() {
     toast.success(metaDeleted ? 'Template eliminado de Meta y del gestor' : 'Template eliminado');
   };
 
+  const handleBulkDelete = async () => {
+    if (!supabase || selectedIds.size === 0) return;
+    const count = selectedIds.size;
+    const hasKapso = templates.filter(t => selectedIds.has(t.id) && t.kapso_template_id).length;
+    const msg = hasKapso > 0
+      ? `¿Eliminar ${count} template${count > 1 ? 's' : ''}? ${hasKapso} se eliminarán también de Meta/Kapso.`
+      : `¿Eliminar ${count} template${count > 1 ? 's' : ''}?`;
+    if (!confirm(msg)) return;
+
+    setBulkDeleting(true);
+    let metaDeletedCount = 0;
+
+    // Delete from Meta first for those with kapso_template_id
+    for (const id of selectedIds) {
+      const t = templates.find(x => x.id === id);
+      if (t?.kapso_template_id) {
+        const metaName = t.nombre
+          .toLowerCase()
+          .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+          .replace(/\s+/g, '_')
+          .replace(/[^a-z0-9_]/g, '');
+        try {
+          const res = await fetch('/api/communication/delete-template', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ metaName }),
+          });
+          const data = await res.json();
+          if (data.meta_deleted) metaDeletedCount++;
+        } catch {
+          // Continue with others
+        }
+      }
+    }
+
+    // Delete all from DB
+    const ids = Array.from(selectedIds);
+    const { error } = await supabase.from('comm_templates').delete().in('id', ids);
+    if (error) {
+      toast.error('Error al eliminar templates');
+      setBulkDeleting(false);
+      return;
+    }
+
+    setTemplates(prev => prev.filter(x => !selectedIds.has(x.id)));
+    setSelectedIds(new Set());
+    setBulkDeleting(false);
+    const metaNote = metaDeletedCount > 0 ? ` (${metaDeletedCount} eliminados de Meta)` : '';
+    toast.success(`${count} template${count > 1 ? 's' : ''} eliminado${count > 1 ? 's' : ''}${metaNote}`);
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map(t => t.id)));
+    }
+  };
+
   const handleCheckStatus = async (t: CommTemplate, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!t.kapso_template_id) { toast.error('Este template no tiene ID de Kapso aún'); return; }
@@ -1203,13 +1285,28 @@ export default function Templates() {
             Gestiona los templates de WhatsApp y su aprobación con Meta
           </p>
         </div>
-        <button
-          onClick={() => { setEditingTemplate(null); setShowForm(true); }}
-          className="flex items-center gap-2 px-4 py-2 bg-[#ff8080] hover:bg-[#ff6b6b] text-white text-sm font-semibold rounded-lg transition-colors"
-        >
-          <span className="text-lg leading-none">+</span>
-          Nuevo template
-        </button>
+        <div className="flex items-center gap-2">
+          {selectedIds.size > 0 && (
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkDeleting}
+              className="flex items-center gap-1.5 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold rounded-lg transition-colors border border-red-200 disabled:opacity-50"
+              title={`Eliminar ${selectedIds.size} template${selectedIds.size > 1 ? 's' : ''}`}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+              </svg>
+              {bulkDeleting ? 'Eliminando...' : selectedIds.size}
+            </button>
+          )}
+          <button
+            onClick={() => { setEditingTemplate(null); setShowForm(true); }}
+            className="flex items-center gap-2 px-4 py-2 bg-[#ff8080] hover:bg-[#ff6b6b] text-white text-sm font-semibold rounded-lg transition-colors"
+          >
+            <span className="text-lg leading-none">+</span>
+            Nuevo template
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -1271,15 +1368,24 @@ export default function Templates() {
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <table className="w-full" style={{ borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <colgroup>
-              <col style={{ width: '30%' }} />
+              <col style={{ width: '40px' }} />
+              <col style={{ width: '28%' }} />
               <col style={{ width: '12%' }} />
-              <col style={{ width: '18%' }} />
-              <col style={{ width: '18%' }} />
+              <col style={{ width: '17%' }} />
+              <col style={{ width: '17%' }} />
               <col style={{ width: '10%' }} />
               <col style={{ width: '12%' }} />
             </colgroup>
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-2 py-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={filtered.length > 0 && selectedIds.size === filtered.length}
+                    onChange={toggleSelectAll}
+                    className="w-3.5 h-3.5 rounded border-gray-300 text-[#3c527a] focus:ring-[#3c527a] cursor-pointer"
+                  />
+                </th>
                 {['Nombre', 'Categoría', 'Variables', 'Estado', 'Actualizado', ''].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wide">
                     {h}
@@ -1291,9 +1397,17 @@ export default function Templates() {
               {filtered.map(t => (
                 <tr
                   key={t.id}
-                  className="border-b border-gray-100 last:border-0 hover:bg-gray-50 cursor-pointer transition-colors"
+                  className={`border-b border-gray-100 last:border-0 hover:bg-gray-50 cursor-pointer transition-colors ${selectedIds.has(t.id) ? 'bg-blue-50/50' : ''}`}
                   onClick={() => setViewingTemplate(t)}
                 >
+                  <td className="px-2 py-3 text-center" onClick={e => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(t.id)}
+                      onChange={() => toggleSelect(t.id)}
+                      className="w-3.5 h-3.5 rounded border-gray-300 text-[#3c527a] focus:ring-[#3c527a] cursor-pointer"
+                    />
+                  </td>
                   <td className="px-4 py-3 overflow-hidden">
                     <p className="text-sm font-semibold text-[#383838] truncate">{t.nombre}</p>
                     <p className="text-xs text-gray-400 mt-0.5 truncate">{t.body}</p>

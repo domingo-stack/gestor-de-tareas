@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
   // Fetch broadcast record
   const { data: broadcast, error: bError } = await supabase
     .from('comm_broadcasts')
-    .select('*, comm_templates(nombre, body, variables, estado, kapso_template_id)')
+    .select('*, comm_templates(nombre, body, variables, estado, kapso_template_id, categoria)')
     .eq('id', broadcastId)
     .single();
 
@@ -50,6 +50,9 @@ export async function POST(req: NextRequest) {
   const template = broadcast.comm_templates;
   if (!template || template.estado !== 'aprobado') {
     return NextResponse.json({ error: 'Template not approved' }, { status: 400 });
+  }
+  if (!template.kapso_template_id) {
+    return NextResponse.json({ error: 'Template missing Meta ID (kapso_template_id)' }, { status: 400 });
   }
 
   // Mark broadcast as sending
@@ -100,13 +103,7 @@ export async function POST(req: NextRequest) {
 
   try {
     // ── Create Kapso broadcast ────────────────────────────────
-    const templateName = template.nombre
-      .toLowerCase()
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/\s+/g, '_')
-      .replace(/[^a-z0-9_]/g, '');
-
-    const kapsoBroadcast = await createBroadcast(broadcast.nombre, templateName);
+    const kapsoBroadcast = await createBroadcast(broadcast.nombre, template.kapso_template_id);
 
     // Fetch static comm_variables for template variable substitution
     const { data: commVars } = await supabase.from('comm_variables').select('key, value');
@@ -123,13 +120,14 @@ export async function POST(req: NextRequest) {
     for (let i = 0; i < contacts.length; i += BATCH_SIZE) {
       const batch = contacts.slice(i, i + BATCH_SIZE);
       const recipients = batch.map(c => {
-        const allAvailable = {
+        const allAvailable: Record<string, string> = {
           ...staticVars,
           nombre: c.first_name ?? '',
+          name: c.first_name ?? '',
           apellido: c.last_name ?? '',
         };
         const variables = Object.fromEntries(
-          templateVarKeys.map(key => [key, allAvailable[key] ?? ''])
+          templateVarKeys.map(key => [key, allAvailable[key] || '-'])
         );
         return { phone_number: c.phone!, variables };
       });
