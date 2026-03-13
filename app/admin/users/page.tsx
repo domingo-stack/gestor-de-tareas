@@ -18,6 +18,7 @@ type AdminUser = {
   mod_finanzas: boolean;
   mod_producto: boolean;
   mod_customer_success: boolean;
+  mod_comunicaciones: boolean;
   created_at: string;
 };
 
@@ -30,6 +31,7 @@ const MODULE_LABELS: Record<string, string> = {
   mod_finanzas: 'Finanzas',
   mod_producto: 'Producto',
   mod_customer_success: 'Customer Success',
+  mod_comunicaciones: 'Comunicaciones',
 };
 
 export default function AdminUsersPage() {
@@ -212,6 +214,7 @@ export default function AdminUsersPage() {
                     <th className="text-center p-4 font-semibold text-gray-600">Finanzas</th>
                     <th className="text-center p-4 font-semibold text-gray-600">Producto</th>
                     <th className="text-center p-4 font-semibold text-gray-600">Customer Success</th>
+                    <th className="text-center p-4 font-semibold text-gray-600">Comunicaciones</th>
                     <th className="text-center p-4 font-semibold text-gray-600">Acciones</th>
                   </tr>
                 </thead>
@@ -223,7 +226,7 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="p-4">
                         <select
-                          value={u.role}
+                          value={u.role ?? ''}
                           onChange={(e) => handleRoleChange(u.user_id, e.target.value)}
                           disabled={u.role === 'superadmin'}
                           className={`text-xs px-2 py-1 rounded-md border ${
@@ -241,20 +244,19 @@ export default function AdminUsersPage() {
                           ))}
                         </select>
                       </td>
-                      {(['mod_tareas', 'mod_calendario', 'mod_revenue', 'mod_finanzas', 'mod_producto', 'mod_customer_success'] as const).map(
+                      {(['mod_tareas', 'mod_calendario', 'mod_revenue', 'mod_finanzas', 'mod_producto', 'mod_customer_success', 'mod_comunicaciones'] as const).map(
                         (mod) => (
                           <td key={mod} className="p-4 text-center">
                             <button
                               onClick={() => handleTogglePermission(u.user_id, mod, u[mod])}
                               disabled={u.role === 'superadmin'}
                               className={`w-10 h-6 rounded-full transition-colors relative ${
-                                u[mod] ? 'bg-green-500' : 'bg-gray-300'
+                                (u.role === 'superadmin' || u[mod]) ? 'bg-green-500' : 'bg-gray-300'
                               } ${u.role === 'superadmin' ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}
                             >
                               <span
-                                className={`absolute top-0.5 left-0 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                                  u[mod] ? 'translate-x-[18px]' : 'translate-x-[2px]'
-                                }`}
+                                className="absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all"
+                                style={{ left: (u.role === 'superadmin' || u[mod]) ? '18px' : '2px' }}
                               />
                             </button>
                           </td>
