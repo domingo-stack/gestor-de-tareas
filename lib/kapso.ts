@@ -216,6 +216,41 @@ export async function getBroadcastStatus(broadcastId: string) {
 }
 
 /**
+ * Gets broadcast recipients with their delivery status from Kapso.
+ */
+export async function getBroadcastRecipients(broadcastId: string, page = 1, perPage = 20) {
+  const res = await fetch(
+    `${KAPSO_BASE_PLATFORM}/whatsapp/broadcasts/${broadcastId}/recipients?page=${page}&per_page=${perPage}`,
+    { method: 'GET', headers: headers() }
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Kapso get recipients error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  return {
+    recipients: data.data as Array<{
+      id: string;
+      phone_number: string;
+      status: string;
+      sent_at: string | null;
+      delivered_at: string | null;
+      read_at: string | null;
+      responded_at: string | null;
+      failed_at: string | null;
+      error_message: string | null;
+      template_components: Array<{
+        type: string;
+        parameters: Array<{ text: string; parameter_name: string }>;
+      }>;
+    }>,
+    meta: data.meta as { page: number; per_page: number; total_pages: number; total_count: number },
+  };
+}
+
+/**
  * Sends a broadcast immediately.
  */
 export async function sendBroadcast(broadcastId: string) {

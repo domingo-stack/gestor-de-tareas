@@ -628,11 +628,335 @@ function Step3({ filters, template, contactCount, onSend, onBack, sending, rates
 }
 
 // ──────────────────────────────────────────
+// Broadcast Detail View
+// ──────────────────────────────────────────
+
+interface Recipient {
+  id: string;
+  phone_number: string;
+  status: string;
+  sent_at: string | null;
+  delivered_at: string | null;
+  read_at: string | null;
+  responded_at: string | null;
+  failed_at: string | null;
+  error_message: string | null;
+  template_components: Array<{
+    type: string;
+    parameters: Array<{ text: string; parameter_name: string }>;
+  }>;
+}
+
+interface DetailData {
+  broadcast: {
+    nombre: string;
+    estado: string;
+    created_at: string;
+    total_destinatarios: number;
+    enviados: number;
+    entregados: number;
+    leidos: number;
+    respondidos: number;
+    fallidos: number;
+    tasa_respuesta: number;
+    comm_templates: { nombre: string; body: string; categoria: string } | null;
+    segmento_filtros: Record<string, string>;
+  };
+  recipients: Recipient[];
+  meta: { page: number; per_page: number; total_pages: number; total_count: number };
+}
+
+function RecipientStatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    sent:      { label: 'Enviado',   cls: 'bg-blue-100 text-blue-700' },
+    delivered: { label: 'Entregado', cls: 'bg-green-100 text-green-700' },
+    read:      { label: 'Leído',     cls: 'bg-purple-100 text-purple-700' },
+    responded: { label: 'Respondió', cls: 'bg-emerald-100 text-emerald-700' },
+    failed:    { label: 'Error',     cls: 'bg-red-100 text-red-600' },
+    pending:   { label: 'Pendiente', cls: 'bg-gray-100 text-gray-500' },
+  };
+  const { label, cls } = map[status] ?? { label: status, cls: 'bg-gray-100 text-gray-500' };
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${cls}`}>{label}</span>;
+}
+
+function fmtDate(d: string | null) {
+  if (!d) return '—';
+  return new Date(d).toLocaleString('es', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+function getContactName(r: Recipient): string {
+  const bodyComp = r.template_components?.find(c => c.type === 'body');
+  const nameParam = bodyComp?.parameters?.find(p => p.parameter_name === 'nombre' || p.parameter_name === 'name');
+  return nameParam?.text ?? '';
+}
+
+function BroadcastDetail({ broadcastId, onBack }: { broadcastId: number; onBack: () => void }) {
+  const [data, setData] = useState<DetailData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState('all');
+
+  const fetchDetail = useCallback(async (p: number) => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/communication/broadcast-detail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ broadcastId, page: p, perPage: 20 }),
+      });
+      const result = await res.json();
+      if (!res.ok) { setError(result.error); return; }
+      setData(result);
+    } catch {
+      setError('Error de red');
+    } finally {
+      setLoading(false);
+    }
+  }, [broadcastId]);
+
+  useEffect(() => { fetchDetail(page); }, [fetchDetail, page]);
+
+  if (loading && !data) return (
+    <div className="flex items-center justify-center py-16 text-gray-400 text-sm">Cargando detalle...</div>
+  );
+
+  if (error) return (
+    <div className="text-center py-16">
+      <p className="text-red-500 text-sm mb-3">{error}</p>
+      <button onClick={onBack} className="text-sm text-[#3c527a] hover:underline font-medium">← Volver</button>
+    </div>
+  );
+
+  if (!data) return null;
+
+  const b = data.broadcast;
+  const deliveryRate = b.enviados > 0 ? Math.round(b.entregados / b.enviados * 100) : 0;
+  const readRate = b.entregados > 0 ? Math.round(b.leidos / b.entregados * 100) : 0;
+  const responseRate = b.enviados > 0 ? Math.round(b.respondidos / b.enviados * 100) : 0;
+
+  const filteredRecipients = statusFilter === 'all'
+    ? data.recipients
+    : data.recipients.filter(r => {
+        if (statusFilter === 'read') return r.read_at;
+        if (statusFilter === 'delivered') return r.delivered_at && !r.read_at;
+        if (statusFilter === 'sent') return r.sent_at && !r.delivered_at;
+        if (statusFilter === 'failed') return r.failed_at;
+        if (statusFilter === 'responded') return r.responded_at;
+        return true;
+      });
+
+  const filterLabels: string[] = [];
+  const sf = b.segmento_filtros ?? {};
+  if (sf.pais && sf.pais !== 'Todos') filterLabels.push(`País: ${sf.pais}`);
+  if (sf.plan_tipo && sf.plan_tipo !== 'todos') filterLabels.push(`Plan: ${sf.plan_tipo}`);
+  if (sf.fecha_desde) filterLabels.push(`Desde: ${sf.fecha_desde}`);
+  if (sf.fecha_hasta) filterLabels.push(`Hasta: ${sf.fecha_hasta}`);
+  if (sf.cancelado_dias) filterLabels.push(`Cancel. ${sf.cancelado_dias}d`);
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex items-center gap-4 mb-6">
+        <button onClick={onBack} className="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 font-medium px-3 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+          ← Volver
+        </button>
+        <div>
+          <div className="flex items-center gap-3">
+            <h2 className="text-xl font-bold text-[#383838]">{b.nombre}</h2>
+            <EstadoBadge estado={b.estado as Broadcast['estado']} />
+          </div>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Creada {new Date(b.created_at).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' })}
+          </p>
+        </div>
+        <button
+          onClick={() => fetchDetail(page)}
+          disabled={loading}
+          className="ml-auto text-xs text-[#3c527a] hover:text-[#2a3d5c] font-medium flex items-center gap-1 disabled:opacity-50"
+        >
+          <span className={loading ? 'animate-spin inline-block' : ''}>↻</span>
+          Actualizar
+        </button>
+      </div>
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-5 gap-3 mb-6">
+        {[
+          { label: 'Destinatarios', value: b.total_destinatarios, sub: '', color: 'text-gray-700', bg: 'bg-gray-50', icon: '👥' },
+          { label: 'Enviados', value: b.enviados, sub: b.enviados === b.total_destinatarios ? '100%' : `${Math.round(b.enviados / b.total_destinatarios * 100)}%`, color: 'text-blue-700', bg: 'bg-blue-50', icon: '📤' },
+          { label: 'Entregados', value: b.entregados, sub: `${deliveryRate}% delivery`, color: 'text-green-700', bg: 'bg-green-50', icon: '✓' },
+          { label: 'Leídos', value: b.leidos, sub: `${readRate}% read rate`, color: 'text-purple-700', bg: 'bg-purple-50', icon: '👁' },
+          { label: 'Respondieron', value: b.respondidos, sub: `${responseRate}% response`, color: 'text-emerald-700', bg: 'bg-emerald-50', icon: '💬' },
+        ].map(k => (
+          <div key={k.label} className={`${k.bg} rounded-xl p-4 border border-gray-100`}>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-xs text-gray-500 font-medium">{k.label}</p>
+              <span className="text-sm">{k.icon}</span>
+            </div>
+            <p className={`text-2xl font-black ${k.color}`}>{k.value.toLocaleString('es')}</p>
+            {k.sub && <p className="text-xs text-gray-400 mt-0.5">{k.sub}</p>}
+          </div>
+        ))}
+      </div>
+
+      {/* Funnel bar */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+        <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Funnel de entrega</p>
+        <div className="flex items-center gap-2">
+          {[
+            { label: 'Enviados', val: b.enviados, color: '#3b82f6' },
+            { label: 'Entregados', val: b.entregados, color: '#22c55e' },
+            { label: 'Leídos', val: b.leidos, color: '#8b5cf6' },
+            { label: 'Respondieron', val: b.respondidos, color: '#10b981' },
+          ].map((s, i) => {
+            const pct = b.total_destinatarios > 0 ? Math.max(s.val / b.total_destinatarios * 100, 2) : 0;
+            return (
+              <div key={s.label} className="flex items-center gap-2 flex-1">
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs font-semibold" style={{ color: s.color }}>{s.label}</span>
+                    <span className="text-xs font-bold" style={{ color: s.color }}>{s.val.toLocaleString('es')}</span>
+                  </div>
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: s.color }} />
+                  </div>
+                </div>
+                {i < 3 && <span className="text-gray-300 text-sm flex-shrink-0">→</span>}
+              </div>
+            );
+          })}
+          {b.fallidos > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-gray-300 text-sm">|</span>
+              <div>
+                <span className="text-xs font-semibold text-red-500">{b.fallidos} fallidos</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Configuration */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+        <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Configuración</p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <p className="text-xs text-gray-400 mb-0.5">Template</p>
+            <p className="text-sm font-semibold text-[#383838]">{b.comm_templates?.nombre ?? '—'}</p>
+            {b.comm_templates?.categoria && (
+              <span className={`mt-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
+                b.comm_templates.categoria === 'marketing' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+              }`}>{b.comm_templates.categoria}</span>
+            )}
+          </div>
+          <div>
+            <p className="text-xs text-gray-400 mb-0.5">Segmento</p>
+            {filterLabels.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {filterLabels.map((l, i) => (
+                  <span key={i} className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full font-medium">{l}</span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">Todos los contactos</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Recipients table */}
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+          <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">
+            Destinatarios ({data.meta.total_count.toLocaleString('es')})
+          </p>
+          <div className="flex gap-1.5">
+            {[
+              { value: 'all', label: 'Todos' },
+              { value: 'read', label: 'Leídos' },
+              { value: 'delivered', label: 'Entregados' },
+              { value: 'sent', label: 'Solo enviados' },
+              { value: 'failed', label: 'Fallidos' },
+            ].map(f => (
+              <button
+                key={f.value}
+                onClick={() => setStatusFilter(f.value)}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${
+                  statusFilter === f.value ? 'bg-[#3c527a] text-white' : 'text-gray-500 hover:bg-gray-100'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <table className="w-full">
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-100">
+              {['Contacto', 'Teléfono', 'Estado', 'Enviado', 'Entregado', 'Leído', 'Error'].map(h => (
+                <th key={h} className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase tracking-wide">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRecipients.map(r => (
+              <tr key={r.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50 transition-colors">
+                <td className="px-4 py-2.5 text-sm font-medium text-[#383838]">
+                  {getContactName(r) || <span className="text-gray-400">—</span>}
+                </td>
+                <td className="px-4 py-2.5 text-sm text-gray-500 font-mono">{r.phone_number}</td>
+                <td className="px-4 py-2.5"><RecipientStatusBadge status={r.failed_at ? 'failed' : r.responded_at ? 'responded' : r.read_at ? 'read' : r.delivered_at ? 'delivered' : r.sent_at ? 'sent' : 'pending'} /></td>
+                <td className="px-4 py-2.5 text-xs text-gray-400">{fmtDate(r.sent_at)}</td>
+                <td className="px-4 py-2.5 text-xs text-gray-400">{fmtDate(r.delivered_at)}</td>
+                <td className="px-4 py-2.5 text-xs text-gray-400">{fmtDate(r.read_at)}</td>
+                <td className="px-4 py-2.5 text-xs text-red-500 max-w-[150px] truncate" title={r.error_message ?? ''}>
+                  {r.error_message ?? '—'}
+                </td>
+              </tr>
+            ))}
+            {filteredRecipients.length === 0 && (
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">Sin resultados para este filtro</td></tr>
+            )}
+          </tbody>
+        </table>
+
+        {/* Pagination */}
+        {data.meta.total_pages > 1 && (
+          <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+            <p className="text-xs text-gray-400">
+              Página {data.meta.page} de {data.meta.total_pages}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page <= 1 || loading}
+                className="px-3 py-1 text-xs font-semibold text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors"
+              >
+                ← Anterior
+              </button>
+              <button
+                onClick={() => setPage(p => Math.min(data.meta.total_pages, p + 1))}
+                disabled={page >= data.meta.total_pages || loading}
+                className="px-3 py-1 text-xs font-semibold text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 transition-colors"
+              >
+                Siguiente →
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────
 // Main Campañas Component
 // ──────────────────────────────────────────
 export default function Campanias() {
   const { supabase } = useAuth();
-  const [view, setView] = useState<'list' | 'step1' | 'step2' | 'step3'>('list');
+  const [view, setView] = useState<'list' | 'detail' | 'step1' | 'step2' | 'step3'>('list');
+  const [detailBroadcastId, setDetailBroadcastId] = useState<number | null>(null);
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [templates, setTemplates] = useState<CommTemplate[]>([]);
   const [loading, setLoading] = useState(true);
@@ -840,6 +1164,14 @@ export default function Campanias() {
       : 0,
   }), [broadcasts]);
 
+  // ── Detail view ──
+  if (view === 'detail' && detailBroadcastId != null) return (
+    <BroadcastDetail
+      broadcastId={detailBroadcastId}
+      onBack={() => { setView('list'); setDetailBroadcastId(null); fetchData(); }}
+    />
+  );
+
   // ── List view ──
   if (view === 'list') return (
     <div>
@@ -887,43 +1219,50 @@ export default function Campanias() {
           <table className="w-full">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                {['Campaña', 'Template', 'Dest.', 'Entregados', 'Leídos', 'Estado', 'Fecha', ''].map(h => (
+                {['Campaña', 'Estado', 'Template', 'Dest.', 'Funnel', 'Fecha', ''].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {broadcasts.map(b => (
-                <tr key={b.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
+                <tr
+                  key={b.id}
+                  className="border-b border-gray-100 last:border-0 hover:bg-gray-50 cursor-pointer transition-colors"
+                  onClick={() => { if (b.kapso_broadcast_id) { setDetailBroadcastId(b.id); setView('detail'); } }}
+                >
                   <td className="px-4 py-3 text-sm font-semibold text-[#383838]">{b.nombre}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500">{b.template_nombre}</td>
-                  <td className="px-4 py-3 text-sm font-bold text-gray-700">{b.total_destinatarios.toLocaleString('es')}</td>
-                  <td className="px-4 py-3">
-                    {b.entregados > 0
-                      ? <PctBar val={b.entregados} total={b.total_destinatarios} color="#3c527a" />
-                      : <span className="text-xs text-gray-400">—</span>
-                    }
-                  </td>
-                  <td className="px-4 py-3">
-                    {b.leidos > 0
-                      ? <PctBar val={b.leidos} total={b.entregados} color="#059669" />
-                      : <span className="text-xs text-gray-400">—</span>
-                    }
-                  </td>
                   <td className="px-4 py-3"><EstadoBadge estado={b.estado} /></td>
+                  <td className="px-4 py-3 text-sm text-gray-500 truncate max-w-[180px]">{b.template_nombre}</td>
+                  <td className="px-4 py-3 text-sm font-bold text-gray-700">
+                    {b.enviados > 0 ? b.enviados.toLocaleString('es') : b.total_destinatarios.toLocaleString('es')}
+                    {b.total_destinatarios > 0 && <span className="text-gray-400 font-normal"> / {b.total_destinatarios.toLocaleString('es')}</span>}
+                  </td>
+                  <td className="px-4 py-3">
+                    {b.enviados > 0 ? (
+                      <div className="flex items-center gap-1 text-xs font-semibold">
+                        <span className="text-blue-600">{b.enviados}</span>
+                        <span className="text-gray-300">→</span>
+                        <span className="text-green-600">{b.entregados}</span>
+                        <span className="text-gray-300">→</span>
+                        <span className="text-purple-600">{b.leidos}</span>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-gray-400">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-xs text-gray-400">
                     {new Date(b.created_at).toLocaleDateString('es', { day: '2-digit', month: 'short' })}
                   </td>
                   <td className="px-4 py-3">
                     {b.kapso_broadcast_id && (
                       <button
-                        onClick={() => handleSync(b)}
+                        onClick={e => { e.stopPropagation(); handleSync(b); }}
                         disabled={syncingId === b.id}
-                        title="Sincronizar métricas con Kapso"
+                        title="Sincronizar métricas"
                         className="text-xs text-[#3c527a] hover:text-[#2a3d5c] font-medium flex items-center gap-1 disabled:opacity-50"
                       >
                         <span className={syncingId === b.id ? 'animate-spin inline-block' : ''}>↻</span>
-                        {syncingId === b.id ? 'Sync...' : 'Actualizar'}
                       </button>
                     )}
                   </td>
