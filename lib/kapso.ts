@@ -6,8 +6,9 @@
 const KAPSO_BASE_PLATFORM = 'https://api.kapso.ai/platform/v1';
 const KAPSO_BASE_META     = 'https://api.kapso.ai/meta/whatsapp/v24.0';
 
-const KAPSO_API_KEY  = process.env.KAPSO_API_KEY!;
-const KAPSO_WABA_ID  = process.env.KAPSO_WABA_ID!;
+const KAPSO_API_KEY          = process.env.KAPSO_API_KEY!;
+const KAPSO_WABA_ID          = process.env.KAPSO_WABA_ID!;
+const KAPSO_PHONE_NUMBER_ID  = process.env.KAPSO_PHONE_NUMBER_ID!;
 
 function headers() {
   return {
@@ -127,6 +128,7 @@ export async function createBroadcast(name: string, templateName: string, langua
         name,
         template_name: templateName,
         template_language: language,
+        phone_number_id: KAPSO_PHONE_NUMBER_ID,
       },
     }),
   });
