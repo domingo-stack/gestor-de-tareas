@@ -781,21 +781,20 @@ function BroadcastDetail({ broadcastId, onBack }: { broadcastId: number; onBack:
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-5 gap-3 mb-6">
+      <div className="flex gap-3 mb-6">
         {[
-          { label: 'Destinatarios', value: b.total_destinatarios, sub: '', color: 'text-gray-700', bg: 'bg-gray-50', icon: '👥' },
-          { label: 'Enviados', value: b.enviados, sub: b.enviados === b.total_destinatarios ? '100%' : `${Math.round(b.enviados / b.total_destinatarios * 100)}%`, color: 'text-blue-700', bg: 'bg-blue-50', icon: '📤' },
-          { label: 'Entregados', value: b.entregados, sub: `${deliveryRate}% delivery`, color: 'text-green-700', bg: 'bg-green-50', icon: '✓' },
-          { label: 'Leídos', value: b.leidos, sub: `${readRate}% read rate`, color: 'text-purple-700', bg: 'bg-purple-50', icon: '👁' },
-          { label: 'Respondieron', value: b.respondidos, sub: `${responseRate}% response`, color: 'text-emerald-700', bg: 'bg-emerald-50', icon: '💬' },
+          { label: 'Destinatarios', value: b.total_destinatarios, sub: '', color: 'text-gray-700', bg: 'bg-gray-50' },
+          { label: 'Enviados', value: b.enviados, sub: b.enviados === b.total_destinatarios ? '100%' : `${Math.round(b.enviados / b.total_destinatarios * 100)}%`, color: 'text-blue-700', bg: 'bg-blue-50' },
+          { label: 'Entregados', value: b.entregados, sub: `${deliveryRate}%`, color: 'text-green-700', bg: 'bg-green-50' },
+          { label: 'Leídos', value: b.leidos, sub: `${readRate}%`, color: 'text-purple-700', bg: 'bg-purple-50' },
+          { label: 'Respondieron', value: b.respondidos, sub: `${responseRate}%`, color: 'text-emerald-700', bg: 'bg-emerald-50' },
         ].map(k => (
-          <div key={k.label} className={`${k.bg} rounded-xl p-4 border border-gray-100`}>
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-xs text-gray-500 font-medium">{k.label}</p>
-              <span className="text-sm">{k.icon}</span>
+          <div key={k.label} className={`${k.bg} rounded-xl px-4 py-3 border border-gray-100`}>
+            <p className="text-xs text-gray-500 font-medium mb-0.5">{k.label}</p>
+            <div className="flex items-baseline gap-1.5">
+              <p className={`text-lg font-black ${k.color}`}>{k.value.toLocaleString('es')}</p>
+              {k.sub && <p className="text-xs text-gray-400">{k.sub}</p>}
             </div>
-            <p className={`text-2xl font-black ${k.color}`}>{k.value.toLocaleString('es')}</p>
-            {k.sub && <p className="text-xs text-gray-400 mt-0.5">{k.sub}</p>}
           </div>
         ))}
       </div>

@@ -4,53 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 
-// Meta rates — default Peru (80% audiencia). Se actualizan desde comm_whatsapp_rates.
 const DEFAULT_RATES = { utility: 0.0200, marketing: 0.0703 };
-
-interface OverallStats {
-  total: number;
-  enviados: number;
-  entregados: number;
-  leidos: number;
-  fallidos: number;
-}
-
-interface CategoryStat {
-  categoria: 'utility' | 'marketing' | null;
-  enviados: number;
-  fallidos: number;
-}
-
-interface BroadcastStat {
-  id: number;
-  nombre: string;
-  created_at: string;
-  template_nombre: string;
-  template_categoria: 'utility' | 'marketing' | null;
-  total: number;
-  enviados: number;
-  entregados: number;
-  leidos: number;
-  fallidos: number;
-}
-
-interface AutomationRule {
-  regla_id: number;
-  regla_nombre: string;
-  template_categoria: 'utility' | 'marketing' | null;
-  enviados: number;
-  entregados: number;
-  leidos: number;
-  fallidos: number;
-}
-
-interface MetricsData {
-  overall: OverallStats;
-  by_category: CategoryStat[];
-  broadcasts: BroadcastStat[];
-  automations: OverallStats;
-  by_rule: AutomationRule[];
-}
 
 function pct(num: number, den: number) {
   if (!den) return '—';
@@ -61,62 +15,41 @@ function usd(amount: number) {
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function calcCost(sent: number, categoria: 'utility' | 'marketing' | null, rates = DEFAULT_RATES) {
-  return sent * (rates[categoria ?? 'utility']);
+type DateFilter = 'semana' | 'mes' | 'todo' | 'custom';
+
+interface BroadcastRow {
+  id: number;
+  nombre: string;
+  created_at: string;
+  estado: string;
+  total_destinatarios: number;
+  enviados: number;
+  entregados: number;
+  leidos: number;
+  kapso_broadcast_id: string | null;
+  comm_templates: {
+    nombre: string;
+    categoria: 'utility' | 'marketing' | null;
+  } | null;
 }
 
-function KpiCard({ label, value, sub, color }: {
-  label: string; value: string | number; sub?: string; color: string;
-}) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 p-5">
-      <p className={`text-2xl font-black ${color}`}>{value}</p>
-      <p className="text-xs font-semibold text-gray-500 mt-1">{label}</p>
-      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
-    </div>
-  );
-}
-
-function PctBar({ value, color }: { value: number; color: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 bg-gray-100 rounded-full h-1.5">
-        <div className={`h-1.5 rounded-full ${color}`} style={{ width: `${Math.min(value, 100)}%` }} />
-      </div>
-      <span className="text-xs text-gray-500 w-8 text-right">{Math.round(value)}%</span>
-    </div>
-  );
-}
-
-type DateFilter = 'semana' | 'mes' | 'custom';
-
-function getDateRange(filter: DateFilter, customFrom: string, customTo: string) {
-  const now = new Date();
-  if (filter === 'semana') {
-    const from = new Date(now);
-    from.setDate(now.getDate() - 7);
-    return { from: from.toISOString(), to: now.toISOString() };
-  }
-  if (filter === 'mes') {
-    const from = new Date(now.getFullYear(), now.getMonth(), 1);
-    return { from: from.toISOString(), to: now.toISOString() };
-  }
-  return {
-    from: customFrom ? new Date(customFrom).toISOString() : null,
-    to:   customTo   ? new Date(customTo + 'T23:59:59').toISOString() : null,
-  };
+interface AutoLogRow {
+  evento_tipo: string;
+  estado: string;
+  created_at: string;
 }
 
 export default function Metricas() {
   const { supabase } = useAuth();
-  const [data, setData] = useState<MetricsData | null>(null);
+  const [broadcasts, setBroadcasts] = useState<BroadcastRow[]>([]);
+  const [autoLogs, setAutoLogs] = useState<AutoLogRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dateFilter, setDateFilter] = useState<DateFilter>('mes');
+  const [syncing, setSyncing] = useState(false);
+  const [dateFilter, setDateFilter] = useState<DateFilter>('todo');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [rates, setRates] = useState(DEFAULT_RATES);
 
-  // Load weighted rates from DB (Peru = 80% of audience, used as default)
   useEffect(() => {
     if (!supabase) return;
     supabase
@@ -129,53 +62,126 @@ export default function Metricas() {
       });
   }, [supabase]);
 
-  const fetchMetrics = useCallback(async () => {
+  const getDateRange = useCallback(() => {
+    const now = new Date();
+    if (dateFilter === 'semana') {
+      const from = new Date(now);
+      from.setDate(now.getDate() - 7);
+      return { from: from.toISOString(), to: now.toISOString() };
+    }
+    if (dateFilter === 'mes') {
+      const from = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { from: from.toISOString(), to: now.toISOString() };
+    }
+    if (dateFilter === 'custom' && customFrom) {
+      return {
+        from: new Date(customFrom).toISOString(),
+        to: customTo ? new Date(customTo + 'T23:59:59').toISOString() : now.toISOString(),
+      };
+    }
+    return { from: null, to: null };
+  }, [dateFilter, customFrom, customTo]);
+
+  const fetchData = useCallback(async () => {
     if (!supabase) return;
     setLoading(true);
-    const { from, to } = getDateRange(dateFilter, customFrom, customTo);
-    const { data: result, error } = await supabase.rpc('get_comm_metrics', {
-      p_from: from ?? null,
-      p_to:   to   ?? null,
-    });
-    if (error) {
-      toast.error('Error al cargar métricas');
-      console.error(error);
-    } else {
-      setData(result as MetricsData);
-    }
-    setLoading(false);
-  }, [supabase, dateFilter, customFrom, customTo]);
+    const { from, to } = getDateRange();
 
-  useEffect(() => { fetchMetrics(); }, [fetchMetrics]);
+    // Fetch broadcasts
+    let bQuery = supabase
+      .from('comm_broadcasts')
+      .select('id, nombre, created_at, estado, total_destinatarios, enviados, entregados, leidos, kapso_broadcast_id, comm_templates(nombre, categoria)')
+      .order('created_at', { ascending: false });
+    if (from) bQuery = bQuery.gte('created_at', from);
+    if (to) bQuery = bQuery.lte('created_at', to);
+
+    // Fetch automation logs
+    let aQuery = supabase
+      .from('comm_message_logs')
+      .select('evento_tipo, estado, created_at')
+      .not('evento_tipo', 'is', null)
+      .neq('evento_tipo', 'auto_reply');
+    if (from) aQuery = aQuery.gte('created_at', from);
+    if (to) aQuery = aQuery.lte('created_at', to);
+
+    const [bRes, aRes] = await Promise.all([bQuery, aQuery.limit(5000)]);
+
+    if (bRes.error) toast.error('Error al cargar campañas');
+    if (aRes.error) toast.error('Error al cargar automatizaciones');
+
+    setBroadcasts((bRes.data ?? []) as BroadcastRow[]);
+    setAutoLogs((aRes.data ?? []) as AutoLogRow[]);
+    setLoading(false);
+  }, [supabase, getDateRange]);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Sync all broadcasts from Kapso
+  const handleSyncAll = async () => {
+    const withKapso = broadcasts.filter(b => b.kapso_broadcast_id);
+    if (withKapso.length === 0) { toast.error('No hay campañas con Kapso ID'); return; }
+    setSyncing(true);
+    let synced = 0;
+    for (const b of withKapso) {
+      try {
+        const res = await fetch('/api/communication/sync-broadcast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ broadcastId: b.id }),
+        });
+        if (res.ok) synced++;
+      } catch { /* continue */ }
+    }
+    toast.success(`${synced} campaña${synced !== 1 ? 's' : ''} sincronizada${synced !== 1 ? 's' : ''}`);
+    setSyncing(false);
+    fetchData();
+  };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20 text-gray-400 text-sm">
-        Cargando métricas...
-      </div>
-    );
+    return <div className="flex items-center justify-center py-20 text-gray-400 text-sm">Cargando métricas...</div>;
   }
 
-  if (!data) return null;
+  // ── Compute aggregates ──
+  const totalDest = broadcasts.reduce((s, b) => s + (b.total_destinatarios ?? 0), 0);
+  const totalEnviados = broadcasts.reduce((s, b) => s + (b.enviados ?? 0), 0);
+  const totalEntregados = broadcasts.reduce((s, b) => s + (b.entregados ?? 0), 0);
+  const totalLeidos = broadcasts.reduce((s, b) => s + (b.leidos ?? 0), 0);
 
-  const { overall, by_category = [], broadcasts = [], automations, by_rule = [] } = data;
+  const deliveryPct = totalEnviados > 0 ? Math.round(totalEntregados / totalEnviados * 100) : 0;
+  const readPct = totalEntregados > 0 ? Math.round(totalLeidos / totalEntregados * 100) : 0;
 
-  // Cost calculations (using Peru rates — 80% of audience)
-  const costByCategory = by_category.reduce((acc, c) => {
-    const cost = calcCost(c.enviados, c.categoria, rates);
-    acc[c.categoria ?? 'utility'] = cost;
-    return acc;
-  }, {} as Record<string, number>);
+  // Cost by category
+  let utilityCost = 0;
+  let marketingCost = 0;
+  broadcasts.forEach(b => {
+    const cat = b.comm_templates?.categoria ?? 'utility';
+    const cost = (b.enviados ?? 0) * rates[cat];
+    if (cat === 'marketing') marketingCost += cost;
+    else utilityCost += cost;
+  });
+  const totalCost = utilityCost + marketingCost;
 
-  const campaignSent = broadcasts.reduce((s, b) => s + (b.enviados ?? 0), 0);
-  const autoSent     = automations?.enviados ?? 0;
-  const totalCost    = Object.values(costByCategory).reduce((a, b) => a + b, 0);
-  const utilityCost  = costByCategory['utility']  ?? 0;
-  const marketingCost = costByCategory['marketing'] ?? 0;
+  // Automation stats
+  const autoTotal = autoLogs.filter(l => l.evento_tipo && l.evento_tipo !== 'auto_reply').length;
+  const autoSent = autoLogs.filter(l => l.estado === 'sent' || l.estado === 'delivered' || l.estado === 'read').length;
+  const autoFailed = autoLogs.filter(l => l.estado === 'failed').length;
 
-  const deliveryPct = overall.enviados ? (overall.entregados / overall.enviados) * 100 : 0;
-  const readPct     = overall.enviados ? (overall.leidos     / overall.enviados) * 100 : 0;
-  const failPct     = overall.total    ? (overall.fallidos   / overall.total)    * 100 : 0;
+  // Group automation by evento_tipo
+  const autoByType: Record<string, { total: number; sent: number; failed: number }> = {};
+  autoLogs.forEach(l => {
+    if (!l.evento_tipo || l.evento_tipo === 'auto_reply') return;
+    if (!autoByType[l.evento_tipo]) autoByType[l.evento_tipo] = { total: 0, sent: 0, failed: 0 };
+    autoByType[l.evento_tipo].total++;
+    if (l.estado === 'failed') autoByType[l.evento_tipo].failed++;
+    else autoByType[l.evento_tipo].sent++;
+  });
+
+  const autoTypeLabels: Record<string, string> = {
+    vencimiento: 'Vencimiento de plan',
+    registro_taller: 'Registro a taller',
+    plan_cancelado: 'Plan cancelado',
+    bienvenida: 'Bienvenida',
+  };
 
   return (
     <div className="space-y-6">
@@ -184,193 +190,176 @@ export default function Metricas() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold text-[#383838]">Métricas</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Rendimiento y costos de campañas y automatizaciones WhatsApp
-          </p>
+          <p className="text-sm text-gray-500 mt-0.5">Rendimiento y costos de campañas y automatizaciones WhatsApp</p>
         </div>
-        <button
-          onClick={fetchMetrics}
-          className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors flex-shrink-0"
-        >
-          <span>↻</span> Actualizar
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleSyncAll}
+            disabled={syncing}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#3c527a] border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            <span className={syncing ? 'animate-spin inline-block' : ''}>↻</span>
+            {syncing ? 'Sincronizando...' : 'Sync Kapso'}
+          </button>
+        </div>
       </div>
 
       {/* Date filters */}
-      <div className="flex items-center gap-3 flex-wrap">
-        {(['semana', 'mes'] as DateFilter[]).map(f => (
+      <div className="flex items-center gap-2 flex-wrap">
+        {(['semana', 'mes', 'todo'] as DateFilter[]).map(f => (
           <button
             key={f}
             onClick={() => setDateFilter(f)}
             className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              dateFilter === f
-                ? 'bg-[#3c527a] text-white'
-                : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
+              dateFilter === f ? 'bg-[#3c527a] text-white' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
             }`}
           >
-            {f === 'semana' ? 'Últimos 7 días' : 'Este mes'}
+            {f === 'semana' ? '7 días' : f === 'mes' ? 'Este mes' : 'Todo'}
           </button>
         ))}
         <button
           onClick={() => setDateFilter('custom')}
           className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-            dateFilter === 'custom'
-              ? 'bg-[#3c527a] text-white'
-              : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
+            dateFilter === 'custom' ? 'bg-[#3c527a] text-white' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
           }`}
         >
           Personalizado
         </button>
         {dateFilter === 'custom' && (
           <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={customFrom}
-              onChange={e => setCustomFrom(e.target.value)}
-              className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#3c527a] transition-colors"
-            />
+            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+              className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#3c527a]" />
             <span className="text-xs text-gray-400">→</span>
-            <input
-              type="date"
-              value={customTo}
-              onChange={e => setCustomTo(e.target.value)}
-              className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#3c527a] transition-colors"
-            />
+            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+              className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs outline-none focus:border-[#3c527a]" />
           </div>
         )}
       </div>
 
-      {/* ── PANEL DE COSTOS ─────────────────────────────── */}
-      <div className="bg-[#3c527a] rounded-2xl p-6 text-white">
-        <p className="text-xs font-bold uppercase tracking-wide text-blue-200 mb-4">Costo estimado total</p>
-        <div className="grid grid-cols-4 gap-4">
+      {/* ── COST PANEL ─────────────────────────────── */}
+      <div className="bg-[#3c527a] rounded-2xl p-5 text-white">
+        <p className="text-xs font-bold uppercase tracking-wide text-blue-200 mb-3">Costo estimado</p>
+        <div className="flex gap-4">
           <div>
-            <p className="text-3xl font-black">{usd(totalCost)}</p>
-            <p className="text-xs text-blue-200 mt-1">Total histórico</p>
+            <p className="text-2xl font-black">{usd(totalCost)}</p>
+            <p className="text-xs text-blue-200 mt-0.5">Total</p>
           </div>
-          <div className="bg-white/10 rounded-xl p-4">
-            <p className="text-xl font-black">{usd(utilityCost)}</p>
-            <p className="text-xs text-blue-200 mt-1">Utility</p>
-            <p className="text-xs text-blue-300 mt-0.5">@ ${rates.utility.toFixed(4)}/msg</p>
+          <div className="bg-white/10 rounded-xl px-4 py-3">
+            <p className="text-lg font-black">{usd(utilityCost)}</p>
+            <p className="text-xs text-blue-200">Utility @ ${rates.utility.toFixed(4)}</p>
           </div>
-          <div className="bg-white/10 rounded-xl p-4">
-            <p className="text-xl font-black">{usd(marketingCost)}</p>
-            <p className="text-xs text-blue-200 mt-1">Marketing</p>
-            <p className="text-xs text-blue-300 mt-0.5">@ ${rates.marketing.toFixed(4)}/msg</p>
+          <div className="bg-white/10 rounded-xl px-4 py-3">
+            <p className="text-lg font-black">{usd(marketingCost)}</p>
+            <p className="text-xs text-blue-200">Marketing @ ${rates.marketing.toFixed(4)}</p>
           </div>
-          <div className="bg-white/10 rounded-xl p-4">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs text-blue-200">Campañas</p>
-              <p className="text-sm font-bold">{campaignSent.toLocaleString()}</p>
-            </div>
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-blue-200">Automatizaciones</p>
-              <p className="text-sm font-bold">{autoSent.toLocaleString()}</p>
-            </div>
-            <div className="border-t border-white/20 mt-2 pt-2 flex items-center justify-between">
-              <p className="text-xs text-blue-200">Total enviados</p>
-              <p className="text-sm font-bold">{(campaignSent + autoSent).toLocaleString()}</p>
+          <div className="bg-white/10 rounded-xl px-4 py-3 ml-auto">
+            <div className="flex items-center justify-between gap-6">
+              <div>
+                <p className="text-xs text-blue-200">Campañas</p>
+                <p className="text-sm font-bold">{totalEnviados.toLocaleString('es')}</p>
+              </div>
+              <div>
+                <p className="text-xs text-blue-200">Automatizaciones</p>
+                <p className="text-sm font-bold">{autoSent.toLocaleString('es')}</p>
+              </div>
             </div>
           </div>
         </div>
-        <p className="text-xs text-blue-300 mt-3 italic">
-          * Tarifas Meta oficiales para Perú (80% de audiencia). Editables en Configuración → comm_whatsapp_rates.
-        </p>
       </div>
 
-      {/* ── KPIs GENERALES ──────────────────────────────── */}
+      {/* ── KPI SUMMARY ──────────────────────────────── */}
       <div>
-        <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Resumen general</p>
-        <div className="grid grid-cols-5 gap-3">
-          <KpiCard label="Total mensajes" value={overall.total?.toLocaleString() ?? 0} color="text-[#383838]" />
-          <KpiCard label="Enviados" value={overall.enviados?.toLocaleString() ?? 0} color="text-blue-600"
-            sub={pct(overall.enviados, overall.total)} />
-          <KpiCard label="Entregados" value={overall.entregados?.toLocaleString() ?? 0} color="text-green-600"
-            sub={pct(overall.entregados, overall.enviados)} />
-          <KpiCard label="Leídos" value={overall.leidos?.toLocaleString() ?? 0} color="text-purple-600"
-            sub={pct(overall.leidos, overall.enviados)} />
-          <KpiCard label="Fallidos" value={overall.fallidos?.toLocaleString() ?? 0} color="text-red-500"
-            sub={pct(overall.fallidos, overall.total)} />
+        <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Resumen campañas</p>
+        <div className="flex gap-3 mb-3">
+          {[
+            { label: 'Destinatarios', value: totalDest, color: 'text-gray-700', bg: 'bg-gray-50' },
+            { label: 'Enviados', value: totalEnviados, sub: pct(totalEnviados, totalDest), color: 'text-blue-700', bg: 'bg-blue-50' },
+            { label: 'Entregados', value: totalEntregados, sub: `${deliveryPct}%`, color: 'text-green-700', bg: 'bg-green-50' },
+            { label: 'Leídos', value: totalLeidos, sub: `${readPct}%`, color: 'text-purple-700', bg: 'bg-purple-50' },
+          ].map(k => (
+            <div key={k.label} className={`${k.bg} rounded-xl px-4 py-3 border border-gray-100`}>
+              <p className="text-xs text-gray-500 font-medium mb-0.5">{k.label}</p>
+              <div className="flex items-baseline gap-1.5">
+                <p className={`text-lg font-black ${k.color}`}>{k.value.toLocaleString('es')}</p>
+                {k.sub && <p className="text-xs text-gray-400">{k.sub}</p>}
+              </div>
+            </div>
+          ))}
         </div>
 
-        {/* Barras de tasas */}
-        {overall.total > 0 && (
-          <div className="mt-3 bg-white rounded-xl border border-gray-200 p-4 space-y-2.5">
-            <div className="flex items-center gap-4">
-              <span className="text-xs text-gray-500 w-24 flex-shrink-0">Tasa entrega</span>
-              <PctBar value={deliveryPct} color="bg-green-400" />
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="text-xs text-gray-500 w-24 flex-shrink-0">Tasa lectura</span>
-              <PctBar value={readPct} color="bg-purple-400" />
-            </div>
-            <div className="flex items-center gap-4">
-              <span className="text-xs text-gray-500 w-24 flex-shrink-0">Tasa fallo</span>
-              <PctBar value={failPct} color="bg-red-400" />
-            </div>
+        {/* Rate bars */}
+        {totalEnviados > 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-2">
+            {[
+              { label: 'Tasa entrega', val: deliveryPct, color: 'bg-green-400' },
+              { label: 'Tasa lectura', val: readPct, color: 'bg-purple-400' },
+            ].map(r => (
+              <div key={r.label} className="flex items-center gap-4">
+                <span className="text-xs text-gray-500 w-24 flex-shrink-0">{r.label}</span>
+                <div className="flex-1 bg-gray-100 rounded-full h-1.5">
+                  <div className={`h-1.5 rounded-full ${r.color}`} style={{ width: `${Math.min(r.val, 100)}%` }} />
+                </div>
+                <span className="text-xs text-gray-500 w-8 text-right">{r.val}%</span>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
-      {/* ── CAMPAÑAS ────────────────────────────────────── */}
+      {/* ── CAMPAIGNS TABLE ────────────────────────────────── */}
       <div>
-        <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Por campaña</p>
+        <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">
+          Por campaña ({broadcasts.length})
+        </p>
         {broadcasts.length === 0 ? (
           <div className="bg-white rounded-xl border border-gray-200 flex items-center justify-center py-10 text-gray-400 text-sm">
-            No hay campañas enviadas aún
+            No hay campañas en este período
           </div>
         ) : (
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <table className="w-full">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  {['Campaña', 'Template', 'Enviados', 'Entregados', 'Leídos', 'Fallidos', 'Costo est.', 'Fecha'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wide whitespace-nowrap">
-                      {h}
-                    </th>
+                  {['Campaña', 'Tipo', 'Enviados', 'Funnel', 'Costo', 'Fecha'].map(h => (
+                    <th key={h} className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {broadcasts.map(b => {
-                  const cost = calcCost(b.enviados ?? 0, b.template_categoria, rates);
+                  const cat = b.comm_templates?.categoria ?? 'utility';
+                  const cost = (b.enviados ?? 0) * rates[cat];
+                  const bDelivery = b.enviados > 0 ? Math.round((b.entregados ?? 0) / b.enviados * 100) : 0;
+                  const bRead = b.entregados > 0 ? Math.round((b.leidos ?? 0) / (b.entregados ?? 1) * 100) : 0;
                   return (
                     <tr key={b.id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3">
                         <p className="text-sm font-semibold text-[#383838]">{b.nombre}</p>
+                        <p className="text-xs text-gray-400 truncate max-w-[180px]">{b.comm_templates?.nombre}</p>
                       </td>
                       <td className="px-4 py-3">
-                        <p className="text-xs text-gray-600 truncate max-w-[140px]">{b.template_nombre}</p>
-                        {b.template_categoria && (
-                          <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
-                            b.template_categoria === 'utility'
-                              ? 'bg-blue-50 text-blue-600'
-                              : 'bg-purple-50 text-purple-600'
-                          }`}>
-                            {b.template_categoria}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-700">{(b.enviados ?? 0).toLocaleString()}</td>
-                      <td className="px-4 py-3">
-                        <p className="text-sm text-gray-700">{(b.entregados ?? 0).toLocaleString()}</p>
-                        <p className="text-xs text-gray-400">{pct(b.entregados, b.enviados)}</p>
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                          cat === 'marketing' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'
+                        }`}>{cat}</span>
                       </td>
                       <td className="px-4 py-3">
-                        <p className="text-sm text-gray-700">{(b.leidos ?? 0).toLocaleString()}</p>
-                        <p className="text-xs text-gray-400">{pct(b.leidos, b.enviados)}</p>
+                        <p className="text-sm font-bold text-gray-700">{(b.enviados ?? 0).toLocaleString('es')}</p>
+                        <p className="text-xs text-gray-400">de {(b.total_destinatarios ?? 0).toLocaleString('es')}</p>
                       </td>
                       <td className="px-4 py-3">
-                        <p className={`text-sm font-semibold ${b.fallidos > 0 ? 'text-red-500' : 'text-gray-400'}`}>
-                          {(b.fallidos ?? 0).toLocaleString()}
-                        </p>
-                        {b.fallidos > 0 && (
-                          <p className="text-xs text-red-400">{pct(b.fallidos, b.total)}</p>
-                        )}
+                        <div className="flex items-center gap-1 text-xs font-semibold">
+                          <span className="text-blue-600">{(b.enviados ?? 0)}</span>
+                          <span className="text-gray-300">→</span>
+                          <span className="text-green-600">{(b.entregados ?? 0)}</span>
+                          <span className="text-xs text-gray-400 font-normal">({bDelivery}%)</span>
+                          <span className="text-gray-300">→</span>
+                          <span className="text-purple-600">{(b.leidos ?? 0)}</span>
+                          <span className="text-xs text-gray-400 font-normal">({bRead}%)</span>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-sm font-semibold text-[#3c527a]">{usd(cost)}</td>
                       <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">
-                        {new Date(b.created_at).toLocaleDateString('es', { day: '2-digit', month: 'short', year: '2-digit' })}
+                        {new Date(b.created_at).toLocaleDateString('es', { day: '2-digit', month: 'short' })}
                       </td>
                     </tr>
                   );
@@ -381,75 +370,65 @@ export default function Metricas() {
         )}
       </div>
 
-      {/* ── AUTOMATIZACIONES ────────────────────────────── */}
+      {/* ── AUTOMATIONS ────────────────────────────── */}
       <div>
         <p className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Automatizaciones</p>
-        <div className="grid grid-cols-4 gap-3 mb-4">
-          <KpiCard label="Enviados" value={automations?.enviados?.toLocaleString() ?? 0} color="text-blue-600"
-            sub="automatizaciones" />
-          <KpiCard label="Entregados" value={automations?.entregados?.toLocaleString() ?? 0} color="text-green-600"
-            sub={pct(automations?.entregados, automations?.enviados)} />
-          <KpiCard label="Leídos" value={automations?.leidos?.toLocaleString() ?? 0} color="text-purple-600"
-            sub={pct(automations?.leidos, automations?.enviados)} />
-          <KpiCard label="Fallidos" value={automations?.fallidos?.toLocaleString() ?? 0} color="text-red-500"
-            sub={pct(automations?.fallidos, automations?.total)} />
+        <div className="flex gap-3 mb-4">
+          {[
+            { label: 'Total', value: autoTotal, color: 'text-gray-700', bg: 'bg-gray-50' },
+            { label: 'Enviados', value: autoSent, color: 'text-blue-700', bg: 'bg-blue-50' },
+            { label: 'Fallidos', value: autoFailed, color: 'text-red-600', bg: 'bg-red-50' },
+          ].map(k => (
+            <div key={k.label} className={`${k.bg} rounded-xl px-4 py-3 border border-gray-100`}>
+              <p className="text-xs text-gray-500 font-medium mb-0.5">{k.label}</p>
+              <p className={`text-lg font-black ${k.color}`}>{k.value.toLocaleString('es')}</p>
+            </div>
+          ))}
         </div>
 
-        {by_rule.length > 0 && (
+        {Object.keys(autoByType).length > 0 && (
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <table className="w-full">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  {['Regla', 'Tipo', 'Enviados', 'Entregados', 'Leídos', 'Fallidos', 'Costo est.'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wide">
-                      {h}
-                    </th>
+                  {['Tipo', 'Enviados', 'Fallidos', 'Tasa éxito'].map(h => (
+                    <th key={h} className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {by_rule.map(r => {
-                  const cost = calcCost(r.enviados ?? 0, r.template_categoria, rates);
-                  return (
-                    <tr key={r.regla_id} className="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3">
-                        <p className="text-sm font-semibold text-[#383838]">{r.regla_nombre}</p>
-                      </td>
-                      <td className="px-4 py-3">
-                        {r.template_categoria && (
-                          <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${
-                            r.template_categoria === 'utility'
-                              ? 'bg-blue-50 text-blue-600'
-                              : 'bg-purple-50 text-purple-600'
-                          }`}>
-                            {r.template_categoria}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-700">{(r.enviados ?? 0).toLocaleString()}</td>
-                      <td className="px-4 py-3">
-                        <p className="text-sm text-gray-700">{(r.entregados ?? 0).toLocaleString()}</p>
-                        <p className="text-xs text-gray-400">{pct(r.entregados, r.enviados)}</p>
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="text-sm text-gray-700">{(r.leidos ?? 0).toLocaleString()}</p>
-                        <p className="text-xs text-gray-400">{pct(r.leidos, r.enviados)}</p>
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className={`text-sm font-semibold ${r.fallidos > 0 ? 'text-red-500' : 'text-gray-400'}`}>
-                          {(r.fallidos ?? 0).toLocaleString()}
-                        </p>
-                      </td>
-                      <td className="px-4 py-3 text-sm font-semibold text-[#3c527a]">{usd(cost)}</td>
-                    </tr>
-                  );
-                })}
+                {Object.entries(autoByType).map(([tipo, stats]) => (
+                  <tr key={tipo} className="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3 text-sm font-semibold text-[#383838]">
+                      {autoTypeLabels[tipo] ?? tipo}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{stats.sent.toLocaleString('es')}</td>
+                    <td className="px-4 py-3">
+                      <span className={`text-sm font-semibold ${stats.failed > 0 ? 'text-red-500' : 'text-gray-400'}`}>
+                        {stats.failed.toLocaleString('es')}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 bg-gray-100 rounded-full h-1.5 max-w-[100px]">
+                          <div className="h-1.5 rounded-full bg-green-400" style={{ width: `${stats.total > 0 ? Math.round(stats.sent / stats.total * 100) : 0}%` }} />
+                        </div>
+                        <span className="text-xs text-gray-500">{pct(stats.sent, stats.total)}</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         )}
-      </div>
 
+        {Object.keys(autoByType).length === 0 && (
+          <div className="bg-white rounded-xl border border-gray-200 flex items-center justify-center py-10 text-gray-400 text-sm">
+            No hay automatizaciones en este período
+          </div>
+        )}
+      </div>
     </div>
   );
 }
