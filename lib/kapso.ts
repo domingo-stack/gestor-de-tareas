@@ -187,6 +187,33 @@ export async function addBroadcastRecipients(
 }
 
 /**
+ * Gets broadcast details/stats from Kapso.
+ */
+export async function getBroadcastStatus(broadcastId: string) {
+  const res = await fetch(
+    `${KAPSO_BASE_PLATFORM}/whatsapp/broadcasts/${broadcastId}`,
+    { method: 'GET', headers: headers() }
+  );
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Kapso get broadcast error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  return data.data as {
+    id: string;
+    name: string;
+    status: string;
+    total_recipients?: number;
+    sent?: number;
+    delivered?: number;
+    read?: number;
+    failed?: number;
+  };
+}
+
+/**
  * Sends a broadcast immediately.
  */
 export async function sendBroadcast(broadcastId: string) {

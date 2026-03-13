@@ -155,6 +155,7 @@ export async function POST(req: NextRequest) {
       .from('comm_broadcasts')
       .update({
         estado: 'completado',
+        kapso_broadcast_id: kapsoBroadcast.id,
         total_destinatarios: totalAdded,
         enviados: totalAdded,
         updated_at: new Date().toISOString(),

@@ -24,6 +24,7 @@ interface Broadcast {
   leidos: number;
   clickeados: number;
   estado: 'borrador' | 'enviando' | 'completado' | 'error';
+  kapso_broadcast_id: string | null;
   created_at: string;
   template_nombre?: string;
 }
@@ -639,6 +640,8 @@ export default function Campanias() {
   const [contactCount, setContactCount] = useState(0);
   const [sending, setSending] = useState(false);
 
+  const [syncingId, setSyncingId] = useState<number | null>(null);
+
   const [whatsappRates, setWhatsappRates] = useState<Record<string, { marketing: number; utility: number }> | undefined>(undefined);
   const [planIds, setPlanIds] = useState<string[]>([]);
   const [filters, setFilters] = useState<Filters>({
@@ -724,6 +727,43 @@ export default function Campanias() {
     return () => clearTimeout(t);
   }, [filters, view, supabase]);
 
+  const handleSync = async (b: Broadcast) => {
+    if (!b.kapso_broadcast_id) {
+      toast.error('Esta campaña no tiene ID de Kapso');
+      return;
+    }
+    setSyncingId(b.id);
+    try {
+      const res = await fetch('/api/communication/sync-broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ broadcastId: b.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? 'Error al sincronizar');
+        return;
+      }
+      // Update local state with synced values
+      setBroadcasts(prev => prev.map(x => x.id === b.id
+        ? {
+            ...x,
+            ...(data.update.estado && { estado: data.update.estado }),
+            ...(data.update.total_destinatarios != null && { total_destinatarios: data.update.total_destinatarios }),
+            ...(data.update.enviados != null && { enviados: data.update.enviados }),
+            ...(data.update.entregados != null && { entregados: data.update.entregados }),
+            ...(data.update.leidos != null && { leidos: data.update.leidos }),
+          }
+        : x
+      ));
+      toast.success('Métricas sincronizadas con Kapso');
+    } catch {
+      toast.error('Error de red');
+    } finally {
+      setSyncingId(null);
+    }
+  };
+
   const handleSend = async (campañaNombre: string) => {
     if (!supabase || !selectedTemplateId) return;
     setSending(true);
@@ -755,23 +795,35 @@ export default function Campanias() {
 
       if (!kapsoRes.ok) {
         const errData = await kapsoRes.json();
-        // Broadcast record created but Kapso failed — show warning
-        setBroadcasts(prev => [{ ...data, template_nombre: selectedTemplate?.nombre ?? '—' }, ...prev]);
+        // Re-fetch broadcast from DB to get actual estado (could be 'error')
+        const { data: freshBroadcast } = await supabase
+          .from('comm_broadcasts')
+          .select('*')
+          .eq('id', data.id)
+          .single();
+        setBroadcasts(prev => [{ ...(freshBroadcast ?? data), template_nombre: selectedTemplate?.nombre ?? '—' }, ...prev]);
         setView('list');
         toast.error(`Campaña creada pero error al enviar: ${errData.error}`);
         return;
       }
 
-      // Update local state with completado status
+      const kapsoData = await kapsoRes.json();
+
+      // Re-fetch broadcast from DB to get the final state set by the API route
+      const { data: finalBroadcast } = await supabase
+        .from('comm_broadcasts')
+        .select('*')
+        .eq('id', data.id)
+        .single();
+
       setBroadcasts(prev => [{
-        ...data,
-        estado: 'completado',
+        ...(finalBroadcast ?? { ...data, estado: 'completado', enviados: kapsoData.recipients_added ?? contactCount }),
         template_nombre: selectedTemplate?.nombre ?? '—',
       }, ...prev]);
       setView('list');
       setSelectedTemplateId(null);
       setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_id: 'todos', fecha_desde: '', fecha_hasta: '', cancelado_dias: '90', eventos_min: '', nivel: '', grado: '', colegio: '' });
-      toast.success(`Campaña enviada a ${contactCount.toLocaleString('es')} contactos`);
+      toast.success(`Campaña enviada a ${kapsoData.recipients_added?.toLocaleString('es') ?? contactCount.toLocaleString('es')} contactos`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Error al crear campaña';
       toast.error(msg);
@@ -835,7 +887,7 @@ export default function Campanias() {
           <table className="w-full">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                {['Campaña', 'Template', 'Dest.', 'Entregados', 'Leídos', 'Estado', 'Fecha'].map(h => (
+                {['Campaña', 'Template', 'Dest.', 'Entregados', 'Leídos', 'Estado', 'Fecha', ''].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -861,6 +913,19 @@ export default function Campanias() {
                   <td className="px-4 py-3"><EstadoBadge estado={b.estado} /></td>
                   <td className="px-4 py-3 text-xs text-gray-400">
                     {new Date(b.created_at).toLocaleDateString('es', { day: '2-digit', month: 'short' })}
+                  </td>
+                  <td className="px-4 py-3">
+                    {b.kapso_broadcast_id && (
+                      <button
+                        onClick={() => handleSync(b)}
+                        disabled={syncingId === b.id}
+                        title="Sincronizar métricas con Kapso"
+                        className="text-xs text-[#3c527a] hover:text-[#2a3d5c] font-medium flex items-center gap-1 disabled:opacity-50"
+                      >
+                        <span className={syncingId === b.id ? 'animate-spin inline-block' : ''}>↻</span>
+                        {syncingId === b.id ? 'Sync...' : 'Actualizar'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
