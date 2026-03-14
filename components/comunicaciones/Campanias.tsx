@@ -4,6 +4,13 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 
+interface TemplateButton {
+  type: 'URL' | 'PHONE_NUMBER' | 'QUICK_REPLY';
+  text: string;
+  url?: string;
+  phone_number?: string;
+}
+
 interface CommTemplate {
   id: number;
   nombre: string;
@@ -11,6 +18,7 @@ interface CommTemplate {
   variables: string[];
   categoria: 'utility' | 'marketing' | null;
   estado: string;
+  buttons: TemplateButton[];
 }
 
 interface Broadcast {
@@ -429,6 +437,18 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, 
             </p>
             <p className="text-right text-xs text-gray-400 mt-1">12:00 ✓✓</p>
           </div>
+          {/* Buttons preview */}
+          {(preview.buttons ?? []).filter(b => b.text.trim()).length > 0 && (
+            <div className="flex flex-col gap-1 mt-1 max-w-xs">
+              {preview.buttons.filter(b => b.text.trim()).map((btn, i) => (
+                <div key={i} className="bg-white rounded-lg px-3 py-2 text-center text-sm font-medium text-[#00a5f4] shadow-sm">
+                  {btn.type === 'URL' && '🔗 '}
+                  {btn.type === 'PHONE_NUMBER' && '📞 '}
+                  {btn.text}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -1060,7 +1080,7 @@ export default function Campanias() {
     setLoading(true);
     const [bRes, tRes, planRes, ratesRes] = await Promise.all([
       supabase.from('comm_broadcasts').select('*').order('created_at', { ascending: false }),
-      supabase.from('comm_templates').select('id, nombre, body, variables, categoria, estado').order('nombre'),
+      supabase.from('comm_templates').select('id, nombre, body, variables, categoria, estado, buttons').order('nombre'),
       supabase.from('growth_users').select('plan_id').not('plan_id', 'is', null).eq('plan_paid', true),
       supabase.from('comm_whatsapp_rates').select('country, marketing, utility'),
     ]);
