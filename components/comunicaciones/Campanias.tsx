@@ -23,8 +23,9 @@ interface Broadcast {
   entregados: number;
   leidos: number;
   clickeados: number;
-  estado: 'borrador' | 'enviando' | 'completado' | 'error';
+  estado: 'borrador' | 'enviando' | 'completado' | 'error' | 'programado';
   kapso_broadcast_id: string | null;
+  scheduled_at: string | null;
   created_at: string;
   template_nombre?: string;
 }
@@ -77,13 +78,14 @@ function getRate(
 }
 
 function EstadoBadge({ estado }: { estado: Broadcast['estado'] }) {
-  const map = {
+  const map: Record<string, { label: string; cls: string }> = {
     borrador:   { label: 'Borrador',   cls: 'bg-gray-100 text-gray-600' },
     enviando:   { label: 'Enviando…',  cls: 'bg-blue-100 text-blue-700' },
     completado: { label: 'Completado', cls: 'bg-green-100 text-green-700' },
     error:      { label: 'Error',      cls: 'bg-red-100 text-red-600' },
+    programado: { label: 'Programado', cls: 'bg-purple-100 text-purple-700' },
   };
-  const { label, cls } = map[estado];
+  const { label, cls } = map[estado] ?? map.borrador;
   return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${cls}`}>{label}</span>;
 }
 
@@ -488,26 +490,41 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, 
 // ──────────────────────────────────────────
 // Step 3: Confirm & Send
 // ──────────────────────────────────────────
-function Step3({ filters, template, contactCount, onSend, onBack, sending, rates }: {
+function Step3({ filters, template, contactCount, onSend, onBack, sending, rates, existingNames }: {
   filters: Filters;
   template: CommTemplate | undefined;
   contactCount: number;
-  onSend: (nombre: string) => void;
+  onSend: (nombre: string, scheduledAt?: string) => void;
   onBack: () => void;
   sending: boolean;
   rates?: Record<string, { marketing: number; utility: number }>;
+  existingNames: string[];
 }) {
   const [nombre, setNombre] = useState('');
   const [confirming, setConfirming] = useState(false);
+  const [scheduleMode, setScheduleMode] = useState<'now' | 'scheduled'>('now');
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('09:00');
   const costRate = getRate(filters.pais, template?.categoria ?? 'marketing', rates);
   const estimatedCost = (contactCount * costRate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  const nameTrimmed = nombre.trim();
+  const isDuplicate = existingNames.some(n => n.toLowerCase() === nameTrimmed.toLowerCase());
+  const nameError = !nameTrimmed ? 'El nombre es obligatorio' : isDuplicate ? 'Ya existe una campaña con este nombre' : '';
+  const scheduleError = scheduleMode === 'scheduled' && !scheduleDate ? 'Selecciona fecha' : '';
+  const canSend = !nameError && !scheduleError && !sending;
+
   const filterLabels: string[] = [];
   if (filters.pais !== 'Todos') filterLabels.push(`País: ${filters.pais}`);
-  if (filters.suscripcion !== 'todos') filterLabels.push(`Suscripción: ${filters.suscripcion}`);
+  if (filters.plan_tipo && filters.plan_tipo !== 'todos') filterLabels.push(`Plan: ${filters.plan_tipo}`);
   if (filters.fecha_desde) filterLabels.push(`Desde: ${filters.fecha_desde}`);
   if (filters.fecha_hasta) filterLabels.push(`Hasta: ${filters.fecha_hasta}`);
   if (filters.eventos_min) filterLabels.push(`Eventos mín: ${filters.eventos_min}`);
+
+  const getScheduledAt = () => {
+    if (scheduleMode === 'now') return undefined;
+    return new Date(`${scheduleDate}T${scheduleTime}:00`).toISOString();
+  };
 
   return (
     <div>
@@ -528,14 +545,67 @@ function Step3({ filters, template, contactCount, onSend, onBack, sending, rates
         {/* Campaign name */}
         <div>
           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
-            Nombre de la campaña
+            Nombre de la campaña <span className="text-red-400">*</span>
           </label>
           <input
             value={nombre}
             onChange={e => setNombre(e.target.value)}
-            placeholder={`Campaña ${new Date().toLocaleDateString('es', { month: 'long', year: 'numeric' })}`}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#3c527a] transition-colors"
+            placeholder="Ej: Renovación marzo — segmento 60 días"
+            className={`w-full border rounded-lg px-3 py-2.5 text-sm outline-none transition-colors ${
+              nameError && nameTrimmed ? 'border-red-300 focus:border-red-400' : 'border-gray-200 focus:border-[#3c527a]'
+            }`}
           />
+          {nameError && nameTrimmed && (
+            <p className="text-xs text-red-500 mt-1">{nameError}</p>
+          )}
+        </div>
+
+        {/* Schedule */}
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+            Envío
+          </label>
+          <div className="flex gap-2 mb-3">
+            <button
+              onClick={() => setScheduleMode('now')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                scheduleMode === 'now' ? 'bg-[#3c527a] text-white' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              Enviar ahora
+            </button>
+            <button
+              onClick={() => setScheduleMode('scheduled')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                scheduleMode === 'scheduled' ? 'bg-[#3c527a] text-white' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              Programar
+            </button>
+          </div>
+          {scheduleMode === 'scheduled' && (
+            <div className="flex gap-3 items-end">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Fecha</label>
+                <input
+                  type="date"
+                  value={scheduleDate}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={e => setScheduleDate(e.target.value)}
+                  className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3c527a] transition-colors"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Hora</label>
+                <input
+                  type="time"
+                  value={scheduleTime}
+                  onChange={e => setScheduleTime(e.target.value)}
+                  className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3c527a] transition-colors"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Summary cards */}
@@ -586,11 +656,14 @@ function Step3({ filters, template, contactCount, onSend, onBack, sending, rates
 
       <div className="flex justify-end">
         <button
-          onClick={() => setConfirming(true)}
-          disabled={sending}
+          onClick={() => { if (canSend) setConfirming(true); }}
+          disabled={!canSend}
           className="px-5 py-2.5 bg-[#ff8080] hover:bg-[#ff6b6b] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50"
         >
-          {sending ? 'Enviando...' : `Enviar a ${contactCount.toLocaleString('es')} contactos`}
+          {sending ? 'Enviando...' : scheduleMode === 'scheduled'
+            ? `Programar para ${scheduleDate || '...'} ${scheduleTime}`
+            : `Enviar a ${contactCount.toLocaleString('es')} contactos`
+          }
         </button>
       </div>
 
@@ -598,14 +671,18 @@ function Step3({ filters, template, contactCount, onSend, onBack, sending, rates
       {confirming && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl p-6">
-            <h3 className="text-lg font-bold text-[#383838] mb-2">¿Confirmar envío?</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Se enviarán <strong>{contactCount.toLocaleString('es')} mensajes</strong> usando el template{' '}
-              <strong>{template?.nombre}</strong>.
+            <h3 className="text-lg font-bold text-[#383838] mb-2">
+              {scheduleMode === 'scheduled' ? '¿Programar campaña?' : '¿Confirmar envío?'}
+            </h3>
+            <p className="text-sm text-gray-600 mb-2">
+              {scheduleMode === 'scheduled' ? (
+                <>Se programarán <strong>{contactCount.toLocaleString('es')} mensajes</strong> para el <strong>{scheduleDate} a las {scheduleTime}</strong>.</>
+              ) : (
+                <>Se enviarán <strong>{contactCount.toLocaleString('es')} mensajes</strong> ahora.</>
+              )}
             </p>
-            <p className="text-sm text-gray-500 mb-6">
-              Costo estimado: <strong>${estimatedCost} USD</strong>
-            </p>
+            <p className="text-sm text-gray-500 mb-1">Template: <strong>{template?.nombre}</strong></p>
+            <p className="text-sm text-gray-500 mb-6">Costo estimado: <strong>${estimatedCost} USD</strong></p>
             <div className="flex gap-3">
               <button
                 onClick={() => setConfirming(false)}
@@ -614,10 +691,10 @@ function Step3({ filters, template, contactCount, onSend, onBack, sending, rates
                 Cancelar
               </button>
               <button
-                onClick={() => { setConfirming(false); onSend(nombre || `Campaña ${new Date().toLocaleDateString('es')}`); }}
+                onClick={() => { setConfirming(false); onSend(nameTrimmed, getScheduledAt()); }}
                 className="flex-1 px-4 py-2 text-sm font-semibold bg-[#ff8080] hover:bg-[#ff6b6b] text-white rounded-lg transition-colors"
               >
-                Confirmar envío
+                {scheduleMode === 'scheduled' ? 'Programar' : 'Confirmar envío'}
               </button>
             </div>
           </div>
@@ -1087,10 +1164,12 @@ export default function Campanias() {
     }
   };
 
-  const handleSend = async (campañaNombre: string) => {
+  const handleSend = async (campañaNombre: string, scheduledAt?: string) => {
     if (!supabase || !selectedTemplateId) return;
     setSending(true);
     try {
+      const isScheduled = !!scheduledAt;
+
       const { data, error } = await supabase
         .from('comm_broadcasts')
         .insert({
@@ -1102,12 +1181,24 @@ export default function Campanias() {
           entregados: 0,
           leidos: 0,
           clickeados: 0,
-          estado: 'borrador',
+          estado: isScheduled ? 'programado' : 'borrador',
+          scheduled_at: isScheduled ? scheduledAt : null,
           created_at: new Date().toISOString(),
         })
         .select()
         .single();
       if (error) throw error;
+
+      // If scheduled, just save — don't send yet
+      if (isScheduled) {
+        setBroadcasts(prev => [{ ...data, template_nombre: selectedTemplate?.nombre ?? '—' }, ...prev]);
+        setView('list');
+        setSelectedTemplateId(null);
+        setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_id: 'todos', fecha_desde: '', fecha_hasta: '', cancelado_dias: '90', eventos_min: '', nivel: '', grado: '', colegio: '' });
+        const dt = new Date(scheduledAt);
+        toast.success(`Campaña programada para ${dt.toLocaleDateString('es')} a las ${dt.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`);
+        return;
+      }
 
       // Trigger Kapso broadcast (server-side API route)
       const kapsoRes = await fetch('/api/communication/send-broadcast', {
@@ -1251,7 +1342,14 @@ export default function Campanias() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-400">
-                    {new Date(b.created_at).toLocaleDateString('es', { day: '2-digit', month: 'short' })}
+                    {b.scheduled_at ? (
+                      <span className="text-purple-600" title={`Programado: ${new Date(b.scheduled_at).toLocaleString('es')}`}>
+                        🕐 {new Date(b.scheduled_at).toLocaleDateString('es', { day: '2-digit', month: 'short' })}{' '}
+                        {new Date(b.scheduled_at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    ) : (
+                      new Date(b.created_at).toLocaleDateString('es', { day: '2-digit', month: 'short' })
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {b.kapso_broadcast_id && (
@@ -1310,6 +1408,7 @@ export default function Campanias() {
           onBack={() => setView('step2')}
           sending={sending}
           rates={whatsappRates}
+          existingNames={broadcasts.map(b => b.nombre)}
         />
       )}
     </div>
