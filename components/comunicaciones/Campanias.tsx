@@ -1367,7 +1367,7 @@ export default function Campanias() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-400">
-                    {b.scheduled_at ? (
+                    {b.scheduled_at && b.estado === 'programado' ? (
                       <span className="text-purple-600" title={`Programado: ${new Date(b.scheduled_at).toLocaleString('es')}`}>
                         🕐 {new Date(b.scheduled_at).toLocaleDateString('es', { day: '2-digit', month: 'short' })}{' '}
                         {new Date(b.scheduled_at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}
