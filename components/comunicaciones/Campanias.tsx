@@ -604,26 +604,31 @@ function Step3({ filters, template, contactCount, onSend, onBack, sending, rates
             </button>
           </div>
           {scheduleMode === 'scheduled' && (
-            <div className="flex gap-3 items-end">
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">Fecha</label>
-                <input
-                  type="date"
-                  value={scheduleDate}
-                  min={new Date().toISOString().slice(0, 10)}
-                  onChange={e => setScheduleDate(e.target.value)}
-                  className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3c527a] transition-colors"
-                />
+            <div>
+              <div className="flex gap-3 items-end">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Fecha</label>
+                  <input
+                    type="date"
+                    value={scheduleDate}
+                    min={new Date().toISOString().slice(0, 10)}
+                    onChange={e => setScheduleDate(e.target.value)}
+                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3c527a] transition-colors"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Hora</label>
+                  <input
+                    type="time"
+                    value={scheduleTime}
+                    onChange={e => setScheduleTime(e.target.value)}
+                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3c527a] transition-colors"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">Hora</label>
-                <input
-                  type="time"
-                  value={scheduleTime}
-                  onChange={e => setScheduleTime(e.target.value)}
-                  className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3c527a] transition-colors"
-                />
-              </div>
+              <p className="text-xs text-gray-400 mt-1.5">
+                Configurado en zona horaria: <span className="font-semibold text-gray-500">{Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
+              </p>
             </div>
           )}
         </div>
