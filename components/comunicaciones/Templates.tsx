@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 
 type TemplateEstado = 'borrador' | 'revision' | 'aprobado' | 'rechazado';
 type TemplateCategoria = 'utility' | 'marketing' | null;
+type TemplateUso = 'campaña' | 'automatización' | 'ambos';
 type ButtonType = 'URL' | 'PHONE_NUMBER' | 'QUICK_REPLY';
 
 interface TemplateButton {
@@ -22,6 +23,7 @@ interface CommTemplate {
   variables: string[];
   buttons: TemplateButton[];
   categoria: TemplateCategoria;
+  uso: TemplateUso;
   submission_error: string | null;
   estado: TemplateEstado;
   kapso_template_id: string | null;
@@ -169,6 +171,20 @@ function CategoriaBadge({ categoria }: { categoria: TemplateCategoria }) {
   );
 }
 
+function UsoBadge({ uso }: { uso: TemplateUso }) {
+  const map: Record<TemplateUso, { label: string; className: string }> = {
+    'campaña':        { label: 'Campaña',        className: 'bg-orange-100 text-orange-700' },
+    'automatización': { label: 'Automatización', className: 'bg-emerald-100 text-emerald-700' },
+    'ambos':          { label: 'Ambos',          className: 'bg-gray-100 text-gray-600' },
+  };
+  const { label, className } = map[uso] ?? map['ambos'];
+  return (
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${className}`}>
+      {label}
+    </span>
+  );
+}
+
 // ──────────────────────────────────────────
 // Template Form Modal
 // ──────────────────────────────────────────
@@ -189,6 +205,7 @@ const EMPTY_BUTTON: TemplateButton = { type: 'URL', text: '', url: '' };
 function TemplateForm({ template, onClose, onSave }: TemplateFormProps) {
   const { supabase } = useAuth();
   const [nombre, setNombre] = useState(template?.nombre ?? '');
+  const [uso, setUso] = useState<TemplateUso>(template?.uso ?? 'ambos');
   const [body, setBody] = useState(template?.body ?? '');
   const [buttons, setButtons] = useState<TemplateButton[]>(template?.buttons ?? []);
   const [categoriaManual, setCategoriaManual] = useState<TemplateCategoria>(template?.categoria ?? null);
@@ -361,6 +378,7 @@ function TemplateForm({ template, onClose, onSave }: TemplateFormProps) {
         variables: vars,
         buttons: buttons.filter(b => b.text.trim()), // only save buttons with text
         categoria: categoriaManual ?? validation?.category ?? null,
+        uso,
         estado: submitToMeta ? 'revision' : (template?.estado === 'rechazado' ? 'borrador' : (template?.estado ?? 'borrador')),
         updated_at: new Date().toISOString(),
       };
@@ -447,6 +465,22 @@ function TemplateForm({ template, onClose, onSave }: TemplateFormProps) {
               placeholder="ej. Recordatorio de vencimiento 7 días"
               className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#3c527a] transition-colors"
             />
+          </div>
+
+          {/* Uso */}
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              Uso
+            </label>
+            <select
+              value={uso}
+              onChange={e => setUso(e.target.value as TemplateUso)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm outline-none focus:border-[#3c527a] transition-colors bg-white"
+            >
+              <option value="ambos">Ambos</option>
+              <option value="campaña">Campaña</option>
+              <option value="automatización">Automatización</option>
+            </select>
           </div>
 
           {/* Body */}
@@ -812,6 +846,7 @@ function TemplateDetail({ template, onClose, onEdit, onDelete }: {
           <div className="flex gap-2">
             <EstadoBadge estado={template.estado} />
             <CategoriaBadge categoria={template.categoria} />
+            <UsoBadge uso={template.uso} />
           </div>
 
           {template.submission_error && (
@@ -1088,6 +1123,7 @@ export default function Templates() {
   const [editingTemplate, setEditingTemplate] = useState<CommTemplate | null>(null);
   const [viewingTemplate, setViewingTemplate] = useState<CommTemplate | null>(null);
   const [filterEstado, setFilterEstado] = useState<string>('todos');
+  const [filterUso, setFilterUso] = useState<string>('todos');
   const [testingTemplate, setTestingTemplate] = useState<CommTemplate | null>(null);
   const [checkingId, setCheckingId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -1103,7 +1139,7 @@ export default function Templates() {
     if (error) {
       toast.error('Error al cargar templates');
     } else {
-      setTemplates(data ?? []);
+      setTemplates((data ?? []).map(t => ({ ...t, uso: t.uso ?? 'ambos' })));
     }
     setLoading(false);
   }, [supabase]);
@@ -1263,9 +1299,9 @@ export default function Templates() {
     }
   };
 
-  const filtered = filterEstado === 'todos'
-    ? templates
-    : templates.filter(t => t.estado === filterEstado);
+  const filtered = templates
+    .filter(t => filterEstado === 'todos' || t.estado === filterEstado)
+    .filter(t => filterUso === 'todos' || t.uso === filterUso);
 
   const counts = {
     total: templates.length,
@@ -1325,26 +1361,50 @@ export default function Templates() {
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-2 mb-4">
-        {[
-          { value: 'todos', label: `Todos (${counts.total})` },
-          { value: 'aprobado', label: 'Aprobados' },
-          { value: 'revision', label: 'En revisión' },
-          { value: 'borrador', label: 'Borradores' },
-          { value: 'rechazado', label: 'Rechazados' },
-        ].map(f => (
-          <button
-            key={f.value}
-            onClick={() => setFilterEstado(f.value)}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              filterEstado === f.value
-                ? 'bg-[#3c527a] text-white'
-                : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
-            }`}
-          >
-            {f.label}
-          </button>
-        ))}
+      <div className="flex items-center gap-4 mb-4 flex-wrap">
+        <div className="flex gap-2">
+          {[
+            { value: 'todos', label: `Todos (${counts.total})` },
+            { value: 'aprobado', label: 'Aprobados' },
+            { value: 'revision', label: 'En revisión' },
+            { value: 'borrador', label: 'Borradores' },
+            { value: 'rechazado', label: 'Rechazados' },
+          ].map(f => (
+            <button
+              key={f.value}
+              onClick={() => setFilterEstado(f.value)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                filterEstado === f.value
+                  ? 'bg-[#3c527a] text-white'
+                  : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        <span className="text-gray-300">|</span>
+
+        <div className="flex gap-2">
+          {[
+            { value: 'todos', label: 'Todos' },
+            { value: 'campaña', label: 'Campaña' },
+            { value: 'automatización', label: 'Automatización' },
+          ].map(f => (
+            <button
+              key={f.value}
+              onClick={() => setFilterUso(f.value)}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                filterUso === f.value
+                  ? 'bg-[#3c527a] text-white'
+                  : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Table */}
@@ -1369,10 +1429,11 @@ export default function Templates() {
           <table className="w-full" style={{ borderCollapse: 'collapse', tableLayout: 'fixed' }}>
             <colgroup>
               <col style={{ width: '40px' }} />
-              <col style={{ width: '28%' }} />
-              <col style={{ width: '12%' }} />
-              <col style={{ width: '17%' }} />
-              <col style={{ width: '17%' }} />
+              <col style={{ width: '24%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '14%' }} />
               <col style={{ width: '10%' }} />
               <col style={{ width: '12%' }} />
             </colgroup>
@@ -1386,7 +1447,7 @@ export default function Templates() {
                     className="w-3.5 h-3.5 rounded border-gray-300 text-[#3c527a] focus:ring-[#3c527a] cursor-pointer"
                   />
                 </th>
-                {['Nombre', 'Categoría', 'Variables', 'Estado', 'Actualizado', ''].map(h => (
+                {['Nombre', 'Categoría', 'Uso', 'Variables', 'Estado', 'Actualizado', ''].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wide">
                     {h}
                   </th>
@@ -1414,6 +1475,9 @@ export default function Templates() {
                   </td>
                   <td className="px-4 py-3">
                     <CategoriaBadge categoria={t.categoria} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <UsoBadge uso={t.uso} />
                   </td>
                   <td className="px-4 py-3">
                     {(t.variables ?? []).length > 0 ? (

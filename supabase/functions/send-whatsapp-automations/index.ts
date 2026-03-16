@@ -1,8 +1,8 @@
 // send-whatsapp-automations
 // Corre diariamente a las 9am UTC-5 (14:00 UTC) via pg_cron.
-// Para cada regla activa de tipo "vencimiento", busca usuarios cuyo
-// subscription_end coincide con hoy + timing_dias, y envía el template
-// via Kapso WhatsApp API.
+// Procesa dos tipos de reglas:
+//   1. "vencimiento" — usuarios pagados cuyo subscription_end coincide con hoy ± timing_dias
+//   2. "activacion"  — usuarios free/cancelados con alta actividad (eventos_valor >= umbral en periodo)
 //
 // Deploy: npx supabase functions deploy send-whatsapp-automations --no-verify-jwt
 // Cron SQL (ejecutar en Supabase SQL Editor):
@@ -83,6 +83,16 @@ function toTemplateName(nombre: string): string {
     .replace(/[^a-z0-9_]/g, '')
 }
 
+// ─── Types ──────────────────────────────────────────────────────
+interface SegmentoFiltros {
+  paises?: string[]
+  plan_ids?: string[]
+  audiencia?: 'free' | 'cancelled' | 'ambos'
+  eventos_min?: number
+  periodo_dias?: number
+  cooldown_dias?: number
+}
+
 // ─── Main ────────────────────────────────────────────────────────
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -104,73 +114,69 @@ serve(async (req: Request) => {
   const nowUTC5 = new Date(Date.now() - 5 * 60 * 60 * 1000)
   const today = nowUTC5.toISOString().split('T')[0] // YYYY-MM-DD
 
-  // ── 1. Cargar reglas activas de vencimiento ──────────────────
-  const { data: rules, error: rulesError } = await supabase
-    .from('comm_event_rules')
-    .select('id, nombre, timing_dias, timing_direction, template_id, comm_templates(nombre, estado, variables)')
-    .eq('evento_tipo', 'vencimiento')
-    .eq('activo', true)
-
-  if (rulesError || !rules || rules.length === 0) {
-    return new Response(JSON.stringify({ message: 'No active vencimiento rules', rules: 0 }), { status: 200 })
-  }
-
   // Cargar comm_variables para variables estáticas (link_renovacion, etc.)
   const { data: commVars } = await supabase.from('comm_variables').select('key, value')
   const staticVars: Record<string, string> = Object.fromEntries(
     (commVars ?? []).map((v: { key: string; value: string }) => [v.key, v.value])
   )
 
-  const summary: Record<string, { rule: string; found: number; sent: number; errors: number }> = {}
+  const summary: Record<string, { rule: string; tipo: string; found: number; sent: number; errors: number }> = {}
 
-  // ── 2. Para cada regla, buscar usuarios que vencen en timing_dias ──
-  for (const rule of rules) {
+  // ════════════════════════════════════════════════════════════════
+  // 1. VENCIMIENTO RULES
+  // ════════════════════════════════════════════════════════════════
+  const { data: vencRules } = await supabase
+    .from('comm_event_rules')
+    .select('id, nombre, timing_dias, timing_direction, template_id, segmento_filtros, comm_templates(nombre, estado, variables)')
+    .eq('evento_tipo', 'vencimiento')
+    .eq('activo', true)
+
+  for (const rule of vencRules ?? []) {
     const template = rule.comm_templates as { nombre: string; estado: string; variables: string[] } | null
-
     if (!template || template.estado !== 'aprobado') {
-      console.log(`[rule ${rule.id}] skipped — template not approved`)
+      console.log(`[venc ${rule.id}] skipped — template not approved`)
       continue
     }
 
-    // Calcular la fecha objetivo según timing_direction
-    // before: buscar usuarios que vencen en timing_dias días (hoy + N)
-    // after:  buscar usuarios que vencieron hace timing_dias días (hoy - N)
+    const segmento: SegmentoFiltros = rule.segmento_filtros ?? {}
+
+    // Calcular fecha objetivo
     const targetDate = new Date(nowUTC5)
     const offset = rule.timing_direction === 'after' ? -rule.timing_dias : rule.timing_dias
     targetDate.setDate(targetDate.getDate() + offset)
-    const targetDateStr = targetDate.toISOString().split('T')[0] // YYYY-MM-DD
+    const targetDateStr = targetDate.toISOString().split('T')[0]
 
-    // Buscar usuarios pagados, no cancelados, con WhatsApp válido,
-    // cuyo subscription_end cae en el día objetivo
-    const { data: users, error: usersError } = await supabase
+    let usersQuery = supabase
       .from('growth_users')
-      .select('id, phone, first_name, subscription_end, plan_id')
+      .select('id, phone, first_name, subscription_end, plan_id, country')
       .eq('plan_paid', true)
       .eq('cancelled', false)
       .eq('whatsapp_valido', true)
       .gte('subscription_end', `${targetDateStr}T00:00:00+00:00`)
-      .lt('subscription_end',  `${targetDateStr}T23:59:59+00:00`)
+      .lt('subscription_end', `${targetDateStr}T23:59:59+00:00`)
       .not('phone', 'is', null)
 
+    if (segmento.paises && segmento.paises.length > 0) {
+      usersQuery = usersQuery.in('country', segmento.paises)
+    }
+    if (segmento.plan_ids && segmento.plan_ids.length > 0) {
+      usersQuery = usersQuery.in('plan_id', segmento.plan_ids)
+    }
+
+    const { data: users, error: usersError } = await usersQuery
+
     if (usersError) {
-      console.error(`[rule ${rule.id}] users query error:`, usersError.message)
+      console.error(`[venc ${rule.id}] users query error:`, usersError.message)
       continue
     }
 
-    summary[rule.id] = {
-      rule: rule.nombre,
-      found: users?.length ?? 0,
-      sent: 0,
-      errors: 0,
-    }
-
+    summary[rule.id] = { rule: rule.nombre, tipo: 'vencimiento', found: users?.length ?? 0, sent: 0, errors: 0 }
     if (!users || users.length === 0) continue
 
-    // ── 3. Enviar mensaje a cada usuario ──────────────────────
     const templateName = toTemplateName(template.nombre)
 
     for (const user of users) {
-      // Verificar que no se le haya enviado ya este mensaje hoy (idempotencia)
+      // Idempotencia: no enviar si ya se envió hoy
       const { count } = await supabase
         .from('comm_message_logs')
         .select('id', { count: 'exact', head: true })
@@ -178,18 +184,14 @@ serve(async (req: Request) => {
         .eq('template_id', rule.template_id)
         .gte('created_at', `${today}T00:00:00+00:00`)
 
-      if ((count ?? 0) > 0) {
-        console.log(`[rule ${rule.id}] skipping user ${user.id} — already sent today`)
-        continue
-      }
+      if ((count ?? 0) > 0) continue
 
-      // Todos los valores disponibles — se filtra por lo que el template declara
       const allVars: Record<string, string> = {
         ...staticVars,
-        nombre:         user.first_name ?? '',
-        plan_id:        user.plan_id ?? '',
+        nombre: user.first_name ?? '',
+        plan_id: user.plan_id ?? '',
         dias_restantes: String(rule.timing_dias),
-        fecha_fin:      formatFecha(user.subscription_end),
+        fecha_fin: formatFecha(user.subscription_end),
       }
       const templateVarKeys: string[] = template.variables ?? []
       const variables = Object.fromEntries(
@@ -198,36 +200,150 @@ serve(async (req: Request) => {
 
       try {
         const kapsoId = await sendKapsoMessage(user.phone!, templateName, variables)
-
         await supabase.from('comm_message_logs').insert({
-          contact_id:       user.id,
-          template_id:      rule.template_id,
-          evento_tipo:      'vencimiento',
+          contact_id: user.id,
+          template_id: rule.template_id,
+          evento_tipo: 'vencimiento',
           kapso_message_id: kapsoId,
-          estado:           'sent',
-          created_at:       new Date().toISOString(),
+          estado: 'sent',
+          created_at: new Date().toISOString(),
         })
-
         summary[rule.id].sent++
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err)
-        console.error(`[rule ${rule.id}] send error for user ${user.id}:`, msg)
-
+        console.error(`[venc ${rule.id}] send error for ${user.id}:`, msg)
         await supabase.from('comm_message_logs').insert({
-          contact_id:       user.id,
-          template_id:      rule.template_id,
-          evento_tipo:      'vencimiento',
+          contact_id: user.id,
+          template_id: rule.template_id,
+          evento_tipo: 'vencimiento',
           kapso_message_id: null,
-          estado:           'failed',
-          error:            msg,
-          created_at:       new Date().toISOString(),
+          estado: 'failed',
+          error: msg,
+          created_at: new Date().toISOString(),
         })
-
         summary[rule.id].errors++
       }
     }
   }
 
+  // ════════════════════════════════════════════════════════════════
+  // 2. ACTIVACION RULES (comportamiento de usuarios free/cancelled)
+  // ════════════════════════════════════════════════════════════════
+  const { data: actRules } = await supabase
+    .from('comm_event_rules')
+    .select('id, nombre, template_id, segmento_filtros, comm_templates(nombre, estado, variables)')
+    .eq('evento_tipo', 'activacion')
+    .eq('activo', true)
+
+  for (const rule of actRules ?? []) {
+    const template = rule.comm_templates as { nombre: string; estado: string; variables: string[] } | null
+    if (!template || template.estado !== 'aprobado') {
+      console.log(`[act ${rule.id}] skipped — template not approved`)
+      continue
+    }
+
+    const seg: SegmentoFiltros = rule.segmento_filtros ?? {}
+    const eventosMin = seg.eventos_min ?? 10
+    const cooldownDias = seg.cooldown_dias ?? 30
+    const audiencia = seg.audiencia ?? 'ambos'
+
+    // Build user query based on audiencia
+    let usersQuery = supabase
+      .from('growth_users')
+      .select('id, phone, first_name, plan_id, country, eventos_valor')
+      .eq('whatsapp_valido', true)
+      .not('phone', 'is', null)
+      .gte('eventos_valor', eventosMin)
+
+    // Audiencia filter
+    if (audiencia === 'free') {
+      usersQuery = usersQuery.eq('plan_free', true)
+    } else if (audiencia === 'cancelled') {
+      usersQuery = usersQuery.eq('cancelled', true)
+    } else {
+      // ambos: free OR cancelled — use .or()
+      usersQuery = usersQuery.or('plan_free.eq.true,cancelled.eq.true')
+    }
+
+    // Country/plan filters
+    if (seg.paises && seg.paises.length > 0) {
+      usersQuery = usersQuery.in('country', seg.paises)
+    }
+    if (seg.plan_ids && seg.plan_ids.length > 0) {
+      usersQuery = usersQuery.in('plan_id', seg.plan_ids)
+    }
+
+    const { data: users, error: usersError } = await usersQuery
+
+    if (usersError) {
+      console.error(`[act ${rule.id}] users query error:`, usersError.message)
+      continue
+    }
+
+    summary[rule.id] = { rule: rule.nombre, tipo: 'activacion', found: users?.length ?? 0, sent: 0, errors: 0 }
+    if (!users || users.length === 0) continue
+
+    const templateName = toTemplateName(template.nombre)
+
+    // Cooldown cutoff date
+    const cooldownDate = new Date(nowUTC5)
+    cooldownDate.setDate(cooldownDate.getDate() - cooldownDias)
+    const cooldownDateStr = cooldownDate.toISOString()
+
+    for (const user of users) {
+      // Cooldown: skip if already sent this template within cooldown period
+      const { count } = await supabase
+        .from('comm_message_logs')
+        .select('id', { count: 'exact', head: true })
+        .eq('contact_id', user.id)
+        .eq('template_id', rule.template_id)
+        .eq('estado', 'sent')
+        .gte('created_at', cooldownDateStr)
+
+      if ((count ?? 0) > 0) continue
+
+      const allVars: Record<string, string> = {
+        ...staticVars,
+        nombre: user.first_name ?? '',
+        plan_id: user.plan_id ?? '',
+        eventos: String(user.eventos_valor ?? 0),
+      }
+      const templateVarKeys: string[] = template.variables ?? []
+      const variables = Object.fromEntries(
+        templateVarKeys.map(key => [key, allVars[key] ?? ''])
+      )
+
+      try {
+        const kapsoId = await sendKapsoMessage(user.phone!, templateName, variables)
+        await supabase.from('comm_message_logs').insert({
+          contact_id: user.id,
+          template_id: rule.template_id,
+          evento_tipo: 'activacion',
+          kapso_message_id: kapsoId,
+          estado: 'sent',
+          created_at: new Date().toISOString(),
+        })
+        summary[rule.id].sent++
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`[act ${rule.id}] send error for ${user.id}:`, msg)
+        await supabase.from('comm_message_logs').insert({
+          contact_id: user.id,
+          template_id: rule.template_id,
+          evento_tipo: 'activacion',
+          kapso_message_id: null,
+          estado: 'failed',
+          error: msg,
+          created_at: new Date().toISOString(),
+        })
+        summary[rule.id].errors++
+      }
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // SUMMARY
+  // ════════════════════════════════════════════════════════════════
   const totalSent = Object.values(summary).reduce((s, r) => s + r.sent, 0)
   const totalErrors = Object.values(summary).reduce((s, r) => s + r.errors, 0)
 

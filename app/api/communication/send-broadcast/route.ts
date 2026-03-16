@@ -17,11 +17,17 @@ function getSupabase() {
 interface Filters {
   pais: string;
   plan_tipo: string;
-  plan_id: string;
+  plan_id?: string;       // legacy single plan (backward compat)
+  plan_ids?: string[];    // new multiselect
   fecha_desde: string;
   fecha_hasta: string;
-  cancelado_dias: string;
+  registro_desde?: string;   // registration date range for free users
+  registro_hasta?: string;
+  cancelado_dias?: string;   // legacy (backward compat)
+  cancelado_desde?: string;  // new range: min days since cancellation
+  cancelado_hasta?: string;  // new range: max days since cancellation
   eventos_min: string;
+  eventos_max?: string;      // new: upper bound for eventos_valor
   nivel: string;
   grado: string;
   colegio: string;
@@ -72,21 +78,42 @@ export async function POST(req: NextRequest) {
 
   if (filters.pais && filters.pais !== 'Todos')       query = query.eq('country', filters.pais);
   if (filters.plan_tipo === 'paid')                    query = query.eq('plan_paid', true).eq('cancelled', false);
-  if (filters.plan_tipo === 'free')                    query = query.eq('plan_free', true);
+  if (filters.plan_tipo === 'free') {
+    query = query.eq('plan_free', true);
+    if (filters.registro_desde)                        query = query.gte('created_date', filters.registro_desde);
+    if (filters.registro_hasta)                        query = query.lte('created_date', `${filters.registro_hasta}T23:59:59`);
+  }
   if (filters.plan_tipo === 'cancelled') {
     query = query.eq('cancelled', true);
-    if (filters.cancelado_dias) {
+    // New range filters (cancelado_desde = min days, cancelado_hasta = max days)
+    if (filters.cancelado_desde) {
+      const hasta = new Date();
+      hasta.setDate(hasta.getDate() - parseInt(filters.cancelado_desde));
+      query = query.lte('subscription_end', hasta.toISOString());
+    }
+    if (filters.cancelado_hasta) {
+      const desde = new Date();
+      desde.setDate(desde.getDate() - parseInt(filters.cancelado_hasta));
+      query = query.gte('subscription_end', desde.toISOString());
+    }
+    // Legacy fallback
+    if (!filters.cancelado_desde && !filters.cancelado_hasta && filters.cancelado_dias) {
       const since = new Date();
       since.setDate(since.getDate() - parseInt(filters.cancelado_dias));
       query = query.gte('subscription_end', since.toISOString());
     }
   }
-  if (filters.plan_id && filters.plan_id !== 'todos') query = query.eq('plan_id', filters.plan_id);
+  // Support new plan_ids array and legacy plan_id string
+  const selectedPlanIds = filters.plan_ids?.length ? filters.plan_ids
+    : (filters.plan_id && filters.plan_id !== 'todos') ? [filters.plan_id]
+    : [];
+  if (selectedPlanIds.length > 0)                    query = query.in('plan_id', selectedPlanIds);
   if (filters.plan_tipo === 'paid') {
     if (filters.fecha_desde)                           query = query.gte('subscription_end', filters.fecha_desde);
     if (filters.fecha_hasta)                           query = query.lte('subscription_end', `${filters.fecha_hasta}T23:59:59`);
   }
   if (filters.eventos_min)                             query = query.gte('eventos_valor', parseInt(filters.eventos_min));
+  if (filters.eventos_max)                             query = query.lte('eventos_valor', parseInt(filters.eventos_max));
   if (filters.nivel)                                   query = query.eq('nivel', filters.nivel);
   if (filters.grado)                                   query = query.ilike('grado', `%${filters.grado}%`);
   if (filters.colegio)                                 query = query.ilike('colegio', `%${filters.colegio}%`);

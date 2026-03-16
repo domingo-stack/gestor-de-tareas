@@ -41,11 +41,15 @@ interface Broadcast {
 interface Filters {
   pais: string;
   plan_tipo: string;       // 'todos' | 'free' | 'paid' | 'cancelled'
-  plan_id: string;         // plan_id exacto o 'todos'
-  fecha_desde: string;     // solo para pagados
-  fecha_hasta: string;     // solo para pagados
-  cancelado_dias: string;  // solo para cancelados: '30'|'60'|'90'|'180'|'365'
+  plan_ids: string[];      // plan_ids seleccionados (vacío = todos)
+  fecha_desde: string;     // solo para pagados (vencimiento)
+  fecha_hasta: string;     // solo para pagados (vencimiento)
+  registro_desde: string;  // solo para gratuitos: fecha de registro desde
+  registro_hasta: string;  // solo para gratuitos: fecha de registro hasta
+  cancelado_desde: string; // solo para cancelados: días mínimo desde cancelación
+  cancelado_hasta: string; // solo para cancelados: días máximo desde cancelación
   eventos_min: string;
+  eventos_max: string;
   nivel: string;
   grado: string;
   colegio: string;
@@ -58,13 +62,7 @@ const PLAN_TIPOS = [
   { value: 'free',      label: 'Gratuito' },
   { value: 'cancelled', label: 'Cancelado' },
 ];
-const CANCELADO_DIAS = [
-  { value: '30',  label: 'Últimos 30 días' },
-  { value: '60',  label: 'Últimos 60 días' },
-  { value: '90',  label: 'Últimos 90 días' },
-  { value: '180', label: 'Últimos 180 días' },
-  { value: '365', label: 'Último año' },
-];
+// removed CANCELADO_DIAS — now using range inputs
 
 // Fallback rates if DB table not loaded yet — Peru (80% de audiencia)
 const FALLBACK_RATES: Record<string, { marketing: number; utility: number }> = {
@@ -202,7 +200,7 @@ function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, pla
         {/* Tipo suscripción */}
         <div>
           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Tipo de suscripción</label>
-          <select value={filters.plan_tipo} onChange={e => setFilters({ ...filters, plan_tipo: e.target.value, plan_id: 'todos' })}
+          <select value={filters.plan_tipo} onChange={e => setFilters({ ...filters, plan_tipo: e.target.value, plan_ids: [] })}
             className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors">
             {PLAN_TIPOS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
@@ -212,11 +210,35 @@ function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, pla
         {filters.plan_tipo === 'paid' && (
           <div className="col-span-2">
             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Plan específico</label>
-            <select value={filters.plan_id} onChange={e => setFilters({ ...filters, plan_id: e.target.value })}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors">
-              <option value="todos">Todos los planes</option>
-              {planIds.map(id => <option key={id} value={id}>{id}</option>)}
-            </select>
+            <div className="border border-gray-200 rounded-lg p-2.5 bg-white">
+              <label className="flex items-center gap-2 text-sm text-gray-700 mb-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={filters.plan_ids.length === 0}
+                  onChange={() => setFilters({ ...filters, plan_ids: [] })}
+                  className="rounded border-gray-300 text-[#3c527a] focus:ring-[#3c527a] h-3.5 w-3.5"
+                />
+                Todos los planes
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
+                {planIds.map(id => (
+                  <label key={id} className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={filters.plan_ids.includes(id)}
+                      onChange={e => {
+                        const next = e.target.checked
+                          ? [...filters.plan_ids, id]
+                          : filters.plan_ids.filter(p => p !== id);
+                        setFilters({ ...filters, plan_ids: next });
+                      }}
+                      className="rounded border-gray-300 text-[#3c527a] focus:ring-[#3c527a] h-3.5 w-3.5"
+                    />
+                    {id}
+                  </label>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 
@@ -240,28 +262,65 @@ function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, pla
           </div>
         </>)}
 
-        {/* Ventana de tiempo — solo para cancelados */}
-        {filters.plan_tipo === 'cancelled' && (
-          <div className="col-span-2">
+        {/* Fechas de registro — solo para gratuitos */}
+        {filters.plan_tipo === 'free' && (<>
+          <div>
             <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
-              Cancelaron en los...
-              <InfoTip text="Filtra usuarios cuya suscripción venció dentro de este período. Más reciente = más probabilidad de reactivación." />
+              Registrado desde
+              <InfoTip text="Filtra usuarios gratuitos que se registraron a partir de esta fecha. Ej: 2026-01-01 para los registrados este año." />
             </label>
-            <select value={filters.cancelado_dias} onChange={e => setFilters({ ...filters, cancelado_dias: e.target.value })}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors">
-              {CANCELADO_DIAS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
-            </select>
+            <input type="date" value={filters.registro_desde} onChange={e => setFilters({ ...filters, registro_desde: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
           </div>
-        )}
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              Registrado hasta
+              <InfoTip text="Combínalo con 'Registrado desde' para definir un rango. Ej: del 1 al 31 de enero = todos los que se registraron en enero." />
+            </label>
+            <input type="date" value={filters.registro_hasta} onChange={e => setFilters({ ...filters, registro_hasta: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
+          </div>
+        </>)}
 
-        {/* Eventos de valor */}
-        <div className="col-span-2">
+        {/* Ventana de tiempo — solo para cancelados */}
+        {filters.plan_tipo === 'cancelled' && (<>
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              Cancelaron hace (desde)
+              <InfoTip text="Mínimo de días desde que cancelaron. Ej: 30 filtra usuarios que cancelaron hace al menos 30 días." />
+            </label>
+            <input type="number" min={0} placeholder="Ej: 30"
+              value={filters.cancelado_desde} onChange={e => setFilters({ ...filters, cancelado_desde: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              Cancelaron hace (hasta)
+              <InfoTip text="Máximo de días desde que cancelaron. Ej: 60 filtra usuarios que cancelaron hace máximo 60 días. Combinado con 'desde' crea un rango." />
+            </label>
+            <input type="number" min={0} placeholder="Ej: 60"
+              value={filters.cancelado_hasta} onChange={e => setFilters({ ...filters, cancelado_hasta: e.target.value })}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
+          </div>
+        </>)}
+
+        {/* Eventos de valor (rango) */}
+        <div>
           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
-            Eventos de valor mínimos
-            <InfoTip text="Talleres u otras actividades completadas por el usuario en Califica. Ej: poner 3 filtra solo usuarios que han participado en al menos 3 actividades. Útil para campañas a usuarios activos." />
+            Eventos de valor (mín)
+            <InfoTip text="Mínimo de eventos de valor. Ej: 15 filtra usuarios con al menos 15 actividades completadas." />
           </label>
-          <input type="number" min={0} placeholder="Sin filtro — incluye todos los usuarios"
+          <input type="number" min={0} placeholder="Sin mínimo"
             value={filters.eventos_min} onChange={e => setFilters({ ...filters, eventos_min: e.target.value })}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+            Eventos de valor (máx)
+            <InfoTip text="Máximo de eventos de valor. Ej: 25 excluye usuarios con más de 25 actividades. Combinado con mín, crea un rango preciso." />
+          </label>
+          <input type="number" min={0} placeholder="Sin máximo"
+            value={filters.eventos_max} onChange={e => setFilters({ ...filters, eventos_max: e.target.value })}
             className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
         </div>
       </div>
@@ -537,9 +596,23 @@ function Step3({ filters, template, contactCount, onSend, onBack, sending, rates
   const filterLabels: string[] = [];
   if (filters.pais !== 'Todos') filterLabels.push(`País: ${filters.pais}`);
   if (filters.plan_tipo && filters.plan_tipo !== 'todos') filterLabels.push(`Plan: ${filters.plan_tipo}`);
-  if (filters.fecha_desde) filterLabels.push(`Desde: ${filters.fecha_desde}`);
-  if (filters.fecha_hasta) filterLabels.push(`Hasta: ${filters.fecha_hasta}`);
-  if (filters.eventos_min) filterLabels.push(`Eventos mín: ${filters.eventos_min}`);
+  if (filters.plan_ids.length > 0) filterLabels.push(`Planes: ${filters.plan_ids.join(', ')}`);
+  if (filters.fecha_desde) filterLabels.push(`Vence desde: ${filters.fecha_desde}`);
+  if (filters.fecha_hasta) filterLabels.push(`Vence hasta: ${filters.fecha_hasta}`);
+  if (filters.registro_desde) filterLabels.push(`Registro desde: ${filters.registro_desde}`);
+  if (filters.registro_hasta) filterLabels.push(`Registro hasta: ${filters.registro_hasta}`);
+  if (filters.cancelado_desde || filters.cancelado_hasta) {
+    const parts = [];
+    if (filters.cancelado_desde) parts.push(`${filters.cancelado_desde}d`);
+    if (filters.cancelado_hasta) parts.push(`${filters.cancelado_hasta}d`);
+    filterLabels.push(`Cancel. ${parts.join(' – ')}`);
+  }
+  if (filters.eventos_min || filters.eventos_max) {
+    const parts = [];
+    if (filters.eventos_min) parts.push(`mín ${filters.eventos_min}`);
+    if (filters.eventos_max) parts.push(`máx ${filters.eventos_max}`);
+    filterLabels.push(`Eventos: ${parts.join(', ')}`);
+  }
 
   const getScheduledAt = () => {
     if (scheduleMode === 'now') return undefined;
@@ -852,9 +925,24 @@ function BroadcastDetail({ broadcastId, onBack }: { broadcastId: number; onBack:
   const sf = b.segmento_filtros ?? {};
   if (sf.pais && sf.pais !== 'Todos') filterLabels.push(`País: ${sf.pais}`);
   if (sf.plan_tipo && sf.plan_tipo !== 'todos') filterLabels.push(`Plan: ${sf.plan_tipo}`);
-  if (sf.fecha_desde) filterLabels.push(`Desde: ${sf.fecha_desde}`);
-  if (sf.fecha_hasta) filterLabels.push(`Hasta: ${sf.fecha_hasta}`);
+  if (sf.plan_ids?.length) filterLabels.push(`Planes: ${(sf.plan_ids as string[]).join(', ')}`);
+  if (sf.fecha_desde) filterLabels.push(`Vence desde: ${sf.fecha_desde}`);
+  if (sf.fecha_hasta) filterLabels.push(`Vence hasta: ${sf.fecha_hasta}`);
+  if (sf.registro_desde) filterLabels.push(`Registro desde: ${sf.registro_desde}`);
+  if (sf.registro_hasta) filterLabels.push(`Registro hasta: ${sf.registro_hasta}`);
+  if (sf.cancelado_desde || sf.cancelado_hasta) {
+    const parts = [];
+    if (sf.cancelado_desde) parts.push(`${sf.cancelado_desde}d`);
+    if (sf.cancelado_hasta) parts.push(`${sf.cancelado_hasta}d`);
+    filterLabels.push(`Cancel. ${parts.join(' – ')}`);
+  }
   if (sf.cancelado_dias) filterLabels.push(`Cancel. ${sf.cancelado_dias}d`);
+  if (sf.eventos_min || sf.eventos_max) {
+    const parts = [];
+    if (sf.eventos_min) parts.push(`mín ${sf.eventos_min}`);
+    if (sf.eventos_max) parts.push(`máx ${sf.eventos_max}`);
+    filterLabels.push(`Eventos: ${parts.join(', ')}`);
+  }
 
   return (
     <div>
@@ -1070,14 +1158,15 @@ export default function Campanias() {
   const [whatsappRates, setWhatsappRates] = useState<Record<string, { marketing: number; utility: number }> | undefined>(undefined);
   const [planIds, setPlanIds] = useState<string[]>([]);
   const [filters, setFilters] = useState<Filters>({
-    pais: 'Todos', plan_tipo: 'todos', plan_id: 'todos',
-    fecha_desde: '', fecha_hasta: '', cancelado_dias: '90',
-    eventos_min: '', nivel: '', grado: '', colegio: '',
+    pais: 'Todos', plan_tipo: 'todos', plan_ids: [],
+    fecha_desde: '', fecha_hasta: '', registro_desde: '', registro_hasta: '',
+    cancelado_desde: '', cancelado_hasta: '',
+    eventos_min: '', eventos_max: '', nivel: '', grado: '', colegio: '',
   });
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
 
   const selectedTemplate = templates.find(t => t.id === selectedTemplateId);
-  const approvedTemplates = useMemo(() => templates.filter(t => t.estado === 'aprobado'), [templates]);
+  const approvedTemplates = useMemo(() => templates.filter(t => t.estado === 'aprobado' && ((t as { uso?: string }).uso === 'campaña' || (t as { uso?: string }).uso === 'ambos' || !(t as { uso?: string }).uso)), [templates]);
 
   // Fetch initial data
   const fetchData = useCallback(async () => {
@@ -1085,7 +1174,7 @@ export default function Campanias() {
     setLoading(true);
     const [bRes, tRes, planRes, ratesRes] = await Promise.all([
       supabase.from('comm_broadcasts').select('*').order('created_at', { ascending: false }),
-      supabase.from('comm_templates').select('id, nombre, body, variables, categoria, estado, buttons').order('nombre'),
+      supabase.from('comm_templates').select('id, nombre, body, variables, categoria, estado, buttons, uso').order('nombre'),
       supabase.from('growth_users').select('plan_id').not('plan_id', 'is', null).eq('plan_paid', true),
       supabase.from('comm_whatsapp_rates').select('country, marketing, utility'),
     ]);
@@ -1126,21 +1215,31 @@ export default function Campanias() {
       let q = supabase.from('growth_users').select('id', { count: 'exact', head: true }).eq('whatsapp_valido', true);
       if (filters.pais !== 'Todos')          q = q.eq('country', filters.pais);
       if (filters.plan_tipo === 'paid')      q = q.eq('plan_paid', true).eq('cancelled', false);
-      if (filters.plan_tipo === 'free')      q = q.eq('plan_free', true);
+      if (filters.plan_tipo === 'free') {
+        q = q.eq('plan_free', true);
+        if (filters.registro_desde) q = q.gte('created_date', filters.registro_desde);
+        if (filters.registro_hasta) q = q.lte('created_date', `${filters.registro_hasta}T23:59:59`);
+      }
       if (filters.plan_tipo === 'cancelled') {
         q = q.eq('cancelled', true);
-        if (filters.cancelado_dias) {
-          const since = new Date();
-          since.setDate(since.getDate() - parseInt(filters.cancelado_dias));
-          q = q.gte('subscription_end', since.toISOString());
+        if (filters.cancelado_desde) {
+          const hasta = new Date();
+          hasta.setDate(hasta.getDate() - parseInt(filters.cancelado_desde));
+          q = q.lte('subscription_end', hasta.toISOString());
+        }
+        if (filters.cancelado_hasta) {
+          const desde = new Date();
+          desde.setDate(desde.getDate() - parseInt(filters.cancelado_hasta));
+          q = q.gte('subscription_end', desde.toISOString());
         }
       }
-      if (filters.plan_id !== 'todos')       q = q.eq('plan_id', filters.plan_id);
+      if (filters.plan_ids.length > 0)        q = q.in('plan_id', filters.plan_ids);
       if (filters.plan_tipo === 'paid') {
         if (filters.fecha_desde)             q = q.gte('subscription_end', filters.fecha_desde);
         if (filters.fecha_hasta)             q = q.lte('subscription_end', `${filters.fecha_hasta}T23:59:59`);
       }
       if (filters.eventos_min)               q = q.gte('eventos_valor', parseInt(filters.eventos_min));
+      if (filters.eventos_max)               q = q.lte('eventos_valor', parseInt(filters.eventos_max));
       if (filters.nivel)                     q = q.eq('nivel', filters.nivel);
       if (filters.grado)                     q = q.ilike('grado', `%${filters.grado}%`);
       if (filters.colegio)                   q = q.ilike('colegio', `%${filters.colegio}%`);
@@ -1219,7 +1318,7 @@ export default function Campanias() {
         setBroadcasts(prev => [{ ...data, template_nombre: selectedTemplate?.nombre ?? '—' }, ...prev]);
         setView('list');
         setSelectedTemplateId(null);
-        setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_id: 'todos', fecha_desde: '', fecha_hasta: '', cancelado_dias: '90', eventos_min: '', nivel: '', grado: '', colegio: '' });
+        setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_ids: [], fecha_desde: '', fecha_hasta: '', cancelado_desde: '', cancelado_hasta: '', eventos_min: '', eventos_max: '', nivel: '', grado: '', colegio: '' });
         const dt = new Date(scheduledAt);
         toast.success(`Campaña programada para ${dt.toLocaleDateString('es')} a las ${dt.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`);
         return;
@@ -1261,7 +1360,7 @@ export default function Campanias() {
       }, ...prev]);
       setView('list');
       setSelectedTemplateId(null);
-      setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_id: 'todos', fecha_desde: '', fecha_hasta: '', cancelado_dias: '90', eventos_min: '', nivel: '', grado: '', colegio: '' });
+      setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_ids: [], fecha_desde: '', fecha_hasta: '', cancelado_desde: '', cancelado_hasta: '', eventos_min: '', eventos_max: '', nivel: '', grado: '', colegio: '' });
       toast.success(`Campaña enviada a ${kapsoData.recipients_added?.toLocaleString('es') ?? contactCount.toLocaleString('es')} contactos`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Error al crear campaña';
