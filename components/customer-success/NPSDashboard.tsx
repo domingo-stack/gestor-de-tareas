@@ -116,6 +116,13 @@ function getQuarterRange(refDate: Date): { start: string; end: string; label: st
   }
 }
 
+function localDateStr(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 function computeNPS(responses: NPSResponse[]): number | null {
   const valid = responses.filter(r => r.score != null)
   if (valid.length === 0) return null
@@ -166,6 +173,17 @@ export default function NPSDashboard() {
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [page, setPage] = useState(1)
   const PAGE_SIZE = 20
+
+  // Resumen period filter
+  const [resumenPeriod, setResumenPeriod] = useState<'q' | 'month' | 'custom'>('q')
+  const [resumenQ, setResumenQ] = useState(() => {
+    const now = new Date()
+    const q = Math.floor(now.getMonth() / 3) + 1
+    return `${now.getFullYear()}-Q${q}`
+  })
+  const [resumenCustomDesde, setResumenCustomDesde] = useState('')
+  const [resumenCustomHasta, setResumenCustomHasta] = useState('')
+  const [resumenMonth, setResumenMonth] = useState(() => new Date())
 
   // Fetch data
   useEffect(() => {
@@ -342,6 +360,78 @@ export default function NPSDashboard() {
       detractors: Math.round((detractors / total) * 100),
     }
   }, [quarterData])
+
+  // Resumen period range
+  const resumenRange = useMemo((): { start: string; end: string; label: string } => {
+    if (resumenPeriod === 'custom' && resumenCustomDesde && resumenCustomHasta) {
+      return { start: resumenCustomDesde, end: resumenCustomHasta, label: `${resumenCustomDesde} — ${resumenCustomHasta}` }
+    }
+    if (resumenPeriod === 'month') {
+      const mr = getMonthRange(resumenMonth)
+      return { ...mr, label: resumenMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }) }
+    }
+    const [yearStr, qStr] = resumenQ.split('-Q')
+    const year = parseInt(yearStr)
+    const q = parseInt(qStr) - 1
+    const start = new Date(year, q * 3, 1)
+    const end = new Date(year, q * 3 + 3, 0)
+    return { start: localDateStr(start), end: localDateStr(end), label: resumenQ.replace('-', ' ') }
+  }, [resumenPeriod, resumenQ, resumenCustomDesde, resumenCustomHasta, resumenMonth])
+
+  const resumenData = useMemo(() => {
+    return baseFiltered.filter(r => {
+      const d = dateOnly(r.fecha)
+      return d >= resumenRange.start && d <= resumenRange.end
+    })
+  }, [baseFiltered, resumenRange])
+
+  const resumenNPS = useMemo(() => computeNPS(resumenData), [resumenData])
+
+  const resumenDistribution = useMemo(() => {
+    const valid = resumenData.filter(r => r.score != null)
+    if (valid.length === 0) return { promoters: 0, passives: 0, detractors: 0 }
+    const promoters = valid.filter(r => r.score! >= 9).length
+    const passives = valid.filter(r => r.score! >= 7 && r.score! <= 8).length
+    const detractors = valid.filter(r => r.score! <= 6).length
+    const total = valid.length
+    return {
+      promoters: Math.round((promoters / total) * 100),
+      passives: Math.round((passives / total) * 100),
+      detractors: Math.round((detractors / total) * 100),
+    }
+  }, [resumenData])
+
+  const resumenCountryNPS = useMemo(() => {
+    const countryMap = new Map<string, NPSResponse[]>()
+    for (const r of resumenData) {
+      const p = r.pais || 'Sin país'
+      if (!countryMap.has(p)) countryMap.set(p, [])
+      countryMap.get(p)!.push(r)
+    }
+    return [...countryMap.entries()]
+      .map(([pais, responses]) => {
+        const valid = responses.filter(r => r.score != null)
+        const promoters = valid.filter(r => r.score! >= 9).length
+        const passives = valid.filter(r => r.score! >= 7 && r.score! <= 8).length
+        const detractors = valid.filter(r => r.score! <= 6).length
+        const nps = computeNPS(responses)
+        return { pais, nps, total: valid.length, promoters, passives, detractors }
+      })
+      .filter(r => r.total > 0)
+      .sort((a, b) => b.total - a.total)
+  }, [resumenData])
+
+  const availableQuarters = useMemo(() => {
+    const qs = new Set<string>()
+    for (const r of allData) {
+      const d = dateOnly(r.fecha)
+      if (!d) continue
+      const [y, m] = d.split('-').map(Number)
+      const q = Math.floor((m - 1) / 3) + 1
+      qs.add(`${y}-Q${q}`)
+    }
+    return Array.from(qs).sort().reverse()
+  }, [allData])
 
   // Database view data — shows ALL data (not filtered by week), only by país/suscripción
   const databaseData = useMemo(() => {
@@ -724,41 +814,112 @@ export default function NPSDashboard() {
       {/* =================== RESUMEN VIEW =================== */}
       {view === 'resumen' && (
         <div className="space-y-5">
-          {/* Quarter header */}
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-gray-700">Período:</span>
-            <span className="text-sm font-bold text-[#3c527a]">{quarterInfo.label}</span>
+          {/* Period selector */}
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Period type toggle */}
+            <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+              {([['q', 'Trimestre'], ['month', 'Mes'], ['custom', 'Personalizado']] as const).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setResumenPeriod(key)}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                    resumenPeriod === key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Quarter dropdown */}
+            {resumenPeriod === 'q' && (
+              <select
+                value={resumenQ}
+                onChange={e => setResumenQ(e.target.value)}
+                className="text-sm border border-gray-200 rounded-md px-3 py-1.5 bg-white text-[#383838] focus:outline-none focus:ring-1 focus:ring-[#3c527a]"
+              >
+                {availableQuarters.map(q => (
+                  <option key={q} value={q}>{q.replace('-', ' ')}</option>
+                ))}
+              </select>
+            )}
+
+            {/* Month nav arrows */}
+            {resumenPeriod === 'month' && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => { const d = new Date(resumenMonth); d.setMonth(d.getMonth() - 1); setResumenMonth(d); }}
+                  className="p-1.5 rounded-md border border-gray-200 hover:bg-gray-50 transition-colors"
+                >
+                  <ChevronLeftIcon className="w-4 h-4 text-gray-600" />
+                </button>
+                <span className="text-sm font-medium text-gray-700 min-w-[160px] text-center capitalize">
+                  {resumenMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
+                </span>
+                <button
+                  onClick={() => { const d = new Date(resumenMonth); d.setMonth(d.getMonth() + 1); setResumenMonth(d); }}
+                  disabled={resumenMonth.getMonth() === new Date().getMonth() && resumenMonth.getFullYear() === new Date().getFullYear()}
+                  className={`p-1.5 rounded-md border border-gray-200 transition-colors ${
+                    resumenMonth.getMonth() === new Date().getMonth() && resumenMonth.getFullYear() === new Date().getFullYear() ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <ChevronRightIcon className="w-4 h-4 text-gray-600" />
+                </button>
+              </div>
+            )}
+
+            {/* Custom date inputs */}
+            {resumenPeriod === 'custom' && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={resumenCustomDesde}
+                  onChange={e => setResumenCustomDesde(e.target.value)}
+                  className="text-sm border border-gray-200 rounded-md px-2 py-1.5 bg-white text-[#383838] focus:outline-none focus:ring-1 focus:ring-[#3c527a]"
+                />
+                <span className="text-xs text-gray-400">—</span>
+                <input
+                  type="date"
+                  value={resumenCustomHasta}
+                  onChange={e => setResumenCustomHasta(e.target.value)}
+                  className="text-sm border border-gray-200 rounded-md px-2 py-1.5 bg-white text-[#383838] focus:outline-none focus:ring-1 focus:ring-[#3c527a]"
+                />
+              </div>
+            )}
+
+            {/* Period label + count */}
+            <span className="text-sm font-bold text-[#3c527a]">{resumenRange.label}</span>
             <span className="text-xs text-gray-400">
-              ({quarterData.filter(r => r.score != null).length} respuestas)
+              ({resumenData.filter(r => r.score != null).length} respuestas)
             </span>
           </div>
 
-          {/* Quarter KPIs */}
+          {/* Period KPIs */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">NPS del trimestre</p>
-              <span className={`text-3xl font-bold ${npsColor(quarterNPS)}`}>
-                {quarterNPS !== null ? quarterNPS : '—'}
+              <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">NPS del período</p>
+              <span className={`text-3xl font-bold ${npsColor(resumenNPS)}`}>
+                {resumenNPS !== null ? resumenNPS : '—'}
               </span>
             </div>
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Total respuestas</p>
-              <span className="text-3xl font-bold text-[#383838]">{quarterData.filter(r => r.score != null).length}</span>
+              <span className="text-3xl font-bold text-[#383838]">{resumenData.filter(r => r.score != null).length}</span>
             </div>
             <div className="bg-white rounded-xl border border-gray-200 p-5">
-              <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Distribución trimestral</p>
-              {quarterData.length === 0 ? (
+              <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Distribución del período</p>
+              {resumenData.length === 0 ? (
                 <span className="text-sm text-gray-400">Sin datos</span>
               ) : (
                 <div className="flex items-center gap-2">
                   <span className="inline-flex items-center rounded-full bg-green-100 text-green-800 px-2 py-0.5 text-xs font-medium">
-                    {quarterDistribution.promoters}% P
+                    {resumenDistribution.promoters}% P
                   </span>
                   <span className="inline-flex items-center rounded-full bg-yellow-100 text-yellow-800 px-2 py-0.5 text-xs font-medium">
-                    {quarterDistribution.passives}% N
+                    {resumenDistribution.passives}% N
                   </span>
                   <span className="inline-flex items-center rounded-full bg-red-100 text-red-800 px-2 py-0.5 text-xs font-medium">
-                    {quarterDistribution.detractors}% D
+                    {resumenDistribution.detractors}% D
                   </span>
                 </div>
               )}
@@ -816,10 +977,10 @@ export default function NPSDashboard() {
           {/* NPS by country table */}
           <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100">
-              <h3 className="text-sm font-semibold text-[#383838]">NPS por país — {quarterInfo.label}</h3>
+              <h3 className="text-sm font-semibold text-[#383838]">NPS por país — {resumenRange.label}</h3>
             </div>
-            {npsByCountry.length === 0 ? (
-              <div className="p-8 text-center text-gray-400 text-sm">Sin datos para el trimestre</div>
+            {resumenCountryNPS.length === 0 ? (
+              <div className="p-8 text-center text-gray-400 text-sm">Sin datos para el período</div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -840,7 +1001,7 @@ export default function NPSDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {npsByCountry.map(row => (
+                    {resumenCountryNPS.map(row => (
                       <tr key={row.pais} className="border-b border-gray-50 hover:bg-gray-50/50">
                         <td className="px-5 py-3 font-medium text-[#383838]">{row.pais}</td>
                         <td className="px-4 py-3 text-center">
@@ -870,21 +1031,21 @@ export default function NPSDashboard() {
                     <tr className="bg-gray-50 font-semibold">
                       <td className="px-5 py-3 text-[#383838]">Total</td>
                       <td className="px-4 py-3 text-center">
-                        <span className={`font-bold ${npsColor(quarterNPS)}`}>
-                          {quarterNPS !== null ? quarterNPS : '—'}
+                        <span className={`font-bold ${npsColor(resumenNPS)}`}>
+                          {resumenNPS !== null ? resumenNPS : '—'}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center text-gray-600">
-                        {npsByCountry.reduce((s, r) => s + r.total, 0)}
+                        {resumenCountryNPS.reduce((s, r) => s + r.total, 0)}
                       </td>
                       <td className="px-4 py-3 text-center text-green-700">
-                        {npsByCountry.reduce((s, r) => s + r.promoters, 0)}
+                        {resumenCountryNPS.reduce((s, r) => s + r.promoters, 0)}
                       </td>
                       <td className="px-4 py-3 text-center text-yellow-700">
-                        {npsByCountry.reduce((s, r) => s + r.passives, 0)}
+                        {resumenCountryNPS.reduce((s, r) => s + r.passives, 0)}
                       </td>
                       <td className="px-4 py-3 text-center text-red-700">
-                        {npsByCountry.reduce((s, r) => s + r.detractors, 0)}
+                        {resumenCountryNPS.reduce((s, r) => s + r.detractors, 0)}
                       </td>
                     </tr>
                   </tbody>

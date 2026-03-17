@@ -15,6 +15,8 @@ import {
   FunnelIcon,
   ChartBarIcon,
   ClipboardDocumentListIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from '@heroicons/react/24/outline'
 import {
   BarChart,
@@ -149,6 +151,17 @@ function normalizePhone(tel: string, pais?: string): string {
   return prefix + digits
 }
 
+function localDateStr(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function dateOnly(d: string): string {
+  return (d || '').slice(0, 10)
+}
+
 // WhatsApp SVG icon component
 function WhatsAppIcon({ className }: { className?: string }) {
   return (
@@ -173,6 +186,7 @@ export default function PagosFallidos() {
   const [subTab, setSubTab] = useState<SubTab>('gestion')
 
   // Filters
+  const [searchQuery, setSearchQuery] = useState('')
   const [filterPais, setFilterPais] = useState('')
   const [filterEstado, setFilterEstado] = useState('')
   const [dateQuickFilter, setDateQuickFilter] = useState<DateQuickFilter>('hoy')
@@ -198,6 +212,17 @@ export default function PagosFallidos() {
   const [cierreMonto, setCierreMonto] = useState('')
   const [cierreComentario, setCierreComentario] = useState('')
   const [closingCase, setClosingCase] = useState(false)
+
+  // Resumen period filter
+  const [resumenPeriod, setResumenPeriod] = useState<'q' | 'month' | 'custom'>('q')
+  const [resumenQ, setResumenQ] = useState(() => {
+    const now = new Date()
+    const q = Math.floor(now.getMonth() / 3) + 1
+    return `${now.getFullYear()}-Q${q}`
+  })
+  const [resumenCustomDesde, setResumenCustomDesde] = useState('')
+  const [resumenCustomHasta, setResumenCustomHasta] = useState('')
+  const [resumenMonth, setResumenMonth] = useState(() => new Date())
 
   // --------------- Fetch ---------------
 
@@ -319,6 +344,14 @@ export default function PagosFallidos() {
   const filtered = useMemo(() => {
     let result = grouped
 
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase()
+      result = result.filter(g =>
+        g.correo.toLowerCase().includes(q) ||
+        g.telefono?.toLowerCase().includes(q) ||
+        g.nombre?.toLowerCase().includes(q)
+      )
+    }
     if (filterPais) result = result.filter(g => g.pais === filterPais)
     if (filterEstado) result = result.filter(g => g.estado === filterEstado)
 
@@ -342,10 +375,10 @@ export default function PagosFallidos() {
     }
 
     return result
-  }, [grouped, filterPais, filterEstado, dateQuickFilter, dateRange, sortField])
+  }, [grouped, searchQuery, filterPais, filterEstado, dateQuickFilter, dateRange, sortField])
 
   // Reset page when filters change
-  useEffect(() => { setCurrentPage(1) }, [filterPais, filterEstado, dateQuickFilter, sortField])
+  useEffect(() => { setCurrentPage(1) }, [searchQuery, filterPais, filterEstado, dateQuickFilter, sortField])
 
   // --------------- Pagination ---------------
 
@@ -442,6 +475,100 @@ export default function PagosFallidos() {
     }
     return weeks
   }, [failures, gestiones])
+
+  // --------------- Resumen period range ---------------
+
+  const resumenRange = useMemo((): { start: string; end: string; label: string } => {
+    if (resumenPeriod === 'custom' && resumenCustomDesde && resumenCustomHasta) {
+      return { start: resumenCustomDesde, end: resumenCustomHasta, label: `${resumenCustomDesde} — ${resumenCustomHasta}` }
+    }
+    if (resumenPeriod === 'month') {
+      const start = new Date(resumenMonth.getFullYear(), resumenMonth.getMonth(), 1)
+      const end = new Date(resumenMonth.getFullYear(), resumenMonth.getMonth() + 1, 0)
+      return { start: localDateStr(start), end: localDateStr(end), label: resumenMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' }) }
+    }
+    const [yearStr, qStr] = resumenQ.split('-Q')
+    const year = parseInt(yearStr)
+    const q = parseInt(qStr) - 1
+    const start = new Date(year, q * 3, 1)
+    const end = new Date(year, q * 3 + 3, 0)
+    return { start: localDateStr(start), end: localDateStr(end), label: resumenQ.replace('-', ' ') }
+  }, [resumenPeriod, resumenQ, resumenCustomDesde, resumenCustomHasta, resumenMonth])
+
+  // --------------- Resumen period metrics ---------------
+
+  const resumenMetrics = useMemo(() => {
+    const from = resumenRange.start
+    const to = resumenRange.end
+
+    const periodFailures = failures.filter(f => {
+      const d = dateOnly(f.fecha_pago_fallido)
+      return d >= from && d <= to
+    })
+
+    const periodGestiones = gestiones.filter(g => {
+      const d = dateOnly(g.created_at)
+      return d >= from && d <= to
+    })
+
+    const uniqueEmails = new Set(periodFailures.map(f => f.correo))
+    const gestionados = periodGestiones.filter(g => g.es_cierre)
+    const exitosos = gestionados.filter(g => g.exitoso)
+    const montoRecuperado = periodGestiones
+      .filter(g => g.exitoso && g.monto_recuperado)
+      .reduce((sum, g) => sum + (g.monto_recuperado || 0), 0)
+
+    const tasaConversion = gestionados.length > 0
+      ? (exitosos.length / gestionados.length) * 100
+      : 0
+
+    // Status breakdown from grouped data filtered by period
+    const periodGrouped = grouped.filter(g =>
+      g.failures.some(f => {
+        const d = dateOnly(f.fecha_pago_fallido)
+        return d >= from && d <= to
+      })
+    )
+    const statusCounts = { pendiente: 0, en_gestion: 0, no_contactado: 0, resuelto: 0 }
+    periodGrouped.forEach(g => {
+      statusCounts[g.estado]++
+    })
+
+    // Country breakdown
+    const countryCounts: Record<string, number> = {}
+    periodGrouped.forEach(g => {
+      const p = g.pais || 'Sin país'
+      countryCounts[p] = (countryCounts[p] || 0) + 1
+    })
+
+    return {
+      totalCasos: uniqueEmails.size,
+      totalFailures: periodFailures.length,
+      gestionados: gestionados.length,
+      exitosos: exitosos.length,
+      montoRecuperado,
+      tasaConversion,
+      statusCounts,
+      countryCounts: Object.entries(countryCounts).sort((a, b) => b[1] - a[1]),
+      periodGroupedTotal: periodGrouped.length,
+    }
+  }, [failures, gestiones, grouped, resumenRange])
+
+  const availableQuarters = useMemo(() => {
+    const qs = new Set<string>()
+    for (const f of failures) {
+      const d = dateOnly(f.fecha_pago_fallido)
+      if (!d) continue
+      const [y, m] = d.split('-').map(Number)
+      const q = Math.floor((m - 1) / 3) + 1
+      qs.add(`${y}-Q${q}`)
+    }
+    // Always include current quarter
+    const now = new Date()
+    const currentQ = Math.floor(now.getMonth() / 3) + 1
+    qs.add(`${now.getFullYear()}-Q${currentQ}`)
+    return Array.from(qs).sort().reverse()
+  }, [failures])
 
   // --------------- Actions ---------------
 
@@ -579,14 +706,54 @@ export default function PagosFallidos() {
       {/* ==================== RESUMEN TAB ==================== */}
       {subTab === 'resumen' && (
         <div className="space-y-4">
+          {/* Period selector */}
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex bg-white rounded-lg border border-gray-200 p-1">
+              <button onClick={() => setResumenPeriod('q')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${resumenPeriod === 'q' ? 'text-white' : 'text-gray-600 hover:text-gray-900'}`} style={resumenPeriod === 'q' ? { backgroundColor: '#3c527a' } : undefined}>Trimestre</button>
+              <button onClick={() => setResumenPeriod('month')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${resumenPeriod === 'month' ? 'text-white' : 'text-gray-600 hover:text-gray-900'}`} style={resumenPeriod === 'month' ? { backgroundColor: '#3c527a' } : undefined}>Mes</button>
+              <button onClick={() => setResumenPeriod('custom')} className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${resumenPeriod === 'custom' ? 'text-white' : 'text-gray-600 hover:text-gray-900'}`} style={resumenPeriod === 'custom' ? { backgroundColor: '#3c527a' } : undefined}>Personalizado</button>
+            </div>
+
+            {resumenPeriod === 'q' && (
+              <select value={resumenQ} onChange={e => setResumenQ(e.target.value)} className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-300">
+                {availableQuarters.map(q => <option key={q} value={q}>{q.replace('-', ' ')}</option>)}
+              </select>
+            )}
+
+            {resumenPeriod === 'month' && (
+              <div className="flex items-center gap-2">
+                <button onClick={() => { const d = new Date(resumenMonth); d.setMonth(d.getMonth() - 1); setResumenMonth(d); }} className="p-1.5 rounded-md border border-gray-200 hover:bg-gray-50 transition-colors">
+                  <ChevronLeftIcon className="w-4 h-4 text-gray-600" />
+                </button>
+                <span className="text-sm font-medium text-gray-700 min-w-[140px] text-center capitalize">
+                  {resumenMonth.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })}
+                </span>
+                <button onClick={() => { const d = new Date(resumenMonth); d.setMonth(d.getMonth() + 1); setResumenMonth(d); }} disabled={resumenMonth.getMonth() === new Date().getMonth() && resumenMonth.getFullYear() === new Date().getFullYear()} className={`p-1.5 rounded-md border border-gray-200 transition-colors ${resumenMonth.getMonth() === new Date().getMonth() && resumenMonth.getFullYear() === new Date().getFullYear() ? 'opacity-40 cursor-not-allowed' : 'hover:bg-gray-50'}`}>
+                  <ChevronRightIcon className="w-4 h-4 text-gray-600" />
+                </button>
+              </div>
+            )}
+
+            {resumenPeriod === 'custom' && (
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-500">Desde</label>
+                <input type="date" value={resumenCustomDesde} onChange={e => setResumenCustomDesde(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-300" />
+                <label className="text-xs text-gray-500">Hasta</label>
+                <input type="date" value={resumenCustomHasta} onChange={e => setResumenCustomHasta(e.target.value)} className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-blue-300" />
+              </div>
+            )}
+
+            <span className="text-xs text-gray-400 ml-auto">{resumenRange.label}</span>
+          </div>
+
           {/* Compact KPI grid */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            <MiniMetricCard label="Casos activos" value={metrics.activos} color="text-red-600" loading={loading} />
-            <MiniMetricCard label="Pendientes" value={metrics.pendientes} color="text-yellow-600" loading={loading} />
-            <MiniMetricCard label="Hoy" value={metrics.casosHoy} color="text-orange-600" loading={loading} />
-            <MiniMetricCard label="Nuevos (semana)" value={metrics.nuevos} color="text-blue-600" loading={loading} />
-            <MiniMetricCard label="Gestionados (semana)" value={metrics.gestionados} color="text-indigo-600" loading={loading} />
-            <MiniMetricCard label="Total histórico" value={metrics.totalCasos} color="text-gray-600" loading={loading} />
+            <MiniMetricCard label="Casos del período" value={resumenMetrics.totalCasos} color="text-red-600" loading={loading} />
+            <MiniMetricCard label="Pendientes" value={resumenMetrics.statusCounts.pendiente} color="text-yellow-600" loading={loading} />
+            <MiniMetricCard label="En gestión" value={resumenMetrics.statusCounts.en_gestion} color="text-blue-600" loading={loading} />
+            <MiniMetricCard label="No contactado" value={resumenMetrics.statusCounts.no_contactado} color="text-orange-600" loading={loading} />
+            <MiniMetricCard label="Resueltos" value={resumenMetrics.statusCounts.resuelto} color="text-green-600" loading={loading} />
+            <MiniMetricCard label="Pagos fallidos" value={resumenMetrics.totalFailures} color="text-gray-600" loading={loading} />
           </div>
 
           {/* Recovery metrics */}
@@ -597,8 +764,8 @@ export default function PagosFallidos() {
                   <CurrencyDollarIcon className="w-5 h-5 text-green-600" />
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Monto recuperado (mes)</p>
-                  <p className="text-xl font-bold text-gray-900">{loading ? '...' : fmtUSD(metrics.montoRecuperado)}</p>
+                  <p className="text-xs text-gray-500">Monto recuperado</p>
+                  <p className="text-xl font-bold text-gray-900">{loading ? '...' : fmtUSD(resumenMetrics.montoRecuperado)}</p>
                 </div>
               </div>
             </div>
@@ -608,8 +775,8 @@ export default function PagosFallidos() {
                   <CheckCircleIcon className="w-5 h-5 text-purple-600" />
                 </div>
                 <div>
-                  <p className="text-xs text-gray-500">Tasa de conversión (mes)</p>
-                  <p className="text-xl font-bold text-gray-900">{loading ? '...' : `${metrics.tasaConversion.toFixed(1)}%`}</p>
+                  <p className="text-xs text-gray-500">Tasa de conversión</p>
+                  <p className="text-xl font-bold text-gray-900">{loading ? '...' : `${resumenMetrics.tasaConversion.toFixed(1)}%`}</p>
                 </div>
               </div>
             </div>
@@ -620,8 +787,9 @@ export default function PagosFallidos() {
             <h3 className="text-sm font-semibold text-gray-700 mb-3">Distribución por estado</h3>
             <div className="space-y-2">
               {(['pendiente', 'en_gestion', 'no_contactado', 'resuelto'] as const).map(estado => {
-                const count = grouped.filter(g => g.estado === estado).length
-                const pct = grouped.length > 0 ? (count / grouped.length) * 100 : 0
+                const count = resumenMetrics.statusCounts[estado]
+                const total = resumenMetrics.periodGroupedTotal
+                const pct = total > 0 ? (count / total) * 100 : 0
                 const ec = ESTADO_COLORS[estado]
                 return (
                   <div key={estado} className="flex items-center gap-3">
@@ -660,22 +828,12 @@ export default function PagosFallidos() {
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4">
             <h3 className="text-sm font-semibold text-gray-700 mb-3">Casos por país</h3>
             <div className="space-y-1.5">
-              {(() => {
-                const countryCounts = new Map<string, number>()
-                for (const g of grouped) {
-                  const p = g.pais || 'Sin país'
-                  countryCounts.set(p, (countryCounts.get(p) || 0) + 1)
-                }
-                return [...countryCounts.entries()]
-                  .sort((a, b) => b[1] - a[1])
-                  .slice(0, 10)
-                  .map(([pais, count]) => (
-                    <div key={pais} className="flex items-center justify-between text-sm py-1 px-2 rounded hover:bg-gray-50">
-                      <span className="text-gray-700">{pais}</span>
-                      <span className="text-gray-500 font-medium">{count}</span>
-                    </div>
-                  ))
-              })()}
+              {resumenMetrics.countryCounts.slice(0, 10).map(([pais, count]) => (
+                <div key={pais} className="flex items-center justify-between text-sm py-1 px-2 rounded hover:bg-gray-50">
+                  <span className="text-gray-700">{pais}</span>
+                  <span className="text-gray-500 font-medium">{count}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -732,6 +890,24 @@ export default function PagosFallidos() {
                       {label}
                     </button>
                   ))}
+                </div>
+
+                <div className="flex items-center gap-1.5 border border-gray-200 rounded-lg px-2.5 py-1.5 w-56 bg-white focus-within:ring-1 focus-within:ring-blue-300 focus-within:border-blue-300">
+                  <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                  </svg>
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    placeholder="Buscar correo, teléfono, nombre..."
+                    className="text-xs bg-transparent outline-none flex-1 min-w-0 placeholder-gray-400"
+                  />
+                  {searchQuery && (
+                    <button onClick={() => setSearchQuery('')} className="text-gray-400 hover:text-gray-600 shrink-0">
+                      <XMarkIcon className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
 
                 <button

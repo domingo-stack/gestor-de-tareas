@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { ExclamationTriangleIcon, EyeIcon } from '@heroicons/react/24/outline';
+import { ExclamationTriangleIcon, EyeIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
 import { fmtNum, fmtPct } from './formatters';
 import WeekSelector, { getCurrentWeekStart, toDateStr } from './WeekSelector';
 
@@ -24,7 +24,12 @@ interface FunnelGeneral {
 interface WeeklyRow {
   weekLabel: string;
   registered: number;
+  ev1: number;
+  ev2: number;
+  ev3: number;
   activated: number;
+  ev5plus: number;
+  ev10plus: number;
   paid: number;
   free: number;
   activationPct: number;
@@ -39,7 +44,17 @@ interface ConversionData {
   weekly?: WeeklyRow[];
 }
 
-const FUNNEL_COLORS = ['#3B82F6', '#8B5CF6', '#10B981'];
+// 8-step funnel colors — warm gradient ending in green for $
+const FUNNEL_COLORS = [
+  { bg: '#3B82F6', light: '#EFF6FF' }, // blue
+  { bg: '#6366F1', light: '#EEF2FF' }, // indigo
+  { bg: '#7C3AED', light: '#F5F3FF' }, // violet
+  { bg: '#9333EA', light: '#FAF5FF' }, // purple
+  { bg: '#A855F7', light: '#FAF5FF' }, // purple light
+  { bg: '#D946EF', light: '#FDF4FF' }, // fuchsia
+  { bg: '#EC4899', light: '#FDF2F8' }, // pink
+  { bg: '#10B981', light: '#ECFDF5' }, // emerald
+];
 
 const EVENTOS_OPTIONS: { value: string; label: string }[] = [
   { value: 'all', label: 'Todos' },
@@ -64,7 +79,6 @@ export default function ConversionFunnel() {
   const [loading, setLoading] = useState(true);
   const [weekStart, setWeekStart] = useState(getCurrentWeekStart);
 
-  // Filters
   const [eventosFilter, setEventosFilter] = useState('all');
   const [planStatus, setPlanStatus] = useState('all');
   const [planId, setPlanId] = useState('all');
@@ -95,7 +109,6 @@ export default function ConversionFunnel() {
     fetchData();
   }, [supabase, weekStart, eventosFilter, planStatus, planId]);
 
-  // Reset planId when planStatus changes away from 'paid'
   useEffect(() => {
     if (planStatus !== 'paid') setPlanId('all');
   }, [planStatus]);
@@ -123,6 +136,14 @@ export default function ConversionFunnel() {
   const weeklyData = data.weekly || [];
   const planOptions = data.plan_options || [];
 
+  // Calculate key conversion metrics for summary cards
+  const totalReg = funnelWeek[0]?.count || 0;
+  const activatedCount = funnelWeek[4]?.count || 0;
+  const paidCount = funnelWeek[7]?.count || 0;
+  const activationRate = totalReg > 0 ? (activatedCount / totalReg) * 100 : 0;
+  const conversionRate = totalReg > 0 ? (paidCount / totalReg) * 100 : 0;
+  const activatedToPayRate = activatedCount > 0 ? (paidCount / activatedCount) * 100 : 0;
+
   return (
     <div className="space-y-6">
       {/* Header + WeekSelector */}
@@ -131,88 +152,113 @@ export default function ConversionFunnel() {
         <WeekSelector weekStart={weekStart} onWeekChange={setWeekStart} />
       </div>
 
-      {/* Filters row */}
+      {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-sm font-medium text-gray-500">Filtros:</span>
-        {/* Eventos filter */}
-        <select
-          value={eventosFilter}
-          onChange={(e) => setEventosFilter(e.target.value)}
-          className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        >
-          {EVENTOS_OPTIONS.map(o => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
+        <select value={eventosFilter} onChange={(e) => setEventosFilter(e.target.value)} className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+          {EVENTOS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        {/* Plan status filter */}
-        <select
-          value={planStatus}
-          onChange={(e) => setPlanStatus(e.target.value)}
-          className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-        >
-          {PLAN_STATUS_OPTIONS.map(o => (
-            <option key={o.value} value={o.value}>{o.label}</option>
-          ))}
+        <select value={planStatus} onChange={(e) => setPlanStatus(e.target.value)} className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+          {PLAN_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        {/* Plan ID sub-dropdown (only when status = paid) */}
         {planStatus === 'paid' && planOptions.length > 0 && (
-          <select
-            value={planId}
-            onChange={(e) => setPlanId(e.target.value)}
-            className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
+          <select value={planId} onChange={(e) => setPlanId(e.target.value)} className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
             <option value="all">Todos los planes</option>
-            {planOptions.map(p => (
-              <option key={p} value={p}>{p}</option>
-            ))}
+            {planOptions.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         )}
       </div>
 
-      {/* Funnel general inline (sutil) */}
-      {funnelGeneral && (
-        <p className="text-xs text-gray-400 px-1">
-          Acumulado: {fmtNum(funnelGeneral.total)} registrados → {fmtPct(funnelGeneral.activationPct)} activacion → {fmtPct(funnelGeneral.conversionPct)} conversion
-        </p>
-      )}
+      {/* ===== Visual Funnel ===== */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 pb-6">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="font-semibold text-gray-700">Funnel Semanal</h3>
+          {funnelGeneral && (
+            <span className="text-xs text-gray-400">
+              Acumulado: {fmtNum(funnelGeneral.total)} reg · {fmtPct(funnelGeneral.activationPct)} activ · {fmtPct(funnelGeneral.conversionPct)} conv
+            </span>
+          )}
+        </div>
 
-      {/* Visual Funnel — SEMANAL (principal) */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h3 className="font-semibold text-gray-700 mb-6">Funnel Semanal</h3>
-        <div className="flex items-end justify-center gap-6 h-64">
+        <div className="flex flex-col items-center">
           {funnelWeek.map((step, i) => {
-            const heightPct = Math.max(step.pctOfTotal, 5);
+            const color = FUNNEL_COLORS[i] || FUNNEL_COLORS[0];
+            const widthPct = Math.max(step.pctOfTotal * 0.82 + 18, 18);
+            const isActivated = i === 4;
+            const isPaid = i === funnelWeek.length - 1;
+            const dropOff = i > 0 ? funnelWeek[i - 1].count - step.count : 0;
+            const dropOffPct = i > 0 && funnelWeek[i - 1].count > 0
+              ? ((dropOff / funnelWeek[i - 1].count) * 100)
+              : 0;
+
             return (
-              <div key={i} className="flex flex-col items-center gap-2 flex-1 max-w-[200px]">
-                <div className="text-center mb-1">
-                  <p className="text-2xl font-bold text-gray-900">{fmtNum(step.count)}</p>
-                  <p className="text-xs text-gray-500">{fmtPct(step.pctOfTotal)} del total</p>
-                  {i > 0 && (
-                    <p className="text-xs font-medium text-blue-600">{fmtPct(step.pctOfPrev)} del paso anterior</p>
-                  )}
-                </div>
+              <div key={i} className="w-full flex flex-col items-center">
+                {i > 0 && dropOff > 0 && (
+                  <div className="flex items-center gap-1.5 py-0.5">
+                    <ChevronDownIcon className="w-3 h-3 text-gray-300" />
+                    <span className="text-[10px] text-gray-400">
+                      -{fmtNum(dropOff)} ({fmtPct(dropOffPct)})
+                    </span>
+                  </div>
+                )}
+                {i > 0 && dropOff === 0 && <div className="h-1" />}
+
                 <div
-                  className="w-full rounded-t-lg transition-all duration-500"
-                  style={{ height: `${heightPct * 1.8}px`, backgroundColor: FUNNEL_COLORS[i], opacity: 0.85 }}
-                />
-                <p className="text-sm font-medium text-gray-700 text-center">{step.label}</p>
+                  className="relative flex items-center justify-between px-5 transition-all duration-500"
+                  style={{
+                    width: `${widthPct}%`,
+                    minHeight: '44px',
+                    backgroundColor: color.bg,
+                    borderRadius: i === 0 ? '12px 12px 4px 4px' : isPaid ? '4px 4px 12px 12px' : '4px',
+                    border: isActivated ? '2px solid rgba(255,255,255,0.5)' : undefined,
+                    boxShadow: isActivated
+                      ? `0 0 0 2px ${color.bg}, inset 0 1px 0 rgba(255,255,255,0.2)`
+                      : isPaid
+                        ? `0 4px 12px ${color.bg}40`
+                        : undefined,
+                  }}
+                >
+                  <div className="absolute inset-0 bg-gradient-to-b from-white/15 to-transparent rounded-[inherit]" />
+                  <div className="relative flex items-center gap-2">
+                    {isActivated && (
+                      <span className="text-[9px] uppercase tracking-wider font-bold text-white/70 bg-white/20 px-1.5 py-0.5 rounded">activ.</span>
+                    )}
+                    {isPaid && (
+                      <span className="text-[9px] uppercase tracking-wider font-bold text-white/70 bg-white/20 px-1.5 py-0.5 rounded">$</span>
+                    )}
+                    <span className="text-sm font-medium text-white drop-shadow-sm">{step.label}</span>
+                  </div>
+                  <div className="relative flex items-center gap-3">
+                    <span className="text-lg font-bold text-white drop-shadow-sm">{fmtNum(step.count)}</span>
+                    <span className="text-xs text-white/75 font-medium min-w-[45px] text-right">{fmtPct(step.pctOfTotal)}</span>
+                  </div>
+                </div>
               </div>
             );
           })}
         </div>
 
-        {/* Arrows between steps */}
-        <div className="flex justify-center gap-4 mt-4">
-          {funnelWeek.length > 1 && funnelWeek.slice(1).map((step, i) => (
-            <div key={i} className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-full">
-              <span className="text-xs text-gray-500">{funnelWeek[i].label} → {step.label}:</span>
-              <span className="text-xs font-bold text-gray-700">{fmtPct(step.pctOfPrev)}</span>
-            </div>
-          ))}
+        {/* Inline conversion summary — bottom left */}
+        <div className="flex items-center gap-4 mt-5 pt-4 border-t border-gray-100">
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#A855F7' }} />
+            <span className="text-[11px] text-gray-500">Reg→Activ</span>
+            <span className="text-[11px] font-bold text-gray-700">{fmtPct(activationRate)}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#10B981' }} />
+            <span className="text-[11px] text-gray-500">Reg→Pago</span>
+            <span className="text-[11px] font-bold text-gray-700">{fmtPct(conversionRate)}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#3c527a' }} />
+            <span className="text-[11px] text-gray-500">Activ→Pago</span>
+            <span className="text-[11px] font-bold text-gray-700">{fmtPct(activatedToPayRate)}</span>
+          </div>
         </div>
       </div>
 
-      {/* Weekly Conversion Table */}
+      {/* ===== Weekly Conversion Table ===== */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
           <h3 className="font-semibold text-gray-700">Conversion Semanal (por cohorte de registro)</h3>
@@ -221,33 +267,41 @@ export default function ConversionFunnel() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 font-medium border-b">
               <tr>
-                <th className="px-4 py-3 text-left">Semana</th>
-                <th className="px-4 py-3 text-right">Registrados</th>
-                <th className="px-4 py-3 text-right">Activados</th>
-                <th className="px-4 py-3 text-right">% Activacion</th>
-                <th className="px-4 py-3 text-right">Pagaron</th>
-                <th className="px-4 py-3 text-right">% Conversion</th>
-                <th className="px-4 py-3 text-right">Gratis</th>
+                <th className="px-3 py-3 text-left whitespace-nowrap">Semana</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">Registr.</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">1 ev</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">2 ev</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">3 ev</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">Activ. (4+)</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">5+ ev</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">10+ ev</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">Pagaron</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">% Activ.</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">% Conv.</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {weeklyData.map((w, i) => (
                 <tr key={i} className="hover:bg-gray-50 transition-colors">
-                  <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{w.weekLabel}</td>
-                  <td className="px-4 py-3 text-right text-gray-700">{fmtNum(w.registered)}</td>
-                  <td className="px-4 py-3 text-right text-purple-600 font-medium">{fmtNum(w.activated)}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{w.weekLabel}</td>
+                  <td className="px-3 py-3 text-right text-gray-700 font-medium">{fmtNum(w.registered)}</td>
+                  <td className="px-3 py-3 text-right text-indigo-600">{fmtNum(w.ev1)}</td>
+                  <td className="px-3 py-3 text-right text-violet-600">{fmtNum(w.ev2)}</td>
+                  <td className="px-3 py-3 text-right text-purple-600">{fmtNum(w.ev3)}</td>
+                  <td className="px-3 py-3 text-right text-purple-700 font-medium">{fmtNum(w.activated)}</td>
+                  <td className="px-3 py-3 text-right text-fuchsia-600">{fmtNum(w.ev5plus)}</td>
+                  <td className="px-3 py-3 text-right text-pink-600">{fmtNum(w.ev10plus)}</td>
+                  <td className="px-3 py-3 text-right text-emerald-600 font-medium">{fmtNum(w.paid)}</td>
+                  <td className="px-3 py-3 text-right">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${w.activationPct >= 50 ? 'bg-green-50 text-green-700' : w.activationPct >= 25 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
                       {fmtPct(w.activationPct)}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right text-green-600 font-medium">{fmtNum(w.paid)}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-3 py-3 text-right">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${w.conversionPct >= 10 ? 'bg-green-50 text-green-700' : w.conversionPct >= 5 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
                       {fmtPct(w.conversionPct)}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-500">{fmtNum(w.free)}</td>
                 </tr>
               ))}
             </tbody>
