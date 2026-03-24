@@ -5,8 +5,10 @@ import {
   LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine
 } from 'recharts';
 
+import type { PnLData } from '@/lib/finance-types';
+
 interface FinancialChartsProps {
-  data: any;
+  data: PnLData;
 }
 
 export default function FinancialCharts({ data }: FinancialChartsProps) {

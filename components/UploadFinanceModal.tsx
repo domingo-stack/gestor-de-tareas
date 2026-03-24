@@ -82,29 +82,48 @@ export default function UploadFinanceModal({ isOpen, onClose, categories }: Uplo
 
       if (uploadError) throw new Error('Error al subir imagen a la nube');
 
-      // C. AVISAR A N8N Y ESPERAR RESPUESTA (AWAIT REAL)
-      // Nota: Esto puede tardar 10-30 segundos mientras la IA piensa.
+      // C. AVISAR A N8N Y ESPERAR RESPUESTA
       const N8N_WEBHOOK_URL = process.env.NEXT_PUBLIC_N8N_WEBHOOK_URL;
 
-      const response = await fetch(N8N_WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filePath: fileName,
-          userId: user.id,
-          fileType: file.type,
-          fileName: file.name
-        })
-      });
+      if (!N8N_WEBHOOK_URL) {
+        throw new Error('URL de webhook no configurada. Revisa NEXT_PUBLIC_N8N_WEBHOOK_URL en .env.local');
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+
+      let response: Response;
+      try {
+        response = await fetch(N8N_WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filePath: fileName,
+            userId: user.id,
+            fileType: file.type,
+            fileName: file.name
+          }),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+      } catch (fetchErr: any) {
+        clearTimeout(timeout);
+        if (fetchErr.name === 'AbortError') {
+          throw new Error('Timeout: n8n no respondió en 30 segundos. Intenta de nuevo.');
+        }
+        throw fetchErr;
+      }
 
       // D. ANALIZAR RESPUESTA DE N8N
       if (!response.ok) {
+        if (response.status === 404) {
+          throw new Error('Webhook no encontrado (404). Verifica que el workflow en n8n esté activo.');
+        }
         throw new Error(`Error de servidor n8n (${response.status})`);
       }
 
       const n8nResult = await response.json();
 
-      // Verificar si n8n reportó éxito explícito
       if (n8nResult.success === false) {
         throw new Error(n8nResult.message || 'La IA no pudo leer el archivo');
       }
