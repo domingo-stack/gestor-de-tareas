@@ -25,23 +25,25 @@ interface MonthlyMetric {
   new_customers_count: number;
 }
 
+interface AutoCustomerEntry {
+  month: string;
+  count: number;
+}
+
 interface Props {
   transactions: Transaction[];
   metrics: MonthlyMetric[];
+  autoCustomers?: AutoCustomerEntry[];
 }
 
-export default function CacEvolutionChart({ transactions, metrics }: Props) {
+export default function CacEvolutionChart({ transactions, metrics, autoCustomers = [] }: Props) {
 
   const data = useMemo(() => {
-    // 1. Crear un mapa de todos los meses disponibles (últimos 12 meses o todo el historial)
     const monthMap: Record<string, { spend: number, customers: number }> = {};
-    
-    // Helper para obtener llave YYYY-MM
     const getMonthKey = (dateStr: string) => dateStr.substring(0, 7);
 
-    // 2. Procesar GASTO (Numerador)
+    // Procesar GASTO (Numerador)
     transactions.forEach(t => {
-      // Solo gastos marcados como CAC
       const isExpense = t.fin_categories?.type === 'expense';
       if (isExpense && t.is_cac_related) {
         const key = getMonthKey(t.transaction_date);
@@ -50,14 +52,31 @@ export default function CacEvolutionChart({ transactions, metrics }: Props) {
       }
     });
 
-    // 3. Procesar CLIENTES (Denominador)
+    // Procesar CLIENTES — manual override takes priority, then auto
+    const manualMap = new Map<string, number>();
     metrics.forEach(m => {
-      const key = getMonthKey(m.month_date);
-      if (!monthMap[key]) monthMap[key] = { spend: 0, customers: 0 };
-      monthMap[key].customers += m.new_customers_count;
+      if (m.new_customers_count > 0) {
+        manualMap.set(getMonthKey(m.month_date), m.new_customers_count);
+      }
     });
 
-    // 4. Convertir a Array y Calcular CAC
+    const autoMap = new Map<string, number>();
+    autoCustomers.forEach(ac => {
+      autoMap.set(ac.month, ac.count);
+    });
+
+    // Merge all months
+    const allMonths = new Set([...Object.keys(monthMap), ...manualMap.keys(), ...autoMap.keys()]);
+    for (const month of allMonths) {
+      if (!monthMap[month]) monthMap[month] = { spend: 0, customers: 0 };
+      // Manual override > auto > 0
+      if (manualMap.has(month)) {
+        monthMap[month].customers = manualMap.get(month)!;
+      } else if (autoMap.has(month)) {
+        monthMap[month].customers = autoMap.get(month)!;
+      }
+    }
+
     return Object.entries(monthMap)
       .map(([month, val]) => {
         // Evitar división por cero
@@ -66,12 +85,12 @@ export default function CacEvolutionChart({ transactions, metrics }: Props) {
           month, // "2024-02"
           spend: val.spend,
           customers: val.customers,
-          cac: Math.round(cac), // Redondeamos para limpieza visual
+          cac: parseFloat(cac.toFixed(2)),
         };
       })
       .sort((a, b) => a.month.localeCompare(b.month)) // Ordenar cronológicamente
-      .slice(-12); // Opcional: Mostrar solo últimos 12 meses para que no se apriete
-  }, [transactions, metrics]);
+      .slice(-12);
+  }, [transactions, metrics, autoCustomers]);
 
   if (data.length === 0) {
     return <div className="p-8 text-center text-gray-400 border rounded-xl bg-gray-50">No hay suficientes datos de Marketing o Clientes para graficar.</div>;
@@ -111,13 +130,14 @@ export default function CacEvolutionChart({ transactions, metrics }: Props) {
               tick={{ fill: '#9ca3af' }}
             />
             
-            {/* Eje Y Derecho: Cantidad de Clientes (Opcional, para contexto) */}
-            <YAxis 
+            {/* Eje Y Derecho: CAC */}
+            <YAxis
               yAxisId="right"
               orientation="right"
+              tickFormatter={(val) => `$${val}`}
               axisLine={false}
               tickLine={false}
-              hide // Lo ocultamos para limpieza, pero está ahí si lo quieres activar
+              tick={{ fill: '#2563eb' }}
             />
 
 <Tooltip 
@@ -150,11 +170,11 @@ export default function CacEvolutionChart({ transactions, metrics }: Props) {
               radius={[4, 4, 0, 0]} 
             />
 
-            {/* Línea: CAC (Protagonista) */}
-            <Line 
-              yAxisId="left"
-              type="monotone" 
-              dataKey="cac" 
+            {/* Línea: CAC (Protagonista) — eje derecho con su propia escala */}
+            <Line
+              yAxisId="right"
+              type="monotone"
+              dataKey="cac"
               name="CAC" 
               stroke="#2563eb" // blue-600
               strokeWidth={3}
