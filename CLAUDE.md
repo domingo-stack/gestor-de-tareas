@@ -164,12 +164,12 @@ The `/marketing` route implements a Marketing Dashboard with tab-based navigatio
 - **Resumen tab**: Executive KPI overview — 4 sections (Ads: gasto/conversiones/CPA, Web: sesiones/nuevos usuarios/conversiones GA4, Orgánico: seguidores/nuevos/engagement, Conversiones: registros/compras/revenue/tasa).
 - **Ads tab**: AdsOverview — consolidated KPIs, platform comparison (Meta/Google/TikTok), campaign table.
 - **Web y Blog tab**: WebAnalytics — GA4 KPIs, hostname breakdown, traffic sources, top pages, pages catalog.
-- **Orgánico tab**: OrganicOverview (4 platforms) + YouTubeMetrics (video detail).
+- **Orgánico tab**: OrganicOverview (4 platforms) + PostsFeed (FB + IG posts with engagement score) + YouTubeMetrics (video detail).
 - **Conversiones tab**: ConversionsSection — registrations/purchases/revenue from Supabase with UTM breakdown.
 - **Sync tab** (superadmin only): Full sync status table from `mkt_sync_logs` — source, status badge, records processed, timestamp, errors.
 - **Date range filter**: Global filter with presets (7d, 14d, 30d, mes actual, custom).
 - **Empty states**: Each section gracefully handles missing API connections.
-- **Tables**: `mkt_ad_accounts`, `mkt_campaigns`, `mkt_ad_metrics`, `mkt_organic_accounts`, `mkt_organic_metrics`, `mkt_web_metrics`, `mkt_sync_logs`. UTM columns added to `growth_users` and `rev_orders`.
+- **Tables**: `mkt_campaigns`, `mkt_ad_metrics` (platform+platform_campaign_id for join, campaign_id NULL), `mkt_organic_accounts`, `mkt_organic_metrics` (platform_name+platform_account_id), `mkt_organic_video_metrics` (YouTube videos), `mkt_organic_post_metrics` (FB+IG posts, reach/impressions deprecated=0), `mkt_web_metrics` (UNIQUE date+hostname, 2 rows per day), `mkt_web_pages` (URL catalog with page_type), `mkt_web_page_metrics` (per-URL daily), `mkt_sync_logs`. UTM columns added to `growth_users` and `rev_orders` (all NULL until Bubble captures them).
 - **RLS**: Ads/web/sync data restricted to superadmin. Organic data accessible to users with `mod_marketing`.
 - **n8n workflows**: 8 workflows (MKT_ prefix) sync data from Meta/Google/TikTok/YouTube/GA4. Documented in `temp-docs/Marketing/n8n_workflows.md`.
 - **Components**: `components/marketing/` — ResumenTab, OrganicTab, SyncTab, ads/ (AdsOverview, PlatformCard, CampaignTable), organic/ (OrganicOverview, PlatformMetrics, YouTubeMetrics), web/ (WebAnalytics, PagesCatalog), conversions/ (ConversionsSection), shared/ (DateRangePicker, SyncStatus, EmptyState, useDateRange, useMarketingData).
