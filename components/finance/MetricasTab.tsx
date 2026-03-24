@@ -157,7 +157,6 @@ export default function MetricasTab({ accounts, allTransactions, filteredTransac
 
     const fixedExpenses = allTransactions.filter((t) => {
       if (!t.is_fixed_expense) return false;
-      if (t.fin_categories?.type !== 'expense') return false;
       const d = new Date(t.transaction_date);
       return d >= threeMonthsAgo && d <= now;
     });
@@ -168,7 +167,7 @@ export default function MetricasTab({ accounts, allTransactions, filteredTransac
     const runwayMonths = burn > 0 ? cash / burn : 999;
 
     return { runway: runwayMonths, monthlyBurn: burn, totalCash: cash };
-  }, [accounts, allTransactions]);
+  }, [accounts, allTransactions, exchangeRates]);
 
   // CAC calculation (hybrid: auto + manual override)
   const { cac, marketingSpend, totalNewCustomers, isAutoSource } = useMemo(() => {
