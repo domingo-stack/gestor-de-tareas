@@ -8,10 +8,11 @@ import { toast } from 'sonner' // Usamos Sonner para alertas bonitas
 interface UploadFinanceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  categories: { id: string, name: string }[]; // <--- NUEVO: Recibimos categorías
+  categories: { id: string, name: string }[];
+  accounts?: { id: number, name: string, currency: string }[];
 }
 
-export default function UploadFinanceModal({ isOpen, onClose, categories }: UploadFinanceModalProps) {
+export default function UploadFinanceModal({ isOpen, onClose, categories, accounts = [] }: UploadFinanceModalProps) {
   const { supabase, user } = useAuth();
   const [activeTab, setActiveTab] = useState<'upload' | 'manual'>('upload');
   
@@ -27,7 +28,8 @@ export default function UploadFinanceModal({ isOpen, onClose, categories }: Uplo
     amount: '',
     currency: 'USD',
     amount_usd: '',
-    category_id: ''
+    category_id: '',
+    account_id: ''
   });
 
   // Referencia al input oculto
@@ -43,7 +45,8 @@ export default function UploadFinanceModal({ isOpen, onClose, categories }: Uplo
         amount: '',
         currency: 'USD',
         amount_usd: '',
-        category_id: ''
+        category_id: '',
+        account_id: ''
       });
     }
   }, [isOpen]);
@@ -179,6 +182,7 @@ export default function UploadFinanceModal({ isOpen, onClose, categories }: Uplo
         amount_usd: amountUSD,
         exchange_rate: exchangeRate, // <--- AQUÍ ENVIAMOS EL CAMPO NUEVO
         category_id: manualForm.category_id || null,
+        account_id: manualForm.account_id ? parseInt(manualForm.account_id) : null,
         status: 'verified',
         user_id: user?.id || null
       });
@@ -283,6 +287,16 @@ export default function UploadFinanceModal({ isOpen, onClose, categories }: Uplo
                   >
                     <option value="">Seleccionar...</option>
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Cuenta</label>
+                  <select
+                    className="w-full border rounded-lg p-2 text-sm"
+                    value={manualForm.account_id} onChange={e => setManualForm({...manualForm, account_id: e.target.value})}
+                  >
+                    <option value="">Sin cuenta</option>
+                    {accounts.map(a => <option key={a.id} value={a.id.toString()}>{a.name} ({a.currency})</option>)}
                   </select>
                 </div>
                 <div>

@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import type { Account, Transaction, MonthlyMetric } from '@/lib/finance-types';
-import { EXCHANGE_RATES } from '@/lib/finance-types';
+import type { Account, Transaction, MonthlyMetric, ExchangeRatesData } from '@/lib/finance-types';
 import KpiCard from '@/components/growth/KpiCard';
 import CacEvolutionChart from '@/components/CacEvolutionChart';
 import {
@@ -22,6 +21,7 @@ interface MetricasTabProps {
   filteredTransactions: Transaction[];
   dateRangeISO: { start: string; end: string };
   monthlyMetrics: MonthlyMetric[];
+  exchangeRates: ExchangeRatesData;
 }
 
 interface RevenueByMonth {
@@ -40,7 +40,7 @@ const fmtUSD = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency'
 const fmtUSD2 = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 const fmtNum = (n: number) => new Intl.NumberFormat('en-US').format(n);
 
-export default function MetricasTab({ accounts, allTransactions, filteredTransactions, dateRangeISO, monthlyMetrics }: MetricasTabProps) {
+export default function MetricasTab({ accounts, allTransactions, filteredTransactions, dateRangeISO, monthlyMetrics, exchangeRates }: MetricasTabProps) {
   const { supabase } = useAuth();
 
   // Revenue from rev_orders
@@ -60,7 +60,7 @@ export default function MetricasTab({ accounts, allTransactions, filteredTransac
       setRevLoading(true);
       const { data } = await supabase
         .from('rev_orders')
-        .select('amount_usd, client_type, created_at')
+        .select('amount_usd, client_type, plan_type, created_at')
         .gte('created_at', `${dateRangeISO.start}T00:00:00`)
         .lte('created_at', `${dateRangeISO.end}T23:59:59`);
 
@@ -70,8 +70,8 @@ export default function MetricasTab({ accounts, allTransactions, filteredTransac
           const month = row.created_at.substring(0, 7);
           const existing = byMonth.get(month) || { nuevo: 0, renovacion: 0 };
           const amount = Number(row.amount_usd) || 0;
-          const clientType = (row.client_type || '').toLowerCase();
-          if (clientType.includes('nuevo')) existing.nuevo += amount;
+          const tipo = (row.client_type || row.plan_type || '').toLowerCase().trim();
+          if (tipo.includes('nuevo')) existing.nuevo += amount;
           else existing.renovacion += amount;
           byMonth.set(month, existing);
         }
@@ -146,7 +146,7 @@ export default function MetricasTab({ accounts, allTransactions, filteredTransac
   // Runway calculation
   const { runway, monthlyBurn, totalCash } = useMemo(() => {
     const cash = accounts.reduce((acc, curr) => {
-      const rate = EXCHANGE_RATES[curr.currency] || 1;
+      const rate = exchangeRates.rates[curr.currency] || 1;
       const val = Number(curr.balance) / rate;
       return acc + (val || 0);
     }, 0);
@@ -251,7 +251,13 @@ export default function MetricasTab({ accounts, allTransactions, filteredTransac
           icon={ArrowTrendingUpIcon}
           colorClass={totalIncome - totalExpense >= 0 ? 'bg-emerald-500' : 'bg-red-500'}
         />
-        <KpiCard title="Caja Total" value={fmtUSD(totalCash)} icon={BanknotesIcon} colorClass="bg-blue-500" />
+        <KpiCard
+          title="Caja Total"
+          value={fmtUSD(totalCash)}
+          icon={BanknotesIcon}
+          colorClass="bg-blue-500"
+          subtext={exchangeRates.isLive ? `Tasas en vivo (${exchangeRates.date})` : 'Tasas offline'}
+        />
       </div>
 
       {/* KPI detail cards */}

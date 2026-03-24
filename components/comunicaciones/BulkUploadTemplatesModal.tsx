@@ -284,64 +284,57 @@ export default function BulkUploadTemplatesModal({ isOpen, onClose, onComplete, 
       setResults([...newResults]);
       setProgress({ current: saved.length, total: saved.length, phase: `${saved.length} templates guardados como borrador` });
 
-      // Step 2: Submit to Meta in batches of 3 (from client, no timeout risk)
+      // Step 2: Assign queue batches and trigger first batch
       if (submitToMeta && saved.length > 0) {
-        const ids = saved.map(s => s.id);
-        const CHUNK_SIZE = 3;
-        let submitted = 0;
-        let errors = 0;
+        const QUEUE_BATCH_SIZE = 1;
+        const totalBatches = Math.ceil(saved.length / QUEUE_BATCH_SIZE);
+        setProgress({
+          current: saved.length,
+          total: saved.length,
+          phase: `Asignando ${totalBatches} lote${totalBatches > 1 ? 's' : ''} de envío...`,
+        });
 
-        for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
-          const chunk = ids.slice(i, i + CHUNK_SIZE);
-          const currentBatch = Math.min(i + CHUNK_SIZE, ids.length);
-          setProgress({
-            current: i,
-            total: ids.length,
-            phase: `Enviando a Meta... ${currentBatch}/${ids.length}`,
-          });
+        // Assign queue_batch and queue_priority to each template
+        for (let i = 0; i < saved.length; i++) {
+          const batchNum = Math.floor(i / QUEUE_BATCH_SIZE) + 1;
+          await supabase
+            .from('comm_templates')
+            .update({ queue_batch: batchNum, queue_priority: i + 1 })
+            .eq('id', saved[i].id);
 
-          try {
-            const res = await fetch('/api/communication/bulk-submit-templates', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ templateIds: chunk }),
-            });
-
-            if (res.ok) {
-              const { results: chunkResults } = await res.json();
-              chunkResults.forEach((r: { id: number; success: boolean; error?: string }) => {
-                const savedItem = saved.find(s => s.id === r.id);
-                if (!savedItem) return;
-                const idx = newResults.findIndex(nr => nr.nombre === savedItem.nombre);
-                if (idx >= 0) {
-                  newResults[idx].status = r.success ? 'submitted' : 'error';
-                  if (r.error) newResults[idx].error = r.error;
-                  if (r.success) submitted++; else errors++;
-                }
-              });
-            } else {
-              // Mark this chunk as failed
-              chunk.forEach(id => {
-                const savedItem = saved.find(s => s.id === id);
-                if (!savedItem) return;
-                const idx = newResults.findIndex(nr => nr.nombre === savedItem.nombre);
-                if (idx >= 0) { newResults[idx].status = 'error'; newResults[idx].error = 'Timeout o error de red'; errors++; }
-              });
-            }
-          } catch {
-            chunk.forEach(id => {
-              const savedItem = saved.find(s => s.id === id);
-              if (!savedItem) return;
-              const idx = newResults.findIndex(nr => nr.nombre === savedItem.nombre);
-              if (idx >= 0) { newResults[idx].status = 'error'; newResults[idx].error = 'Error de conexión'; errors++; }
-            });
+          const idx = newResults.findIndex(nr => nr.nombre === saved[i].nombre);
+          if (idx >= 0) {
+            newResults[idx].status = 'submitted';
+            newResults[idx].error = `Lote ${batchNum}`;
           }
+        }
+        setResults([...newResults]);
 
-          // Update results in real-time
-          setResults([...newResults]);
+        // Trigger first batch immediately
+        setProgress({
+          current: saved.length,
+          total: saved.length,
+          phase: `Enviando lote 1 de ${totalBatches} a Meta...`,
+        });
+
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          await fetch('/api/communication/process-template-queue', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
+            },
+          });
+        } catch {
+          // Queue will be processed by cron if manual trigger fails
         }
 
-        setProgress({ current: ids.length, total: ids.length, phase: `Completado: ${submitted} enviados, ${errors} errores` });
+        setProgress({
+          current: saved.length,
+          total: saved.length,
+          phase: `Encolados en ${totalBatches} lote${totalBatches > 1 ? 's' : ''}. El lote 1 ya se envió a Meta.`,
+        });
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -609,7 +602,7 @@ export default function BulkUploadTemplatesModal({ isOpen, onClose, onComplete, 
                     </div>
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
                       <div className="text-2xl font-bold text-blue-700">{results.filter(r => r.status === 'submitted').length}</div>
-                      <div className="text-xs text-blue-600">Enviados a Meta</div>
+                      <div className="text-xs text-blue-600">Encolados para Meta</div>
                     </div>
                     <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
                       <div className="text-2xl font-bold text-red-700">{results.filter(r => r.status === 'error').length}</div>
@@ -637,7 +630,7 @@ export default function BulkUploadTemplatesModal({ isOpen, onClose, onComplete, 
                                 r.status === 'saved' ? 'bg-green-100 text-green-700' :
                                 'bg-red-100 text-red-600'
                               }`}>
-                                {r.status === 'submitted' ? 'En revisión' : r.status === 'saved' ? 'Borrador' : 'Error'}
+                                {r.status === 'submitted' ? 'Encolado' : r.status === 'saved' ? 'Borrador' : 'Error'}
                               </span>
                             </td>
                             <td className="px-4 py-2 text-xs text-gray-500">{r.error || '—'}</td>
@@ -683,7 +676,7 @@ export default function BulkUploadTemplatesModal({ isOpen, onClose, onComplete, 
                   disabled={selectedCount === 0 || processing}
                   className="px-4 py-2 text-sm font-semibold bg-[#3c527a] text-white rounded-lg hover:bg-[#2d3f5e] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
-                  Guardar y enviar a Meta ({selectedCount})
+                  Guardar y encolar para Meta ({selectedCount})
                 </button>
               </div>
             </>

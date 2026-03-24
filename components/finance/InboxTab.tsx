@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
-import type { Transaction, Category, FilterStatus, CurrencyEditState } from '@/lib/finance-types';
+import type { Transaction, Category, Account, FilterStatus, CurrencyEditState } from '@/lib/finance-types';
 import AutocompleteInput from './AutocompleteInput';
 import UploadFinanceModal from '@/components/UploadFinanceModal';
 import CurrencyEditModal from '@/components/CurrencyEditModal';
@@ -12,10 +12,11 @@ interface InboxTabProps {
   transactions: Transaction[];
   filteredTransactions: Transaction[];
   categories: Category[];
+  accounts: Account[];
   fetchData: () => void;
 }
 
-export default function InboxTab({ transactions, filteredTransactions, categories, fetchData }: InboxTabProps) {
+export default function InboxTab({ transactions, filteredTransactions, categories, accounts, fetchData }: InboxTabProps) {
   const { supabase } = useAuth();
 
   // UI state
@@ -24,7 +25,8 @@ export default function InboxTab({ transactions, filteredTransactions, categorie
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(25);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ description: '', amount_usd: 0, category_id: '', raw_description: '' });
+  const [editForm, setEditForm] = useState({ description: '', amount_usd: 0, category_id: '', raw_description: '', account_id: null as number | null });
+  const [accountFilter, setAccountFilter] = useState<string>('all');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
   const [bulkForm, setBulkForm] = useState({ category_id: '', description: '' });
@@ -44,6 +46,14 @@ export default function InboxTab({ transactions, filteredTransactions, categorie
   const viewTransactions = useMemo(() => {
     let data = filteredTransactions.filter((t) => statusFilter === 'all' || t.status === statusFilter);
 
+    if (accountFilter !== 'all') {
+      if (accountFilter === 'none') {
+        data = data.filter((t) => !t.account_id);
+      } else {
+        data = data.filter((t) => t.account_id === parseInt(accountFilter));
+      }
+    }
+
     if (searchTerm.trim()) {
       const lowerTerm = searchTerm.toLowerCase();
       data = data.filter((t) => {
@@ -54,7 +64,7 @@ export default function InboxTab({ transactions, filteredTransactions, categorie
       });
     }
     return data;
-  }, [filteredTransactions, statusFilter, searchTerm]);
+  }, [filteredTransactions, statusFilter, searchTerm, accountFilter]);
 
   const indexOfLastRow = currentPage * rowsPerPage;
   const indexOfFirstRow = indexOfLastRow - rowsPerPage;
@@ -66,7 +76,7 @@ export default function InboxTab({ transactions, filteredTransactions, categorie
   // Actions
   const startEdit = (tx: Transaction) => {
     setEditingId(tx.id);
-    setEditForm({ description: tx.description, amount_usd: tx.amount_usd, category_id: tx.category_id, raw_description: tx.raw_description || '' });
+    setEditForm({ description: tx.description, amount_usd: tx.amount_usd, category_id: tx.category_id, raw_description: tx.raw_description || '', account_id: tx.account_id });
   };
 
   const saveEdit = async (id: string) => {
@@ -214,6 +224,19 @@ export default function InboxTab({ transactions, filteredTransactions, categorie
               </button>
             )}
           </div>
+          {accounts.length > 0 && (
+            <select
+              value={accountFilter}
+              onChange={(e) => { setAccountFilter(e.target.value); setCurrentPage(1); }}
+              className="border border-gray-300 rounded-md px-2 py-1.5 text-xs bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="all">Todas las cuentas</option>
+              <option value="none">Sin cuenta</option>
+              {accounts.map(a => (
+                <option key={a.id} value={a.id.toString()}>{a.name} ({a.currency})</option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Table */}
@@ -228,6 +251,7 @@ export default function InboxTab({ transactions, filteredTransactions, categorie
                 <th className="px-6 py-3 bg-gray-50">Descripción IA</th>
                 <th className="px-6 py-3 bg-gray-50">Descripción Original</th>
                 <th className="px-6 py-3 bg-gray-50">Categoría</th>
+                <th className="px-6 py-3 bg-gray-50">Cuenta</th>
                 <th className="px-6 py-3 text-right bg-gray-50">Monto (USD)</th>
                 <th className="px-6 py-3 text-center bg-gray-50">Acción</th>
               </tr>
@@ -261,6 +285,24 @@ export default function InboxTab({ transactions, filteredTransactions, categorie
                     ) : (
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium tracking-wide border ${tx.fin_categories?.type === 'income' ? 'bg-green-50 text-green-700 border-green-100' : 'bg-gray-50 text-gray-600 border-gray-200'}`}>
                         {tx.fin_categories?.name}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-6 py-3">
+                    {editingId === tx.id ? (
+                      <select
+                        className="border rounded px-2 py-1 text-xs w-full"
+                        value={editForm.account_id?.toString() ?? ''}
+                        onChange={(e) => setEditForm({ ...editForm, account_id: e.target.value ? parseInt(e.target.value) : null })}
+                      >
+                        <option value="">—</option>
+                        {accounts.map(a => (
+                          <option key={a.id} value={a.id.toString()}>{a.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-xs text-gray-500">
+                        {tx.account_id ? accounts.find(a => a.id === tx.account_id)?.name ?? '—' : '—'}
                       </span>
                     )}
                   </td>
@@ -352,7 +394,7 @@ export default function InboxTab({ transactions, filteredTransactions, categorie
       )}
 
       {/* Modals */}
-      <UploadFinanceModal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setTimeout(fetchData, 2000); }} categories={categories} />
+      <UploadFinanceModal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); setTimeout(fetchData, 2000); }} categories={categories} accounts={accounts} />
       <CurrencyEditModal isOpen={currencyEdit.isOpen} onClose={() => setCurrencyEdit((prev) => ({ ...prev, isOpen: false }))} onSave={saveCurrencyData} initialData={currencyEdit.currentData} />
     </>
   );

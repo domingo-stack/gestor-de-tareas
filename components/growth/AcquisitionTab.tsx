@@ -45,12 +45,14 @@ export default function AcquisitionTab() {
   const [loading, setLoading] = useState(true);
   const [weekStart, setWeekStart] = useState<Date>(getCurrentWeekStart);
   const [showAllTime, setShowAllTime] = useState(false);
+  const [countryFilter, setCountryFilter] = useState<string>('');
 
   const fetchData = useCallback(async () => {
     if (!supabase) return;
     setLoading(true);
     const params: Record<string, string | null> = {
       p_week_start: showAllTime ? null : toDateStr(weekStart),
+      p_country_filter: countryFilter || null,
     };
     const { data: result, error } = await supabase.rpc('get_acquisition_stats', params);
     if (error) {
@@ -63,7 +65,7 @@ export default function AcquisitionTab() {
       setData({ has_data: false });
     }
     setLoading(false);
-  }, [supabase, weekStart, showAllTime]);
+  }, [supabase, weekStart, showAllTime, countryFilter]);
 
   useEffect(() => {
     fetchData();
@@ -209,8 +211,82 @@ export default function AcquisitionTab() {
       {/* Country x Status */}
       <StatusTable title="Pais x Status" tableData={countryTable} />
 
-      {/* Channel x Status */}
-      <StatusTable title="Canal x Status" tableData={channelTable} />
+      {/* Channel x Status — with country filter */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+        <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+          <h3 className="font-semibold text-gray-700">Canal x Status</h3>
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-gray-500">Filtrar por país:</label>
+            <select
+              value={countryFilter}
+              onChange={(e) => setCountryFilter(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-xs bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 min-w-[160px]"
+            >
+              <option value="">Todos los países</option>
+              {countryTable.map(row => (
+                <option key={row.key} value={row.key}>{row.key} ({fmtNum(row.total)})</option>
+              ))}
+            </select>
+            {countryFilter && (
+              <button
+                onClick={() => setCountryFilter('')}
+                className="text-xs text-red-500 hover:text-red-700 font-medium"
+              >
+                Limpiar
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-500 font-medium border-b">
+              <tr>
+                <th className="px-4 py-3 text-left">Canal</th>
+                <th className="px-4 py-3 text-right">Pago</th>
+                <th className="px-4 py-3 text-right">Gratis Activado</th>
+                <th className="px-4 py-3 text-right">No Activado</th>
+                <th className="px-4 py-3 text-right">Total</th>
+                <th className="px-4 py-3 text-right">% Total</th>
+                <th className="px-4 py-3 text-right">% Conversion</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {channelTable.map((row) => (
+                <tr key={row.key} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-3 font-medium text-gray-900">{row.key}</td>
+                  <td className="px-4 py-3 text-right text-green-600 font-medium">{fmtNum(row.pago)}</td>
+                  <td className="px-4 py-3 text-right text-purple-600">{fmtNum(row.gratisActivado)}</td>
+                  <td className="px-4 py-3 text-right text-gray-400">{fmtNum(row.noActivado)}</td>
+                  <td className="px-4 py-3 text-right font-bold text-gray-900">{fmtNum(row.total)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <span className="text-xs text-gray-500">{row.pctOfGrandTotal != null ? `${row.pctOfGrandTotal}%` : '-'}</span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${row.conversionPct >= 10 ? 'bg-green-50 text-green-700' : row.conversionPct >= 5 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
+                      {fmtPct(row.conversionPct)}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+              <tr className="bg-gray-50 font-bold border-t-2 border-gray-300">
+                <td className="px-4 py-3 text-gray-900">Total{countryFilter ? ` (${countryFilter})` : ''}</td>
+                <td className="px-4 py-3 text-right text-green-700">{fmtNum(channelTable.reduce((s, r) => s + r.pago, 0))}</td>
+                <td className="px-4 py-3 text-right text-purple-700">{fmtNum(channelTable.reduce((s, r) => s + r.gratisActivado, 0))}</td>
+                <td className="px-4 py-3 text-right text-gray-500">{fmtNum(channelTable.reduce((s, r) => s + r.noActivado, 0))}</td>
+                <td className="px-4 py-3 text-right text-gray-900">{fmtNum(channelTable.reduce((s, r) => s + r.total, 0))}</td>
+                <td className="px-4 py-3 text-right text-xs text-gray-500">100%</td>
+                <td className="px-4 py-3 text-right">
+                  {(() => {
+                    const totalAll = channelTable.reduce((s, r) => s + r.total, 0);
+                    const totalPago = channelTable.reduce((s, r) => s + r.pago, 0);
+                    return <span className="text-xs font-medium text-gray-600">{fmtPct(totalAll > 0 ? (totalPago / totalAll) * 100 : 0)}</span>;
+                  })()}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
       {/* Channel x Plan */}
       {channelPlanRows.length > 0 && (

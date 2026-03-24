@@ -14,6 +14,7 @@ import {
 
 import type { Account, Category, Transaction, MonthlyMetric, DateRangePreset } from '@/lib/finance-types';
 import { useFinanceDateRange } from '@/components/finance/useFinanceDateRange';
+import { useExchangeRates } from '@/hooks/useExchangeRates';
 import InboxTab from '@/components/finance/InboxTab';
 import PnLTab from '@/components/finance/PnLTab';
 import MetricasTab from '@/components/finance/MetricasTab';
@@ -38,6 +39,9 @@ export default function FinancePage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [monthlyMetrics, setMonthlyMetrics] = useState<MonthlyMetric[]>([]);
+
+  // Exchange rates (live API with fallback)
+  const exchangeRates = useExchangeRates();
 
   // Date range
   const {
@@ -90,11 +94,11 @@ export default function FinancePage() {
 
     switch (activeTab) {
       case 'inbox':
-        return <InboxTab transactions={transactions} filteredTransactions={filteredTransactions} categories={categories} fetchData={fetchData} />;
+        return <InboxTab transactions={transactions} filteredTransactions={filteredTransactions} categories={categories} accounts={accounts} fetchData={fetchData} />;
       case 'pnl':
         return <PnLTab filteredTransactions={filteredTransactions} dateRangeISO={dateRangeISO} />;
       case 'metricas':
-        return <MetricasTab accounts={accounts} allTransactions={transactions} filteredTransactions={filteredTransactions} dateRangeISO={dateRangeISO} monthlyMetrics={monthlyMetrics} />;
+        return <MetricasTab accounts={accounts} allTransactions={transactions} filteredTransactions={filteredTransactions} dateRangeISO={dateRangeISO} monthlyMetrics={monthlyMetrics} exchangeRates={exchangeRates} />;
       case 'config':
         return <ConfigTab accounts={accounts} monthlyMetrics={monthlyMetrics} fetchData={fetchData} />;
       default:

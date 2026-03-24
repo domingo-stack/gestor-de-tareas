@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import type { Account, MonthlyMetric } from '@/lib/finance-types';
 import CategorySettingsModal from '@/components/CategorySettingsModal';
 import OperationalMetricsModal from '@/components/OperationalMetricsModal';
+import AccountModal from '@/components/finance/AccountModal';
 
 interface ConfigTabProps {
   accounts: Account[];
@@ -20,6 +21,8 @@ export default function ConfigTab({ accounts, monthlyMetrics, fetchData }: Confi
   const [balancesForm, setBalancesForm] = useState<Record<string, number>>({});
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [isMetricsOpen, setIsMetricsOpen] = useState(false);
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null);
 
   useEffect(() => {
     const form: Record<string, number> = {};
@@ -29,20 +32,31 @@ export default function ConfigTab({ accounts, monthlyMetrics, fetchData }: Confi
 
   const updateBalances = async () => {
     try {
-      const updates = Object.entries(balancesForm).map(([idString, balance]) => ({
-        id: parseInt(idString),
-        balance: Number(balance),
-        last_updated: new Date().toISOString(),
-      }));
-
-      const { error } = await supabase.from('fin_accounts').upsert(updates);
-      if (error) throw error;
+      const now = new Date().toISOString();
+      for (const [idString, balance] of Object.entries(balancesForm)) {
+        const { error } = await supabase
+          .from('fin_accounts')
+          .update({ balance: Number(balance), last_updated: now })
+          .eq('id', parseInt(idString));
+        if (error) throw error;
+      }
 
       toast.success('Saldos actualizados correctamente');
       fetchData();
     } catch {
       toast.error('Error al actualizar saldos');
     }
+  };
+
+  const handleDeleteAccount = async (acc: Account) => {
+    if (!confirm(`¿Eliminar la cuenta "${acc.name}"? Las transacciones asociadas quedarán sin cuenta.`)) return;
+    const { error } = await supabase.from('fin_accounts').delete().eq('id', acc.id);
+    if (error) {
+      toast.error('Error al eliminar la cuenta');
+      return;
+    }
+    toast.success('Cuenta eliminada');
+    fetchData();
   };
 
   return (
@@ -54,13 +68,23 @@ export default function ConfigTab({ accounts, monthlyMetrics, fetchData }: Confi
             <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wide">Saldos Bancarios</h3>
             <p className="text-xs text-gray-400 mt-0.5">Actualiza los saldos de tus cuentas para calcular el Runway correctamente</p>
           </div>
+          <button
+            onClick={() => { setEditingAccount(null); setAccountModalOpen(true); }}
+            className="flex items-center gap-1.5 px-4 py-2 bg-[#ff8080] hover:bg-[#ff6b6b] text-white text-sm font-semibold rounded-lg transition-colors"
+          >
+            <span className="text-lg leading-none">+</span>
+            Nueva Cuenta
+          </button>
         </div>
 
         <div className="space-y-4">
           {accounts.map((acc) => (
             <div key={acc.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100">
-              <div>
-                <p className="font-medium text-gray-800">{acc.name}</p>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <p className="font-medium text-gray-800">{acc.name}</p>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-500 font-medium">{acc.type || 'otro'}</span>
+                </div>
                 <p className="text-xs text-gray-500">{acc.currency} — Saldo actual: {acc.currency} {fmtNum(acc.balance)}</p>
                 {acc.last_updated && (
                   <p className="text-[10px] text-gray-400 mt-0.5">
@@ -68,12 +92,32 @@ export default function ConfigTab({ accounts, monthlyMetrics, fetchData }: Confi
                   </p>
                 )}
               </div>
-              <input
-                type="number"
-                className="border border-gray-300 rounded-lg px-3 py-2 text-right w-40 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                value={balancesForm[acc.id.toString()] || 0}
-                onChange={(e) => setBalancesForm({ ...balancesForm, [acc.id.toString()]: parseFloat(e.target.value) })}
-              />
+              <div className="flex items-center gap-2 ml-4">
+                <input
+                  type="number"
+                  className="border border-gray-300 rounded-lg px-3 py-2 text-right w-40 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  value={balancesForm[acc.id.toString()] ?? 0}
+                  onChange={(e) => setBalancesForm({ ...balancesForm, [acc.id.toString()]: parseFloat(e.target.value) })}
+                />
+                <button
+                  onClick={() => { setEditingAccount(acc); setAccountModalOpen(true); }}
+                  className="p-2 text-gray-400 hover:text-[#3c527a] transition-colors rounded-lg hover:bg-gray-100"
+                  title="Editar cuenta"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Z" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => handleDeleteAccount(acc)}
+                  className="p-2 text-gray-400 hover:text-red-500 transition-colors rounded-lg hover:bg-red-50"
+                  title="Eliminar cuenta"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                  </svg>
+                </button>
+              </div>
             </div>
           ))}
           {accounts.length === 0 && (
@@ -132,6 +176,12 @@ export default function ConfigTab({ accounts, monthlyMetrics, fetchData }: Confi
       {/* Modals */}
       <CategorySettingsModal isOpen={isCategoryOpen} onClose={() => setIsCategoryOpen(false)} onUpdate={fetchData} />
       <OperationalMetricsModal isOpen={isMetricsOpen} onClose={() => setIsMetricsOpen(false)} />
+      <AccountModal
+        isOpen={accountModalOpen}
+        onClose={() => { setAccountModalOpen(false); setEditingAccount(null); }}
+        onSaved={fetchData}
+        account={editingAccount}
+      />
     </div>
   );
 }

@@ -31,11 +31,11 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 ### Authentication & Authorization
 
 - `context/AuthContext.tsx` provides a global `useAuth()` hook exposing `session`, `user`, `isLoading`, and the `supabase` client instance.
-- `context/PermissionsContext.tsx` provides `usePermissions()` hook exposing `role`, `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `mod_customer_success`, `isLoading`, `refetch`.
+- `context/PermissionsContext.tsx` provides `usePermissions()` hook exposing `role`, `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `mod_customer_success`, `mod_comunicaciones`, `mod_marketing`, `isLoading`, `refetch`.
 - `components/AuthGuard.tsx` wraps protected pages; redirects to `/login` if unauthenticated.
 - `components/ModuleGuard.tsx` wraps page content; checks module-level permissions. Shows "Acceso Denegado" if user lacks permission, or "Cuenta Pendiente" if user has no role (registered without invitation).
 - **Roles**: `superadmin` (full access), `member` (org employee), `invitado` (external collaborator).
-- **Permissions**: Per-module booleans in `user_permissions` table: `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `mod_producto`, `mod_customer_success`. Superadmin always has all permissions.
+- **Permissions**: Per-module booleans in `user_permissions` table: `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `mod_producto`, `mod_customer_success`, `mod_comunicaciones`, `mod_marketing`. Superadmin always has all permissions.
 - **Registration**: Invitation-only via `/register?invite_token=TOKEN`. Without token, registration is blocked.
 - Role info + permissions fetched via `get_user_role_and_permissions` RPC.
 
@@ -47,10 +47,11 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 | `/projects` | Project listing with favorites, delete, invite members (uses `ProjectCard`) |
 | `/projects/[id]` | Project detail with Kanban board (drag-and-drop) |
 | `/calendar` | FullCalendar event management with team-colored events |
-| `/finance` | Transaction management, multi-currency, CAC tracking |
+| `/finance` | Finance Dashboard — 4-tab: Inbox, P&L, Métricas (growth integration), Config |
 | `/revenue` | Growth Dashboard — 8-tab growth analytics (Revenue, Country, Churn, Conversion, Acquisition, Behavior, Reports) |
 | `/producto` | Product module (Backlog, Roadmap, Experimentos) |
 | `/customer-success` | Customer Success dashboard (embedded Kali Analytics iframe) |
+| `/marketing` | Marketing module — Performance (superadmin) or Organic (member/invitado) dashboard |
 | `/admin/users` | Superadmin user & permissions administration |
 | `/settings/team` | Organization member management |
 | `/settings/notifications` | Per-user notification preferences (email/in-app toggles) |
@@ -60,7 +61,7 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 - All Supabase queries happen client-side inside components (no server actions or API routes).
 - **RPC functions**: `get_user_role_and_permissions`, `get_all_members`, `get_all_users_admin`, `update_user_role`, `update_user_module_permission`, `deactivate_user`, `add_member`, `remove_member`, `create_task_v2`, `create_project`, `get_project_members`, `get_projects_with_members`, `get_my_assigned_tasks_with_projects`, `toggle_project_favorite`, `delete_project_and_tasks`, `migrate_tasks_and_delete_project`, `create_content_review`, `submit_review_response`, `get_review_history`, `get_notification_preferences`, `upsert_notification_preferences`, `get_all_notification_preferences`, `get_notification_recipients`, `get_executive_summary` (weekly KPIs + `weekly_trend` 8-week revenue/registrations array + `country_registrations` top-15 country table → jsonb), `get_churn_renewal` (churn/renewal tables → jsonb; params: `p_plan_filter text`, `p_upcoming_days int`; returns `newPaid`/`renewed` split + `plan_options`), `get_conversion_funnel` (funnel semanal + acumulado + weekly cohorts → jsonb; params: `p_week_start date`, `p_weeks int`, `p_eventos_filter text` ('all'|'0'..'4'|'5+'), `p_plan_status text` ('all'|'free'|'paid'|'cancelled'), `p_plan_id text`; returns `funnel_week`, `funnel_general`, `weekly`, `plan_options`), `get_acquisition_stats` (country/channel cross-tables → jsonb; params: `p_week_start date` (NULL=all-time); channels grouped into 8 categories via CASE; returns `pctOfGrandTotal` per row), `get_revenue_by_country` (country×period matrix → jsonb).
 - **Key tables**: `profiles` (role), `user_permissions` (module booleans), `org_settings` (singleton org config), `invitations` (invite tokens), `tasks` (uses `assignee_user_id` UUID column, not `assignee_id`), `content_reviews` (review rounds), `review_responses` (reviewer votes), `product_initiatives` (Dual-Track product items with RICE scoring), `notification_preferences` (per-user notification channel preferences), `project_favorites` (user-project favorite relation, managed via `toggle_project_favorite` RPC), `rev_orders` (payment orders with `client_type`, `plan_category`, `plan_duration` columns), `growth_users` (Bubble users sync), `growth_events` (Mixpanel events), `growth_funnels` (Mixpanel funnels), `growth_retention` (Mixpanel cohorts), `growth_metrics_daily` (DAU/WAU/MAU), `growth_report_config` (report recipients), `growth_report_log` (report send history), `growth_weekly_snapshots` (weekly computed metrics).
-- Types are centralized in `lib/types.ts` — key entities: `Task`, `Project`, `CompanyEvent`, `Transaction`, `Account`, `Category`, `MonthlyMetric`, `UserPermissions`, `ProductInitiative`, `ExperimentData`.
+- Types are centralized in `lib/types.ts` — key entities: `Task`, `Project`, `CompanyEvent`, `UserPermissions`, `ProductInitiative`, `ExperimentData`. Finance types in `lib/finance-types.ts`: `Transaction`, `Account`, `Category`, `MonthlyMetric`, `PnLData`, `EXCHANGE_RATES`.
 
 ### Supabase Edge Functions (`supabase/functions/`)
 
@@ -100,6 +101,19 @@ Ten Deno/TypeScript edge functions handle email + in-app notifications via Resen
 - **Layout** (`app/layout.tsx`): Flex horizontal — `Sidebar | (TopBar + main content)`. Login/Register pages don't show sidebar or topbar (components return null when no user).
 - **Favicon**: `app/icon.svg` (monster from Califica logo). Auto-detected by Next.js convention.
 
+### Finance Module (4-tab dashboard at `/finance`)
+
+The `/finance` route implements a CFO dashboard with 4 tabs (same pattern as `/revenue` and `/marketing`):
+- **Inbox tab**: Transaction table with inline editing, bulk operations (verify, edit lote), status filter (Por Revisar/Histórico/Todo), search, pagination, **account filter** (dropdown). Upload facturas via n8n webhook (IA) or manual entry. CurrencyEditModal for exchange rate correction. Transactions have optional `account_id` FK to `fin_accounts`.
+- **P&L tab**: 3 Recharts (income vs expenses, cost structure, net margin %) + expandable P&L matrix (PnLSection) with drill-down by parent → category → description.
+- **Métricas tab**: KPI cards (Runway, CAC, Cash Flow, Caja Total). **Growth integration**: Revenue auto-loaded from `rev_orders` (split Nuevo/Renovación), new customers auto from `growth_users` (plan_paid=true) with manual override via `fin_monthly_metrics`. CacEvolutionChart with hybrid customer data. **Live exchange rates** via `useExchangeRates` hook (fallback to hardcoded).
+- **Config tab**: Account CRUD (create/edit/delete via AccountModal), balance management, CategorySettingsModal (fixed expense + CAC flags), OperationalMetricsModal (manual customer count override).
+- **Date range filter**: Global in header (Este Mes, 3M, 6M, 12M, Todo, Custom) — hidden on Config tab.
+- **Tables**: `fin_transactions` (with `account_id` FK nullable), `fin_categories`, `fin_accounts`, `fin_monthly_metrics`. Reads from `rev_orders` and `growth_users` for automated metrics.
+- **Exchange rates**: `hooks/useExchangeRates.ts` fetches live from `cdn.jsdelivr.net/npm/@fawazahmed0/currency-api`. Fallback to `EXCHANGE_RATES` constant in `lib/finance-types.ts`.
+- **n8n webhook**: `NEXT_PUBLIC_N8N_WEBHOOK_URL` env var. 30s timeout via AbortController, specific 404 error message.
+- **Components**: `components/finance/` — InboxTab, PnLTab, MetricasTab, ConfigTab, AccountModal, PnLSection, AutocompleteInput, useFinanceDateRange. Shared: `components/` — UploadFinanceModal, CurrencyEditModal, CategorySettingsModal, OperationalMetricsModal, FinancialCharts, CacEvolutionChart.
+
 ### Component Patterns
 
 - Forms use controlled state; `EditTaskForm` auto-saves with 1500ms debounce.
@@ -131,6 +145,34 @@ The `/revenue` route implements a Growth Dashboard with 8 tabs:
 - **Reportes** (Fase 4, superadmin only): Report recipients CRUD, send history, test send.
 - **Components**: `components/growth/` — KpiCard, GrowthFilters, WeekSelector, ExecutiveSummary, RevenueTab, RevenueByCountry, ChurnRenewal, ConversionFunnel, AcquisitionTab, RetentionCohort, ReportConfig.
 - **Data sources**: `rev_orders` (existing, enhanced), `growth_users` (Bubble Users via n8n), `growth_events`/`growth_funnels`/`growth_retention`/`growth_metrics_daily` (Mixpanel via n8n).
+
+### Communications Module (5-tab dashboard at `/comunicaciones`)
+
+The `/comunicaciones` route implements a WhatsApp communications dashboard with 5 tabs: Campañas, Métricas, Automatizaciones, Templates, Configuración.
+- **Templates tab**: CRUD for WhatsApp message templates with Meta approval workflow. Bulk CSV upload via `BulkUploadTemplatesModal`. Individual/bulk delete (from Meta + local DB).
+- **Template Queue System**: Bulk uploads use a queue to avoid saturating Meta's review. Templates are assigned to batches of 3 (`queue_batch` column). A cron job (every 15 min) or manual button calls `process-template-queue` API to: check active batch status with Meta → advance to next batch when resolved → submit next batch. Queue status banner in Templates tab shows progress with auto-polling every 60s.
+- **API Routes** (`app/api/communication/`): `submit-template`, `bulk-submit-templates`, `delete-template`, `check-template-status`, `process-template-queue` (queue processor, CRON_SECRET or auth), `queue-status` (GET, queue state for UI), `send-broadcast`, `sync-broadcast`, `send-test`, `event` (webhook), `status-update` (webhook).
+- **Tables**: `comm_templates` (with `queue_batch`, `queue_priority` for queue system), `comm_broadcasts`, `comm_variables`, `comm_test_contacts`, `comm_message_logs`, `comm_automations`.
+- **Kapso integration**: `lib/kapso.ts` — `submitTemplateToMeta`, `getTemplateStatus`, `deleteTemplateFromMeta`, `createBroadcast`, `addBroadcastRecipients`, `sendBroadcast`, `getBroadcastStatus`, `sendTemplateMessage`.
+- **Components**: `components/comunicaciones/` — Templates, BulkUploadTemplatesModal, Campanias, Metricas, Automatizaciones, Configuracion.
+
+### Marketing Module (6-tab dashboard at `/marketing`)
+
+The `/marketing` route implements a Marketing Dashboard with tab-based navigation (same pattern as `/revenue`):
+- **Superadmin view — 6 tabs**: Resumen, Ads, Web y Blog, Orgánico, Conversiones, Sync. DateRangePicker global in header applies to all tabs (except Sync). Tab bar with icons.
+- **Member/Invitado view**: Single organic view without tab bar — OrganicOverview + YouTubeMetrics with DateRangePicker.
+- **Resumen tab**: Executive KPI overview — 4 sections (Ads: gasto/conversiones/CPA, Web: sesiones/nuevos usuarios/conversiones GA4, Orgánico: seguidores/nuevos/engagement, Conversiones: registros/compras/revenue/tasa).
+- **Ads tab**: AdsOverview — consolidated KPIs, platform comparison (Meta/Google/TikTok), campaign table.
+- **Web y Blog tab**: WebAnalytics — GA4 KPIs, hostname breakdown, traffic sources, top pages, pages catalog.
+- **Orgánico tab**: OrganicOverview (4 platforms) + YouTubeMetrics (video detail).
+- **Conversiones tab**: ConversionsSection — registrations/purchases/revenue from Supabase with UTM breakdown.
+- **Sync tab** (superadmin only): Full sync status table from `mkt_sync_logs` — source, status badge, records processed, timestamp, errors.
+- **Date range filter**: Global filter with presets (7d, 14d, 30d, mes actual, custom).
+- **Empty states**: Each section gracefully handles missing API connections.
+- **Tables**: `mkt_ad_accounts`, `mkt_campaigns`, `mkt_ad_metrics`, `mkt_organic_accounts`, `mkt_organic_metrics`, `mkt_web_metrics`, `mkt_sync_logs`. UTM columns added to `growth_users` and `rev_orders`.
+- **RLS**: Ads/web/sync data restricted to superadmin. Organic data accessible to users with `mod_marketing`.
+- **n8n workflows**: 8 workflows (MKT_ prefix) sync data from Meta/Google/TikTok/YouTube/GA4. Documented in `temp-docs/Marketing/n8n_workflows.md`.
+- **Components**: `components/marketing/` — ResumenTab, OrganicTab, SyncTab, ads/ (AdsOverview, PlatformCard, CampaignTable), organic/ (OrganicOverview, PlatformMetrics, YouTubeMetrics), web/ (WebAnalytics, PagesCatalog), conversions/ (ConversionsSection), shared/ (DateRangePicker, SyncStatus, EmptyState, useDateRange, useMarketingData).
 
 ### Product Module (Backlog | Roadmap | Experimentos)
 

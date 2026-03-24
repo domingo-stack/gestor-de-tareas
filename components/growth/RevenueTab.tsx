@@ -226,7 +226,7 @@ export default function RevenueTab() {
           if (selectedCountries.length > 0) q = q.in('country', selectedCountries);
           if (selectedPlan !== 'all') q = q.or(`product_name.ilike.%${selectedPlan}%,plan_duration.ilike.%${selectedPlan}%`);
           if (selectedProviders.length > 0) q = q.in('provider', selectedProviders);
-          if (selectedTypes.length > 0) q = q.in('client_type', selectedTypes);
+          // selectedTypes filter applied client-side (needs client_type OR plan_type fallback)
           if (searchTerm) q = q.or(`external_id.ilike.%${searchTerm}%,user_bubble_id.ilike.%${searchTerm}%`);
           return q;
         };
@@ -244,8 +244,20 @@ export default function RevenueTab() {
         if (allDataRes.error) throw allDataRes.error;
         if (tableDataRes.error) throw tableDataRes.error;
 
-        const data = allDataRes.data || [];
-        const prevData = prevDataRes.data || [];
+        // Client-side type filter (uses client_type OR plan_type fallback)
+        const typeFilter = (items: any[]) => {
+          if (selectedTypes.length === 0) return items;
+          return items.filter((o: any) => {
+            const tipo = (o.client_type || o.plan_type || '').toLowerCase().trim();
+            const isNuevo = tipo.includes('nuevo');
+            if (selectedTypes.includes('Nuevo') && isNuevo) return true;
+            if (selectedTypes.includes('Renovacion') && !isNuevo) return true;
+            return false;
+          });
+        };
+
+        const data = typeFilter(allDataRes.data || []);
+        const prevData = typeFilter(prevDataRes.data || []);
 
         const totalRev = data.reduce((sum: number, item: any) => sum + (item.amount_usd || 0), 0);
         const prevTotal = prevData.reduce((sum: number, item: any) => sum + (item.amount_usd || 0), 0);
@@ -257,8 +269,8 @@ export default function RevenueTab() {
 
         setMetrics({ totalRevenue: totalRev, totalTransactions: data.length, averageTicket: data.length > 0 ? totalRev / data.length : 0, growth: growthParams });
         setAllData(data as RevenueOrder[]);
-        setLastYearData((lastYearRes.data || []) as RevenueOrder[]);
-        setOrders((tableDataRes.data || []) as RevenueOrder[]);
+        setLastYearData(typeFilter(lastYearRes.data || []) as RevenueOrder[]);
+        setOrders(typeFilter(tableDataRes.data || []) as RevenueOrder[]);
         setTotalRecords(allDataRes.count || 0);
       } catch (err) {
         console.error('Error fetching revenue data:', err);
@@ -303,7 +315,7 @@ export default function RevenueTab() {
 
       const tipo = (order.client_type || order.plan_type || '').toLowerCase().trim();
       if (tipo.includes('nuevo')) entry.nuevo += amt;
-      else if (tipo.includes('renova')) entry.renovacion += amt;
+      else entry.renovacion += amt;
     });
 
     bucketMap.forEach((entry, key) => {

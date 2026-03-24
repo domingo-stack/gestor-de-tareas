@@ -1116,6 +1116,28 @@ function SendTestModal({ template, onClose }: { template: CommTemplate; onClose:
 // ──────────────────────────────────────────
 // Main Templates Component
 // ──────────────────────────────────────────
+// ──────────────────────────────────────────
+// Queue status types
+// ──────────────────────────────────────────
+interface QueueBatchSummary {
+  batch: number;
+  total: number;
+  aprobado: number;
+  revision: number;
+  rechazado: number;
+  borrador: number;
+}
+
+interface QueueStatus {
+  has_queue: boolean;
+  active_batch: number | null;
+  total_batches: number;
+  completed_batches: number;
+  pending_count: number;
+  total_queued: number;
+  batches?: QueueBatchSummary[];
+}
+
 export default function Templates() {
   const { supabase } = useAuth();
   const [templates, setTemplates] = useState<CommTemplate[]>([]);
@@ -1130,6 +1152,9 @@ export default function Templates() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [queueStatus, setQueueStatus] = useState<QueueStatus | null>(null);
+  const [processingQueue, setProcessingQueue] = useState(false);
+  const [lastQueueCheck, setLastQueueCheck] = useState<Date | null>(null);
 
   const fetchTemplates = useCallback(async () => {
     if (!supabase) return;
@@ -1147,6 +1172,75 @@ export default function Templates() {
   }, [supabase]);
 
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
+
+  // Queue status polling
+  const fetchQueueStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/communication/queue-status');
+      if (res.ok) {
+        const data = await res.json();
+        setQueueStatus(data);
+        setLastQueueCheck(new Date());
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => {
+    fetchQueueStatus();
+  }, [fetchQueueStatus]);
+
+  // Auto-poll every 60s when queue is active
+  useEffect(() => {
+    if (!queueStatus?.has_queue) return;
+    const interval = setInterval(() => {
+      fetchQueueStatus();
+      fetchTemplates(); // Also refresh template list
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [queueStatus?.has_queue, fetchQueueStatus, fetchTemplates]);
+
+  const handleProcessQueue = async () => {
+    setProcessingQueue(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/communication/process-template-queue', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(session?.access_token && { 'Authorization': `Bearer ${session.access_token}` }),
+        },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(data.message ?? 'Cola procesada');
+        await fetchQueueStatus();
+        await fetchTemplates();
+      } else {
+        toast.error(data.error ?? 'Error al procesar cola');
+      }
+    } catch {
+      toast.error('Error de red al procesar cola');
+    } finally {
+      setProcessingQueue(false);
+    }
+  };
+
+  const handleStopQueue = async () => {
+    if (!confirm('¿Detener la cola y quitar el banner? Los templates que ya están en revisión en Meta seguirán su proceso normal, solo se limpia la cola local.')) return;
+    try {
+      const { error } = await supabase
+        .from('comm_templates')
+        .update({ queue_batch: null, queue_priority: null })
+        .not('queue_batch', 'is', null);
+      if (error) throw error;
+
+      toast.success('Cola eliminada');
+      await fetchQueueStatus();
+      await fetchTemplates();
+    } catch {
+      toast.error('Error al detener la cola');
+    }
+  };
 
   const handleSave = (saved: CommTemplate) => {
     setTemplates(prev => {
@@ -1371,6 +1465,100 @@ export default function Templates() {
         ))}
       </div>
 
+      {/* Queue Status Banner */}
+      {queueStatus?.has_queue && (
+        <div className="mb-6 bg-blue-50 border border-blue-200 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">📦</span>
+              <h3 className="text-sm font-bold text-blue-800">Importación masiva en progreso</h3>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleProcessQueue}
+                disabled={processingQueue}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
+              >
+                <span className={processingQueue ? 'animate-spin inline-block' : ''}>🔄</span>
+                {processingQueue ? 'Procesando...' : 'Procesar cola'}
+              </button>
+              <button
+                onClick={() => { fetchQueueStatus(); fetchTemplates(); }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-blue-300 text-blue-700 text-xs font-semibold rounded-lg hover:bg-blue-50 transition-colors"
+              >
+                ↻ Actualizar estados
+              </button>
+              <button
+                onClick={handleStopQueue}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-red-300 text-red-600 text-xs font-semibold rounded-lg hover:bg-red-50 transition-colors"
+              >
+                ⏹ Detener cola
+              </button>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          {(() => {
+            const total = queueStatus.total_batches;
+            const completed = queueStatus.completed_batches;
+            const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+            return (
+              <div className="mb-3">
+                <div className="flex items-center justify-between text-xs text-blue-700 mb-1">
+                  <span>Lote actual: {queueStatus.active_batch ?? '—'} de {total}</span>
+                  <span>{pct}%</span>
+                </div>
+                <div className="bg-blue-200 rounded-full h-2.5">
+                  <div
+                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Batch breakdown */}
+          {queueStatus.batches && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {queueStatus.batches.map(b => {
+                const isActive = b.batch === queueStatus.active_batch;
+                const isResolved = b.borrador === 0 && b.revision === 0;
+                const hasRejected = b.rechazado > 0;
+                let icon = '⬚';
+                let textColor = 'text-gray-500';
+                if (isResolved && !hasRejected) { icon = '✅'; textColor = 'text-green-700'; }
+                else if (isResolved && hasRejected) { icon = '⚠️'; textColor = 'text-yellow-700'; }
+                else if (isActive) { icon = '⏳'; textColor = 'text-blue-700'; }
+
+                return (
+                  <span
+                    key={b.batch}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium ${
+                      isActive ? 'bg-blue-100 border border-blue-300' :
+                      isResolved ? 'bg-green-50 border border-green-200' :
+                      'bg-gray-50 border border-gray-200'
+                    } ${textColor}`}
+                  >
+                    {icon} Lote {b.batch}: {b.total} templates
+                    {isActive && b.revision > 0 && ` (${b.revision} en revisión)`}
+                    {b.aprobado > 0 && ` · ${b.aprobado} aprobados`}
+                    {b.rechazado > 0 && ` · ${b.rechazado} rechazados`}
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Timestamp */}
+          {lastQueueCheck && (
+            <p className="text-[10px] text-blue-500 mt-1">
+              Última verificación: {lastQueueCheck.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })} · Auto-refresh cada 60s
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Filter tabs */}
       <div className="flex items-center gap-4 mb-4 flex-wrap">
         <div className="flex gap-2">
@@ -1586,8 +1774,8 @@ export default function Templates() {
       {showBulkUpload && (
         <BulkUploadTemplatesModal
           isOpen={showBulkUpload}
-          onClose={() => setShowBulkUpload(false)}
-          onComplete={() => { setShowBulkUpload(false); fetchTemplates(); }}
+          onClose={() => { setShowBulkUpload(false); fetchQueueStatus(); fetchTemplates(); }}
+          onComplete={() => { setShowBulkUpload(false); fetchQueueStatus(); fetchTemplates(); }}
           existingNames={templates.map(t => t.nombre)}
         />
       )}

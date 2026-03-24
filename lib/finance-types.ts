@@ -28,6 +28,7 @@ export type Transaction = {
   exchange_rate: number;
   status: 'pending_review' | 'verified';
   category_id: string;
+  account_id: number | null;
   is_fixed_expense?: boolean;
   is_cac_related?: boolean;
   fin_categories: {
@@ -57,7 +58,14 @@ export type CurrencyEditState = {
   } | null;
 };
 
-// Tasas de cambio por defecto (source of truth)
+// Tipos de cambio en vivo
+export type ExchangeRatesData = {
+  rates: Record<string, number>;
+  date: string | null;
+  isLive: boolean;
+};
+
+// Tasas de cambio por defecto (fallback)
 export const EXCHANGE_RATES: Record<string, number> = {
   USD: 1,
   PEN: 3.75,
