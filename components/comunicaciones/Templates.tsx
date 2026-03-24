@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
+import BulkUploadTemplatesModal from './BulkUploadTemplatesModal';
 
 type TemplateEstado = 'borrador' | 'revision' | 'aprobado' | 'rechazado';
 type TemplateCategoria = 'utility' | 'marketing' | null;
@@ -1128,6 +1129,7 @@ export default function Templates() {
   const [checkingId, setCheckingId] = useState<number | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
 
   const fetchTemplates = useCallback(async () => {
     if (!supabase) return;
@@ -1335,6 +1337,15 @@ export default function Templates() {
               {bulkDeleting ? 'Eliminando...' : selectedIds.size}
             </button>
           )}
+          <button
+            onClick={() => setShowBulkUpload(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-[#3c527a] text-sm font-semibold rounded-lg transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+            </svg>
+            Carga masiva
+          </button>
           <button
             onClick={() => { setEditingTemplate(null); setShowForm(true); }}
             className="flex items-center gap-2 px-4 py-2 bg-[#ff8080] hover:bg-[#ff6b6b] text-white text-sm font-semibold rounded-lg transition-colors"
@@ -1568,6 +1579,16 @@ export default function Templates() {
           onClose={() => setViewingTemplate(null)}
           onEdit={() => { setEditingTemplate(viewingTemplate); setViewingTemplate(null); setShowForm(true); }}
           onDelete={() => handleDelete(viewingTemplate.id)}
+        />
+      )}
+
+      {/* Bulk Upload Modal */}
+      {showBulkUpload && (
+        <BulkUploadTemplatesModal
+          isOpen={showBulkUpload}
+          onClose={() => setShowBulkUpload(false)}
+          onComplete={() => { setShowBulkUpload(false); fetchTemplates(); }}
+          existingNames={templates.map(t => t.nombre)}
         />
       )}
     </div>
