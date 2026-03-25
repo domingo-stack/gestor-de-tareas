@@ -1,7 +1,8 @@
 'use client';
 
 import { DateRange } from '../shared/useDateRange';
-import { useAdsData } from '../shared/useMarketingData';
+import { useAdsData, useAdsTrend } from '../shared/useMarketingData';
+import { AdsSpendChart, AdsCpaChart, CampaignCpaBar } from './AdsCharts';
 import { fmtNum, fmtUSD, fmtPct } from '@/components/growth/formatters';
 import KpiCard from '@/components/growth/KpiCard';
 import PlatformCard from './PlatformCard';
@@ -23,6 +24,7 @@ interface AdsOverviewProps {
 
 export default function AdsOverview({ range }: AdsOverviewProps) {
   const { platformKpis, campaigns, loading, hasData } = useAdsData(range);
+  const { data: trendData } = useAdsTrend(range);
 
   if (loading) {
     return (
@@ -64,6 +66,15 @@ export default function AdsOverview({ range }: AdsOverviewProps) {
         <KpiCard title="CTR" value={fmtPct(avgCtr)} icon={CursorArrowRaysIcon} colorClass="bg-amber-500" />
         <KpiCard title="Alcance" value={fmtNum(totalReach)} icon={EyeIcon} colorClass="bg-indigo-500" />
       </div>
+
+      {/* Trend charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <AdsSpendChart data={trendData} />
+        <AdsCpaChart data={trendData} />
+      </div>
+
+      {/* CPA by Campaign */}
+      <CampaignCpaBar campaigns={campaigns} />
 
       {/* Platform comparison */}
       <div>

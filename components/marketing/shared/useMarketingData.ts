@@ -761,3 +761,168 @@ export function useConversionsData(range: DateRange) {
 
   return { data, loading };
 }
+
+// ==================== Trend Hooks (daily data for charts) ====================
+
+export interface AdsTrendPoint {
+  date: string;
+  spend: number;
+  conversions: number;
+  impressions: number;
+  clicks: number;
+  cpa: number;
+  ctr: number;
+}
+
+export function useAdsTrend(range: DateRange) {
+  const { supabase } = useAuth();
+  const [data, setData] = useState<AdsTrendPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const fetchData = async () => {
+      setLoading(true);
+      const { data: rows } = await supabase
+        .from('mkt_ad_metrics')
+        .select('date, spend, conversions, impressions, clicks')
+        .gte('date', range.from)
+        .lte('date', range.to)
+        .order('date', { ascending: true });
+
+      if (rows && rows.length > 0) {
+        // Aggregate by date (all platforms combined)
+        const byDate = new Map<string, { spend: number; conversions: number; impressions: number; clicks: number }>();
+        for (const r of rows) {
+          const existing = byDate.get(r.date) || { spend: 0, conversions: 0, impressions: 0, clicks: 0 };
+          existing.spend += Number(r.spend) || 0;
+          existing.conversions += Number(r.conversions) || 0;
+          existing.impressions += Number(r.impressions) || 0;
+          existing.clicks += Number(r.clicks) || 0;
+          byDate.set(r.date, existing);
+        }
+        setData(Array.from(byDate.entries()).map(([date, v]) => ({
+          date,
+          ...v,
+          cpa: v.conversions > 0 ? v.spend / v.conversions : 0,
+          ctr: v.impressions > 0 ? (v.clicks / v.impressions) * 100 : 0,
+        })));
+      } else {
+        setData([]);
+      }
+      setLoading(false);
+    };
+    fetchData();
+  }, [supabase, range.from, range.to]);
+
+  return { data, loading };
+}
+
+export interface OrganicTrendPoint {
+  date: string;
+  facebook_followers: number;
+  instagram_followers: number;
+  youtube_followers: number;
+  facebook_engagement: number;
+  instagram_engagement: number;
+  youtube_engagement: number;
+  total_followers_delta: number;
+}
+
+export function useOrganicTrend(range: DateRange) {
+  const { supabase } = useAuth();
+  const [data, setData] = useState<OrganicTrendPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const fetchData = async () => {
+      setLoading(true);
+      const { data: rows } = await supabase
+        .from('mkt_organic_metrics')
+        .select('platform_name, date, followers, followers_delta, engagement, likes, comments, shares')
+        .gte('date', range.from)
+        .lte('date', range.to)
+        .order('date', { ascending: true });
+
+      if (rows && rows.length > 0) {
+        const byDate = new Map<string, OrganicTrendPoint>();
+        for (const r of rows) {
+          const existing = byDate.get(r.date) || {
+            date: r.date,
+            facebook_followers: 0, instagram_followers: 0, youtube_followers: 0,
+            facebook_engagement: 0, instagram_engagement: 0, youtube_engagement: 0,
+            total_followers_delta: 0,
+          };
+          const platform = (r.platform_name || '').toLowerCase();
+          const followers = Number(r.followers) || 0;
+          const engagement = Number(r.engagement) || (Number(r.likes) || 0) + (Number(r.comments) || 0) + (Number(r.shares) || 0);
+          const delta = Number(r.followers_delta) || 0;
+
+          if (platform === 'facebook') { existing.facebook_followers = followers; existing.facebook_engagement += engagement; }
+          else if (platform === 'instagram') { existing.instagram_followers = followers; existing.instagram_engagement += engagement; }
+          else if (platform === 'youtube') { existing.youtube_followers = followers; existing.youtube_engagement += engagement; }
+
+          existing.total_followers_delta += delta;
+          byDate.set(r.date, existing);
+        }
+        setData(Array.from(byDate.values()));
+      } else {
+        setData([]);
+      }
+      setLoading(false);
+    };
+    fetchData();
+  }, [supabase, range.from, range.to]);
+
+  return { data, loading };
+}
+
+export interface WebTrendPoint {
+  date: string;
+  app_sessions: number;
+  web_sessions: number;
+  app_new_users: number;
+  web_new_users: number;
+}
+
+export function useWebTrend(range: DateRange) {
+  const { supabase } = useAuth();
+  const [data, setData] = useState<WebTrendPoint[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const fetchData = async () => {
+      setLoading(true);
+      const { data: rows } = await supabase
+        .from('mkt_web_metrics')
+        .select('date, hostname, sessions, new_users')
+        .gte('date', range.from)
+        .lte('date', range.to)
+        .order('date', { ascending: true });
+
+      if (rows && rows.length > 0) {
+        const byDate = new Map<string, WebTrendPoint>();
+        for (const r of rows) {
+          const existing = byDate.get(r.date) || { date: r.date, app_sessions: 0, web_sessions: 0, app_new_users: 0, web_new_users: 0 };
+          if (r.hostname === 'app.califica.ai') {
+            existing.app_sessions += Number(r.sessions) || 0;
+            existing.app_new_users += Number(r.new_users) || 0;
+          } else {
+            existing.web_sessions += Number(r.sessions) || 0;
+            existing.web_new_users += Number(r.new_users) || 0;
+          }
+          byDate.set(r.date, existing);
+        }
+        setData(Array.from(byDate.values()));
+      } else {
+        setData([]);
+      }
+      setLoading(false);
+    };
+    fetchData();
+  }, [supabase, range.from, range.to]);
+
+  return { data, loading };
+}
