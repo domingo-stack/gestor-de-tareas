@@ -12,6 +12,7 @@ type PermissionsContextType = {
   mod_producto: boolean;
   mod_customer_success: boolean;
   mod_comunicaciones: boolean;
+  mod_marketing: boolean;
   isLoading: boolean;
   refetch: () => Promise<void>;
 };
@@ -28,6 +29,7 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
   const [mod_producto, setModProducto] = useState(false);
   const [mod_customer_success, setModCustomerSuccess] = useState(false);
   const [mod_comunicaciones, setModComunicaciones] = useState(false);
+  const [mod_marketing, setModMarketing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchPermissions = useCallback(async () => {
@@ -40,6 +42,7 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
       setModProducto(false);
       setModCustomerSuccess(false);
       setModComunicaciones(false);
+      setModMarketing(false);
       setIsLoading(false);
       return;
     }
@@ -62,6 +65,7 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
       setModProducto(p.mod_producto);
       setModCustomerSuccess(p.mod_customer_success);
       setModComunicaciones(p.mod_comunicaciones ?? false);
+      setModMarketing(p.mod_marketing ?? false);
     }
 
     setIsLoading(false);
@@ -82,9 +86,10 @@ export function PermissionsProvider({ children }: { children: React.ReactNode })
     mod_producto,
     mod_customer_success,
     mod_comunicaciones,
+    mod_marketing,
     isLoading: isLoading || authLoading,
     refetch: fetchPermissions,
-  }), [role, mod_tareas, mod_calendario, mod_revenue, mod_finanzas, mod_producto, mod_customer_success, mod_comunicaciones, isLoading, authLoading, fetchPermissions]);
+  }), [role, mod_tareas, mod_calendario, mod_revenue, mod_finanzas, mod_producto, mod_customer_success, mod_comunicaciones, mod_marketing, isLoading, authLoading, fetchPermissions]);
 
   return (
     <PermissionsContext.Provider value={value}>
