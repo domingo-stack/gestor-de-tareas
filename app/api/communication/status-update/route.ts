@@ -65,18 +65,71 @@ export async function POST(req: NextRequest) {
     }
 
     const supabase = getSupabase();
+    const normalizedPhone = senderPhone.replace(/\D/g, '');
+    const incomingText = (message?.text?.body ?? message?.button?.text ?? '').trim().toLowerCase();
 
-    // Check auto-reply config
+    // Load config variables
     const { data: configRows } = await supabase
       .from('comm_variables')
       .select('key, value')
-      .in('key', ['auto_reply_enabled', 'auto_reply_message', 'auto_reply_support_number', 'auto_reply_support_url']);
+      .in('key', ['auto_reply_enabled', 'auto_reply_message', 'auto_reply_support_number', 'auto_reply_support_url', 'optout_keywords']);
 
     const config: Record<string, string> = {};
     (configRows ?? []).forEach((r: { key: string; value: string }) => { config[r.key] = r.value; });
 
+    // ── Opt-out detection (drip campaigns) ──
+    const optoutKeywords = (config.optout_keywords || 'STOP,NO,PARAR,NO ME INTERESA,DETENER,CANCELAR,SALIR,PARA,BASTA,NO QUIERO,DESUSCRIBIR')
+      .split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+
+    const isOptout = incomingText && optoutKeywords.includes(incomingText);
+    const isQuickReplyOptout = message?.button?.text?.toLowerCase().includes('no me interesa');
+
+    if (isOptout || isQuickReplyOptout) {
+      // Find active drip campaigns where this phone received messages
+      const { data: dripLogs } = await supabase
+        .from('comm_message_logs')
+        .select('broadcast_id')
+        .eq('phone', normalizedPhone)
+        .not('broadcast_id', 'is', null)
+        .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (dripLogs && dripLogs.length > 0) {
+        const broadcastIds = [...new Set(dripLogs.map(l => l.broadcast_id))];
+        // Find drip campaigns linked to these broadcasts
+        const { data: dripSteps } = await supabase
+          .from('comm_drip_steps')
+          .select('drip_campaign_id')
+          .in('broadcast_id', broadcastIds);
+
+        if (dripSteps && dripSteps.length > 0) {
+          const dripIds = [...new Set(dripSteps.map(s => s.drip_campaign_id))];
+          // Find contact_id from growth_users by phone
+          const { data: contact } = await supabase
+            .from('growth_users')
+            .select('id')
+            .eq('phone', normalizedPhone)
+            .limit(1)
+            .single();
+
+          for (const dripId of dripIds) {
+            await supabase.from('comm_drip_optouts').upsert({
+              drip_campaign_id: dripId,
+              contact_id: contact?.id ?? null,
+              phone: normalizedPhone,
+              opted_out_at: new Date().toISOString(),
+              reason: isQuickReplyOptout ? 'button_click' : 'keyword_stop',
+            }, { onConflict: 'drip_campaign_id, phone' }).select();
+          }
+          console.log(`[status-update] Opt-out registered for phone ${normalizedPhone} in ${dripIds.length} drip(s)`);
+        }
+      }
+    }
+
+    // ── Auto-reply logic ──
     if (config.auto_reply_enabled === 'false') {
-      return NextResponse.json({ ok: true, ignored: true, reason: 'auto-reply disabled' });
+      return NextResponse.json({ ok: true, ignored: true, reason: 'auto-reply disabled', optout: isOptout || isQuickReplyOptout });
     }
 
     // 24h cooldown per phone
@@ -84,20 +137,48 @@ export async function POST(req: NextRequest) {
     const { count } = await supabase
       .from('comm_message_logs')
       .select('id', { count: 'exact', head: true })
-      .eq('phone', senderPhone)
+      .eq('phone', normalizedPhone)
       .eq('evento_tipo', 'auto_reply')
       .gte('created_at', since);
 
     if ((count ?? 0) > 0) {
-      return NextResponse.json({ ok: true, ignored: true, reason: 'cooldown 24h' });
+      return NextResponse.json({ ok: true, ignored: true, reason: 'cooldown 24h', optout: isOptout || isQuickReplyOptout });
     }
 
-    // Build reply
-    let replyText = config.auto_reply_message || DEFAULT_AUTO_REPLY;
-    if (config.auto_reply_support_url) {
-      replyText += `\n\n👉 ${config.auto_reply_support_url}`;
-    } else if (config.auto_reply_support_number) {
-      replyText += `\n\n📞 ${config.auto_reply_support_number}`;
+    // ── Campaign-specific auto-reply (priority) ──
+    // Look for a broadcast this phone received in the last 48h with a custom auto_reply_message
+    let replyText: string | null = null;
+    const since48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const { data: recentLog } = await supabase
+      .from('comm_message_logs')
+      .select('broadcast_id')
+      .eq('phone', normalizedPhone)
+      .not('broadcast_id', 'is', null)
+      .gte('created_at', since48h)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (recentLog?.broadcast_id) {
+      const { data: broadcast } = await supabase
+        .from('comm_broadcasts')
+        .select('auto_reply_message')
+        .eq('id', recentLog.broadcast_id)
+        .single();
+
+      if (broadcast?.auto_reply_message) {
+        replyText = broadcast.auto_reply_message;
+      }
+    }
+
+    // ── Global auto-reply (fallback) ──
+    if (!replyText) {
+      replyText = config.auto_reply_message || DEFAULT_AUTO_REPLY;
+      if (config.auto_reply_support_url) {
+        replyText += `\n\n👉 ${config.auto_reply_support_url}`;
+      } else if (config.auto_reply_support_number) {
+        replyText += `\n\n📞 ${config.auto_reply_support_number}`;
+      }
     }
 
     try {
@@ -108,20 +189,20 @@ export async function POST(req: NextRequest) {
       });
 
       await supabase.from('comm_message_logs').insert({
-        phone: senderPhone,
+        phone: normalizedPhone,
         kapso_message_id: result.messages?.[0]?.id ?? null,
         evento_tipo: 'auto_reply',
         estado: 'sent',
         created_at: new Date().toISOString(),
       });
 
-      return NextResponse.json({ ok: true, auto_reply_sent: true });
+      return NextResponse.json({ ok: true, auto_reply_sent: true, campaign_reply: !!recentLog?.broadcast_id });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error('[status-update] auto-reply error:', errMsg);
 
       await supabase.from('comm_message_logs').insert({
-        phone: senderPhone,
+        phone: normalizedPhone,
         evento_tipo: 'auto_reply',
         estado: 'failed',
         error: errMsg,

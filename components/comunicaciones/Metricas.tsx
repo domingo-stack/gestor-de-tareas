@@ -27,6 +27,8 @@ interface BroadcastRow {
   entregados: number;
   leidos: number;
   kapso_broadcast_id: string | null;
+  pagos_atribuidos: number;
+  revenue_atribuido: number;
   comm_templates: {
     nombre: string;
     categoria: 'utility' | 'marketing' | null;
@@ -90,7 +92,7 @@ export default function Metricas() {
     // Fetch broadcasts
     let bQuery = supabase
       .from('comm_broadcasts')
-      .select('id, nombre, created_at, estado, total_destinatarios, enviados, entregados, leidos, kapso_broadcast_id, comm_templates(nombre, categoria)')
+      .select('id, nombre, created_at, estado, total_destinatarios, enviados, entregados, leidos, kapso_broadcast_id, pagos_atribuidos, revenue_atribuido, comm_templates(nombre, categoria)')
       .order('created_at', { ascending: false });
     if (from) bQuery = bQuery.gte('created_at', from);
     if (to) bQuery = bQuery.lte('created_at', to);
@@ -149,6 +151,10 @@ export default function Metricas() {
 
   const deliveryPct = totalEnviados > 0 ? Math.round(totalEntregados / totalEnviados * 100) : 0;
   const readPct = totalEntregados > 0 ? Math.round(totalLeidos / totalEntregados * 100) : 0;
+
+  // Revenue attribution totals
+  const totalPagos = broadcasts.reduce((s, b) => s + (b.pagos_atribuidos ?? 0), 0);
+  const totalRevenue = broadcasts.reduce((s, b) => s + (b.revenue_atribuido ?? 0), 0);
 
   // Cost by category
   let utilityCost = 0;
@@ -236,13 +242,13 @@ export default function Metricas() {
         )}
       </div>
 
-      {/* ── COST PANEL ─────────────────────────────── */}
+      {/* ── COST & ROI PANEL ─────────────────────────────── */}
       <div className="bg-[#3c527a] rounded-2xl p-5 text-white">
-        <p className="text-xs font-bold uppercase tracking-wide text-blue-200 mb-3">Costo estimado</p>
-        <div className="flex gap-4">
+        <p className="text-xs font-bold uppercase tracking-wide text-blue-200 mb-3">Inversión y Retorno</p>
+        <div className="flex gap-4 flex-wrap">
           <div>
             <p className="text-2xl font-black">{usd(totalCost)}</p>
-            <p className="text-xs text-blue-200 mt-0.5">Total</p>
+            <p className="text-xs text-blue-200 mt-0.5">Inversión total</p>
           </div>
           <div className="bg-white/10 rounded-xl px-4 py-3">
             <p className="text-lg font-black">{usd(utilityCost)}</p>
@@ -252,6 +258,23 @@ export default function Metricas() {
             <p className="text-lg font-black">{usd(marketingCost)}</p>
             <p className="text-xs text-blue-200">Marketing @ ${rates.marketing.toFixed(4)}</p>
           </div>
+          {totalRevenue > 0 && (
+            <>
+              <div className="bg-green-500/20 rounded-xl px-4 py-3">
+                <p className="text-lg font-black">{usd(totalRevenue)}</p>
+                <p className="text-xs text-green-200">Revenue atribuido</p>
+              </div>
+              <div className={`rounded-xl px-4 py-3 ${totalRevenue > totalCost ? 'bg-emerald-400/25' : 'bg-red-400/20'}`}>
+                <p className="text-2xl font-black">
+                  {totalCost > 0 ? `${((totalRevenue / totalCost) * 100).toFixed(0)}%` : '∞'}
+                </p>
+                <p className={`text-xs ${totalRevenue > totalCost ? 'text-emerald-200' : 'text-red-200'}`}>
+                  ROI {totalRevenue > totalCost ? '↑' : '↓'}
+                  {totalCost > 0 && ` · ${((totalRevenue - totalCost) / totalCost * 100).toFixed(0)}% neto`}
+                </p>
+              </div>
+            </>
+          )}
           <div className="bg-white/10 rounded-xl px-4 py-3 ml-auto">
             <div className="flex items-center justify-between gap-6">
               <div>
@@ -276,6 +299,7 @@ export default function Metricas() {
             { label: 'Enviados', value: totalEnviados, sub: pct(totalEnviados, totalDest), color: 'text-blue-700', bg: 'bg-blue-50' },
             { label: 'Entregados', value: totalEntregados, sub: `${deliveryPct}%`, color: 'text-green-700', bg: 'bg-green-50' },
             { label: 'Leídos', value: totalLeidos, sub: `${readPct}%`, color: 'text-purple-700', bg: 'bg-purple-50' },
+            { label: 'Pagos atrib.', value: totalPagos, color: 'text-green-700', bg: 'bg-green-50' },
           ].map(k => (
             <div key={k.label} className={`${k.bg} rounded-xl px-4 py-3 border border-gray-100`}>
               <p className="text-xs text-gray-500 font-medium mb-0.5">{k.label}</p>
@@ -320,7 +344,7 @@ export default function Metricas() {
             <table className="w-full">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-200">
-                  {['Campaña', 'Tipo', 'Enviados', 'Funnel', 'Costo', 'Fecha'].map(h => (
+                  {['Campaña', 'Tipo', 'Enviados', 'Funnel', 'Costo', 'Pagos', 'Revenue', 'ROI', 'Fecha'].map(h => (
                     <th key={h} className="px-4 py-2.5 text-left text-xs font-bold text-gray-400 uppercase tracking-wide">{h}</th>
                   ))}
                 </tr>
@@ -358,6 +382,37 @@ export default function Metricas() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-sm font-semibold text-[#3c527a]">{usd(cost)}</td>
+                      <td className="px-4 py-3 text-center">
+                        {(b.pagos_atribuidos ?? 0) > 0 ? (
+                          <span className="text-sm font-bold text-green-600">{b.pagos_atribuidos}</span>
+                        ) : (
+                          <span className="text-xs text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {(b.revenue_atribuido ?? 0) > 0 ? (
+                          <span className="text-sm font-bold text-green-600">{usd(b.revenue_atribuido)}</span>
+                        ) : (
+                          <span className="text-xs text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {(b.revenue_atribuido ?? 0) > 0 && cost > 0 ? (
+                          (() => {
+                            const roi = ((b.revenue_atribuido - cost) / cost) * 100;
+                            const isPositive = roi >= 0;
+                            return (
+                              <span className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-bold ${
+                                isPositive ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'
+                              }`}>
+                                {isPositive ? '↑' : '↓'} {Math.abs(roi).toFixed(0)}%
+                              </span>
+                            );
+                          })()
+                        ) : (
+                          <span className="text-xs text-gray-300">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">
                         {new Date(b.created_at).toLocaleDateString('es', { day: '2-digit', month: 'short' })}
                       </td>

@@ -162,9 +162,10 @@ export async function POST(req: NextRequest) {
       const addResult = await addBroadcastRecipients(kapsoBroadcast.id, recipients);
       totalAdded += addResult.added;
 
-      // Insert into message_logs for tracking
+      // Insert into message_logs for tracking (include phone for revenue attribution)
       const logRows = batch.map(c => ({
         contact_id: c.id,
+        phone: c.phone?.replace(/\D/g, '') || null,
         template_id: broadcast.template_id,
         broadcast_id: broadcastId,
         kapso_message_id: null,

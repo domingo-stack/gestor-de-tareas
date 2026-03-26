@@ -406,9 +406,18 @@ function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, pla
 }
 
 // ──────────────────────────────────────────
-// Step 2: Template selection
+// Step 2: Template selection (single or sequence)
 // ──────────────────────────────────────────
-function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, pais, rates }: {
+interface SequenceStep {
+  template_id: number | null;
+  delay_days: number;
+  delay_hours: number;
+  send_at_hour: number;
+  send_date: string; // YYYY-MM-DD
+  send_time: string; // HH:MM
+}
+
+function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, pais, rates, isSequence, setIsSequence, sequenceSteps, setSequenceSteps }: {
   templates: CommTemplate[];
   selectedId: number | null;
   onSelect: (id: number) => void;
@@ -417,6 +426,10 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, 
   contactCount: number;
   pais: string;
   rates?: Record<string, { marketing: number; utility: number }>;
+  isSequence: boolean;
+  setIsSequence: (v: boolean) => void;
+  sequenceSteps: SequenceStep[];
+  setSequenceSteps: (steps: SequenceStep[]) => void;
 }) {
   const [previewId, setPreviewId] = useState<number | null>(null);
   const preview = templates.find(t => t.id === (previewId ?? selectedId));
@@ -432,19 +445,221 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, 
         </button>
         <div>
           <p className="text-xs font-bold text-gray-400 uppercase tracking-wide">Paso 2 de 3</p>
-          <h2 className="text-lg font-bold text-[#383838]">Seleccionar template</h2>
+          <h2 className="text-lg font-bold text-[#383838]">{isSequence ? 'Configurar secuencia' : 'Seleccionar template'}</h2>
         </div>
         <div className="ml-auto">
           <Steps current={2} />
         </div>
       </div>
 
-      {templates.length === 0 ? (
+      {/* Toggle: Mensaje único / Secuencia */}
+      <div className="flex gap-2 mb-6">
+        <button
+          onClick={() => setIsSequence(false)}
+          className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${
+            !isSequence ? 'bg-[#3c527a] text-white' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
+          }`}
+        >
+          Mensaje único
+        </button>
+        <button
+          onClick={() => setIsSequence(true)}
+          className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors ${
+            isSequence ? 'bg-[#3c527a] text-white' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
+          }`}
+        >
+          Secuencia
+        </button>
+      </div>
+
+      {/* ── Sequence mode ── */}
+      {isSequence && (
+        <div className="space-y-6 mb-6">
+          {sequenceSteps.map((step, idx) => {
+            const selectedTmpl = templates.find(t => t.id === step.template_id);
+            return (
+              <div key={idx} className="relative">
+                {/* Connector line */}
+                {idx > 0 && (
+                  <div className="absolute -top-6 left-5 w-0.5 h-6 bg-gray-200" />
+                )}
+
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                  {/* Step header */}
+                  <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 border-b border-gray-100">
+                    <div className="w-7 h-7 rounded-full bg-[#3c527a] text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
+                      {idx + 1}
+                    </div>
+                    <div className="flex-1">
+                      <span className="text-sm font-semibold text-gray-700">
+                        {idx === 0 ? 'Primer mensaje' : `Mensaje ${idx + 1}`}
+                      </span>
+                      {idx === 0 && <span className="text-xs text-gray-400 ml-2">— se envía al activar</span>}
+                    </div>
+                    {/* Date + Time */}
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="date"
+                        value={step.send_date}
+                        min={idx > 0 && sequenceSteps[idx - 1].send_date ? sequenceSteps[idx - 1].send_date : new Date().toISOString().slice(0, 10)}
+                        onChange={e => {
+                          const newSteps = [...sequenceSteps];
+                          newSteps[idx] = { ...newSteps[idx], send_date: e.target.value };
+                          setSequenceSteps(newSteps);
+                        }}
+                        className="border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-[#3c527a]"
+                      />
+                      <input
+                        type="time"
+                        value={step.send_time}
+                        onChange={e => {
+                          const newSteps = [...sequenceSteps];
+                          newSteps[idx] = { ...newSteps[idx], send_time: e.target.value };
+                          setSequenceSteps(newSteps);
+                        }}
+                        className="border border-gray-200 rounded-lg px-2 py-1 text-xs outline-none focus:border-[#3c527a]"
+                      />
+                      {idx > 0 && sequenceSteps[idx - 1].send_date && step.send_date && (
+                        <span className="text-[10px] text-gray-400">
+                          +{Math.max(0, Math.round((new Date(step.send_date + 'T' + step.send_time).getTime() - new Date(sequenceSteps[idx - 1].send_date + 'T' + sequenceSteps[idx - 1].send_time).getTime()) / (1000 * 60 * 60 * 24)))}d
+                        </span>
+                      )}
+                    </div>
+                    {/* Reorder + Remove */}
+                    <div className="flex items-center gap-0.5 ml-2">
+                      {idx > 0 && (
+                        <button onClick={() => {
+                          const n = [...sequenceSteps];
+                          [n[idx - 1], n[idx]] = [n[idx], n[idx - 1]];
+                          setSequenceSteps(n);
+                        }} className="p-1 text-gray-300 hover:text-gray-500 text-xs" title="Subir">▲</button>
+                      )}
+                      {idx < sequenceSteps.length - 1 && (
+                        <button onClick={() => {
+                          const n = [...sequenceSteps];
+                          [n[idx], n[idx + 1]] = [n[idx + 1], n[idx]];
+                          setSequenceSteps(n);
+                        }} className="p-1 text-gray-300 hover:text-gray-500 text-xs" title="Bajar">▼</button>
+                      )}
+                      {sequenceSteps.length > 1 && (
+                        <button onClick={() => setSequenceSteps(sequenceSteps.filter((_, i) => i !== idx))} className="p-1 text-gray-300 hover:text-red-500 ml-1" title="Eliminar">✕</button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Template selector — horizontal scroll cards */}
+                  <div className="p-4">
+                    {selectedTmpl ? (
+                      /* Selected template preview */
+                      <div className="flex gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-semibold text-[#383838]">{selectedTmpl.nombre}</p>
+                              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                                selectedTmpl.categoria === 'marketing' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                              }`}>{selectedTmpl.categoria}</span>
+                            </div>
+                            <button
+                              onClick={() => {
+                                const newSteps = [...sequenceSteps];
+                                newSteps[idx] = { ...newSteps[idx], template_id: null };
+                                setSequenceSteps(newSteps);
+                              }}
+                              className="text-xs text-gray-400 hover:text-red-500"
+                            >
+                              Cambiar
+                            </button>
+                          </div>
+                          <div className="bg-[#ECE5DD] rounded-xl p-3">
+                            <div className="bg-white rounded-xl rounded-tl-none px-3 py-2 max-w-sm shadow-sm">
+                              <p className="text-xs text-gray-700 whitespace-pre-wrap line-clamp-4">
+                                {selectedTmpl.body.replace(/\{\{(\w+)\}\}/g, (_: string, v: string) => `[${v}]`)}
+                              </p>
+                              <p className="text-right text-[10px] text-gray-400 mt-1">12:00 ✓✓</p>
+                            </div>
+                            {(selectedTmpl.buttons ?? []).filter(b => b.text.trim()).length > 0 && (
+                              <div className="flex flex-col gap-1 mt-1 max-w-sm">
+                                {selectedTmpl.buttons.filter(b => b.text.trim()).map((btn, bi) => (
+                                  <div key={bi} className="bg-white rounded-lg px-3 py-1.5 text-center text-xs font-medium text-[#00a5f4] shadow-sm">
+                                    {btn.type === 'URL' && '🔗 '}{btn.text}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Template picker — horizontal scroll */
+                      <div>
+                        <p className="text-xs text-gray-500 mb-2">Selecciona un template para este paso:</p>
+                        <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1">
+                          {templates.map(t => (
+                            <div
+                              key={t.id}
+                              onClick={() => {
+                                const newSteps = [...sequenceSteps];
+                                newSteps[idx] = { ...newSteps[idx], template_id: t.id };
+                                setSequenceSteps(newSteps);
+                              }}
+                              className="flex-shrink-0 w-56 border-2 border-gray-200 hover:border-[#ff8080] rounded-xl p-3 cursor-pointer transition-all hover:shadow-md bg-white"
+                            >
+                              <div className="flex items-start justify-between gap-1 mb-1.5">
+                                <p className="text-xs font-semibold text-[#383838] leading-tight line-clamp-1">{t.nombre}</p>
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                                  t.categoria === 'marketing' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                                }`}>{t.categoria === 'marketing' ? 'Mkt' : 'Util'}</span>
+                              </div>
+                              <p className="text-[11px] text-gray-400 line-clamp-3 leading-relaxed">{t.body}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Add step */}
+          <button
+            onClick={() => {
+              const lastStep = sequenceSteps[sequenceSteps.length - 1];
+              const lastDate = lastStep.send_date ? new Date(lastStep.send_date + 'T12:00:00') : new Date();
+              const nextDate = new Date(lastDate);
+              nextDate.setDate(nextDate.getDate() + 3);
+              setSequenceSteps([...sequenceSteps, {
+                template_id: null, delay_days: 3, delay_hours: 0, send_at_hour: 9,
+                send_date: nextDate.toISOString().slice(0, 10), send_time: '09:00',
+              }]);
+            }}
+            className="w-full py-3 border-2 border-dashed border-gray-200 rounded-xl text-sm font-semibold text-gray-400 hover:text-[#3c527a] hover:border-[#3c527a] transition-colors"
+          >
+            + Agregar mensaje
+          </button>
+
+          {/* Summary */}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+            <p className="text-xs text-blue-700 font-medium">
+              {sequenceSteps.length} mensaje{sequenceSteps.length > 1 ? 's' : ''} · Duración total: {sequenceSteps.reduce((s, st) => s + st.delay_days, 0)} días
+            </p>
+            <p className="text-[10px] text-blue-500 mt-0.5">
+              Los usuarios que respondan con opt-out no recibirán los mensajes siguientes.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Single message mode ── */}
+      {!isSequence && (templates.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-gray-400">
           <p className="text-sm">No hay templates aprobados.</p>
           <p className="text-xs mt-1">Ve a la pestaña Templates y aprueba uno primero.</p>
         </div>
       ) : (
+        <>
         <div className="grid grid-cols-2 gap-4 mb-6">
           {templates.map(t => {
             const isMarketing = t.categoria === 'marketing';
@@ -484,7 +699,6 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, 
             );
           })}
         </div>
-      )}
 
       {/* Preview panel */}
       {preview && (
@@ -552,11 +766,16 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, 
           )}
         </div>
       )}
+        </>
+      ))}
 
       <div className="flex justify-end">
         <button
           onClick={onNext}
-          disabled={!selectedId}
+          disabled={isSequence ? (
+            sequenceSteps.some(s => !s.template_id || !s.send_date || !s.send_time) ||
+            sequenceSteps.some((s, i) => i > 0 && new Date(s.send_date + 'T' + s.send_time) <= new Date(sequenceSteps[i - 1].send_date + 'T' + sequenceSteps[i - 1].send_time))
+          ) : !selectedId}
           className="px-5 py-2 bg-[#ff8080] hover:bg-[#ff6b6b] text-white text-sm font-semibold rounded-lg transition-colors disabled:opacity-50"
         >
           Siguiente →
@@ -569,28 +788,38 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, 
 // ──────────────────────────────────────────
 // Step 3: Confirm & Send
 // ──────────────────────────────────────────
-function Step3({ filters, template, contactCount, onSend, onBack, sending, rates, existingNames }: {
+function Step3({ filters, template, contactCount, onSend, onBack, sending, rates, existingNames, isSequence, sequenceSteps, templates }: {
   filters: Filters;
   template: CommTemplate | undefined;
   contactCount: number;
-  onSend: (nombre: string, scheduledAt?: string) => void;
+  onSend: (nombre: string, scheduledAt?: string, autoReplyMessage?: string) => void;
   onBack: () => void;
   sending: boolean;
   rates?: Record<string, { marketing: number; utility: number }>;
   existingNames: string[];
+  isSequence?: boolean;
+  sequenceSteps?: SequenceStep[];
+  templates?: CommTemplate[];
 }) {
   const [nombre, setNombre] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [scheduleMode, setScheduleMode] = useState<'now' | 'scheduled'>('now');
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('09:00');
+  const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
+  const [autoReplyMessage, setAutoReplyMessage] = useState('');
   const costRate = getRate(filters.pais, template?.categoria ?? 'marketing', rates);
-  const estimatedCost = (contactCount * costRate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const estimatedCost = isSequence
+    ? (sequenceSteps ?? []).reduce((total, s) => {
+        const t = (templates ?? []).find(tmpl => tmpl.id === s.template_id);
+        return total + contactCount * getRate(filters.pais, t?.categoria ?? 'marketing', rates);
+      }, 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : (contactCount * costRate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const nameTrimmed = nombre.trim();
   const isDuplicate = existingNames.some(n => n.toLowerCase() === nameTrimmed.toLowerCase());
   const nameError = !nameTrimmed ? 'El nombre es obligatorio' : isDuplicate ? 'Ya existe una campaña con este nombre' : '';
-  const scheduleError = scheduleMode === 'scheduled' && !scheduleDate ? 'Selecciona fecha' : '';
+  const scheduleError = !isSequence && scheduleMode === 'scheduled' && !scheduleDate ? 'Selecciona fecha' : '';
   const canSend = !nameError && !scheduleError && !sending;
 
   const filterLabels: string[] = [];
@@ -653,79 +882,159 @@ function Step3({ filters, template, contactCount, onSend, onBack, sending, rates
           )}
         </div>
 
-        {/* Schedule */}
+        {/* Schedule (single) or Timeline (sequence) */}
+        {isSequence ? (
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">
+              Timeline de la secuencia
+            </label>
+            <div className="space-y-3">
+              {(sequenceSteps ?? []).map((step, idx) => {
+                const tmpl = (templates ?? []).find(t => t.id === step.template_id);
+                const fmtDate = step.send_date ? new Date(step.send_date + 'T12:00:00').toLocaleDateString('es', { weekday: 'short', day: '2-digit', month: 'short' }) : '—';
+                return (
+                  <div key={idx} className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-[#3c527a] text-white flex items-center justify-center text-xs font-bold flex-shrink-0">
+                      {idx + 1}
+                    </div>
+                    <div className="flex-1 bg-gray-50 rounded-xl px-4 py-3 border border-gray-100">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-[#383838]">{tmpl?.nombre ?? 'Sin template'}</p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-500">🗓 {fmtDate}</span>
+                          <span className="text-xs text-gray-500">🕐 {step.send_time || '09:00'}</span>
+                        </div>
+                      </div>
+                      {tmpl && (
+                        <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{tmpl.body}</p>
+                      )}
+                    </div>
+                    {idx < (sequenceSteps?.length ?? 0) - 1 && (
+                      <div className="w-0.5 h-3 bg-gray-200 absolute" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div>
+            <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+              Envío
+            </label>
+            <div className="flex gap-2 mb-3">
+              <button
+                onClick={() => setScheduleMode('now')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                  scheduleMode === 'now' ? 'bg-[#3c527a] text-white' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                Enviar ahora
+              </button>
+              <button
+                onClick={() => setScheduleMode('scheduled')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                  scheduleMode === 'scheduled' ? 'bg-[#3c527a] text-white' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                Programar
+              </button>
+            </div>
+            {scheduleMode === 'scheduled' && (
+              <div>
+                <div className="flex gap-3 items-end">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Fecha</label>
+                    <input
+                      type="date"
+                      value={scheduleDate}
+                      min={new Date().toISOString().slice(0, 10)}
+                      onChange={e => setScheduleDate(e.target.value)}
+                      className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3c527a] transition-colors"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Hora</label>
+                    <input
+                      type="time"
+                      value={scheduleTime}
+                      onChange={e => setScheduleTime(e.target.value)}
+                      className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3c527a] transition-colors"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400 mt-1.5">
+                  Configurado en zona horaria: <span className="font-semibold text-gray-500">{Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Auto-reply */}
         <div>
           <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
-            Envío
+            Respuesta automática
           </label>
-          <div className="flex gap-2 mb-3">
+          <div className="flex items-center gap-3 mb-2">
             <button
-              onClick={() => setScheduleMode('now')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-                scheduleMode === 'now' ? 'bg-[#3c527a] text-white' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
-              }`}
+              onClick={() => setAutoReplyEnabled(!autoReplyEnabled)}
+              className={`w-10 h-6 rounded-full transition-colors relative ${
+                autoReplyEnabled ? 'bg-green-500' : 'bg-gray-300'
+              } cursor-pointer`}
             >
-              Enviar ahora
+              <span
+                className="absolute top-[3px] w-[18px] h-[18px] bg-white rounded-full shadow transition-all"
+                style={{ left: autoReplyEnabled ? '19px' : '3px' }}
+              />
             </button>
-            <button
-              onClick={() => setScheduleMode('scheduled')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-                scheduleMode === 'scheduled' ? 'bg-[#3c527a] text-white' : 'bg-white text-gray-500 border border-gray-200 hover:border-gray-300'
-              }`}
-            >
-              Programar
-            </button>
+            <span className="text-sm text-gray-600">
+              {autoReplyEnabled ? 'Activada' : 'Desactivada'} — respuesta personalizada cuando el usuario responda a esta campaña
+            </span>
           </div>
-          {scheduleMode === 'scheduled' && (
-            <div>
-              <div className="flex gap-3 items-end">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Fecha</label>
-                  <input
-                    type="date"
-                    value={scheduleDate}
-                    min={new Date().toISOString().slice(0, 10)}
-                    onChange={e => setScheduleDate(e.target.value)}
-                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3c527a] transition-colors"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Hora</label>
-                  <input
-                    type="time"
-                    value={scheduleTime}
-                    onChange={e => setScheduleTime(e.target.value)}
-                    className="border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3c527a] transition-colors"
-                  />
-                </div>
-              </div>
-              <p className="text-xs text-gray-400 mt-1.5">
-                Configurado en zona horaria: <span className="font-semibold text-gray-500">{Intl.DateTimeFormat().resolvedOptions().timeZone}</span>
-              </p>
-            </div>
+          {autoReplyEnabled && (
+            <textarea
+              value={autoReplyMessage}
+              onChange={e => setAutoReplyMessage(e.target.value)}
+              placeholder="Ej: Gracias por tu interés en nuestra promoción. Un asesor se pondrá en contacto contigo pronto."
+              rows={3}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-[#3c527a] transition-colors resize-none"
+            />
           )}
         </div>
 
         {/* Summary cards */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className={`grid ${isSequence ? 'grid-cols-3' : 'grid-cols-3'} gap-4`}>
           <div className="bg-green-50 border border-green-200 rounded-xl p-4">
             <p className="text-2xl font-black text-green-600">{contactCount.toLocaleString('es')}</p>
             <p className="text-xs text-gray-500 mt-0.5">Destinatarios</p>
           </div>
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-            <p className="text-sm font-bold text-[#383838] truncate">{template?.nombre}</p>
-            <p className="text-xs text-gray-500 mt-0.5">Template</p>
-            <span className={`mt-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
-              template?.categoria === 'marketing' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
-            }`}>
-              {template?.categoria === 'marketing' ? 'Marketing' : 'Utility'}
-            </span>
+            {isSequence ? (
+              <>
+                <p className="text-2xl font-black text-[#3c527a]">{sequenceSteps?.length ?? 0}</p>
+                <p className="text-xs text-gray-500 mt-0.5">Mensajes en secuencia</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {(sequenceSteps ?? []).reduce((s, st) => s + st.delay_days, 0)} días de duración
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-bold text-[#383838] truncate">{template?.nombre}</p>
+                <p className="text-xs text-gray-500 mt-0.5">Template</p>
+                <span className={`mt-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${
+                  template?.categoria === 'marketing' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                }`}>
+                  {template?.categoria === 'marketing' ? 'Marketing' : 'Utility'}
+                </span>
+              </>
+            )}
           </div>
-          <div className={`${template?.categoria === 'marketing' ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-200'} border rounded-xl p-4`}>
-            <p className={`text-2xl font-black ${template?.categoria === 'marketing' ? 'text-yellow-600' : 'text-gray-600'}`}>
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+            <p className="text-2xl font-black text-gray-600">
               ${estimatedCost}
             </p>
-            <p className="text-xs text-gray-500 mt-0.5">Costo estimado USD</p>
+            <p className="text-xs text-gray-500 mt-0.5">Costo estimado USD{isSequence ? ' (total)' : ''}</p>
           </div>
         </div>
 
@@ -770,16 +1079,18 @@ function Step3({ filters, template, contactCount, onSend, onBack, sending, rates
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl p-6">
             <h3 className="text-lg font-bold text-[#383838] mb-2">
-              {scheduleMode === 'scheduled' ? '¿Programar campaña?' : '¿Confirmar envío?'}
+              {isSequence ? '¿Activar secuencia?' : scheduleMode === 'scheduled' ? '¿Programar campaña?' : '¿Confirmar envío?'}
             </h3>
             <p className="text-sm text-gray-600 mb-2">
-              {scheduleMode === 'scheduled' ? (
+              {isSequence ? (
+                <>Se enviarán <strong>{sequenceSteps?.length} mensajes</strong> a <strong>{contactCount.toLocaleString('es')} contactos</strong> según la programación configurada.</>
+              ) : scheduleMode === 'scheduled' ? (
                 <>Se programarán <strong>{contactCount.toLocaleString('es')} mensajes</strong> para el <strong>{scheduleDate} a las {scheduleTime}</strong>.</>
               ) : (
                 <>Se enviarán <strong>{contactCount.toLocaleString('es')} mensajes</strong> ahora.</>
               )}
             </p>
-            <p className="text-sm text-gray-500 mb-1">Template: <strong>{template?.nombre}</strong></p>
+            {!isSequence && <p className="text-sm text-gray-500 mb-1">Template: <strong>{template?.nombre}</strong></p>}
             <p className="text-sm text-gray-500 mb-6">Costo estimado: <strong>${estimatedCost} USD</strong></p>
             <div className="flex gap-3">
               <button
@@ -789,10 +1100,10 @@ function Step3({ filters, template, contactCount, onSend, onBack, sending, rates
                 Cancelar
               </button>
               <button
-                onClick={() => { setConfirming(false); onSend(nameTrimmed, getScheduledAt()); }}
+                onClick={() => { setConfirming(false); onSend(nameTrimmed, getScheduledAt(), autoReplyEnabled ? autoReplyMessage : undefined); }}
                 className="flex-1 px-4 py-2 text-sm font-semibold bg-[#ff8080] hover:bg-[#ff6b6b] text-white rounded-lg transition-colors"
               >
-                {scheduleMode === 'scheduled' ? 'Programar' : 'Confirmar envío'}
+                {isSequence ? 'Activar secuencia' : scheduleMode === 'scheduled' ? 'Programar' : 'Confirmar envío'}
               </button>
             </div>
           </div>
@@ -1164,6 +1475,10 @@ export default function Campanias() {
     eventos_min: '', eventos_max: '', nivel: '', grado: '', colegio: '',
   });
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
+  const [isSequence, setIsSequence] = useState(false);
+  const [sequenceSteps, setSequenceSteps] = useState<SequenceStep[]>([
+    { template_id: null, delay_days: 0, delay_hours: 0, send_at_hour: 9, send_date: '', send_time: '09:00' },
+  ]);
 
   const selectedTemplate = templates.find(t => t.id === selectedTemplateId);
   const approvedTemplates = useMemo(() => templates.filter(t => t.estado === 'aprobado' && ((t as { uso?: string }).uso === 'campaña' || (t as { uso?: string }).uso === 'ambos' || !(t as { uso?: string }).uso)), [templates]);
@@ -1288,10 +1603,108 @@ export default function Campanias() {
     }
   };
 
-  const handleSend = async (campañaNombre: string, scheduledAt?: string) => {
-    if (!supabase || !selectedTemplateId) return;
+  const handleSend = async (campañaNombre: string, scheduledAt?: string, autoReplyMsg?: string) => {
+    if (!supabase) return;
+    if (!isSequence && !selectedTemplateId) return;
     setSending(true);
     try {
+      // ── SEQUENCE MODE ──
+      if (isSequence && sequenceSteps.length > 0) {
+        // 1. Create drip campaign
+        const { data: drip, error: dripErr } = await supabase
+          .from('comm_drip_campaigns')
+          .insert({
+            nombre: campañaNombre,
+            segmento_filtros: filters,
+            estado: 'activa',
+          })
+          .select()
+          .single();
+        if (dripErr) throw dripErr;
+
+        // 2. Create drip steps
+        const stepsToInsert = sequenceSteps.map((s, idx) => ({
+          drip_campaign_id: drip.id,
+          step_order: idx + 1,
+          template_id: s.template_id,
+          delay_days: s.delay_days,
+          delay_hours: 0,
+          send_at_hour: parseInt(s.send_time?.split(':')[0] ?? '9') || 9,
+          estado: 'pendiente',
+        }));
+        const { error: stepsErr } = await supabase.from('comm_drip_steps').insert(stepsToInsert);
+        if (stepsErr) throw stepsErr;
+
+        // 3. Create parent broadcast
+        const { data: broadcast, error: bErr } = await supabase
+          .from('comm_broadcasts')
+          .insert({
+            nombre: campañaNombre,
+            template_id: sequenceSteps[0].template_id,
+            segmento_filtros: filters,
+            total_destinatarios: contactCount,
+            enviados: 0, entregados: 0, leidos: 0, clickeados: 0,
+            estado: 'programado',
+            is_sequence: true,
+            drip_campaign_id: drip.id,
+            auto_reply_message: autoReplyMsg || null,
+            created_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+        if (bErr) throw bErr;
+
+        // 4. Trigger first step immediately if send_date is today or past
+        const firstStep = sequenceSteps[0];
+        const firstSendTime = new Date(firstStep.send_date + 'T' + firstStep.send_time + ':00');
+        if (firstSendTime <= new Date()) {
+          // Send first step now
+          try {
+            const { data: stepBroadcast } = await supabase
+              .from('comm_broadcasts')
+              .insert({
+                nombre: `${campañaNombre} — Paso 1`,
+                template_id: firstStep.template_id,
+                segmento_filtros: filters,
+                total_destinatarios: contactCount,
+                enviados: 0, entregados: 0, leidos: 0, clickeados: 0,
+                estado: 'borrador',
+                auto_reply_message: autoReplyMsg || null,
+                created_at: new Date().toISOString(),
+              })
+              .select()
+              .single();
+
+            if (stepBroadcast) {
+              await fetch('/api/communication/send-broadcast', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ broadcastId: stepBroadcast.id }),
+              });
+
+              // Mark step as sent
+              await supabase
+                .from('comm_drip_steps')
+                .update({ estado: 'enviado', broadcast_id: stepBroadcast.id })
+                .eq('drip_campaign_id', drip.id)
+                .eq('step_order', 1);
+            }
+          } catch (e) {
+            console.error('Error sending first step:', e);
+          }
+        }
+
+        setBroadcasts(prev => [{ ...broadcast, template_nombre: templates.find(t => t.id === sequenceSteps[0].template_id)?.nombre ?? '—' }, ...prev]);
+        setView('list');
+        setIsSequence(false);
+        setSequenceSteps([{ template_id: null, delay_days: 0, delay_hours: 0, send_at_hour: 9, send_date: '', send_time: '09:00' }]);
+        setSelectedTemplateId(null);
+        setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_ids: [], fecha_desde: '', fecha_hasta: '', cancelado_desde: '', cancelado_hasta: '', eventos_min: '', eventos_max: '', nivel: '', grado: '', colegio: '' });
+        toast.success(`Secuencia activada: ${sequenceSteps.length} mensajes programados`);
+        return;
+      }
+
+      // ── SINGLE MESSAGE MODE ──
       const isScheduled = !!scheduledAt;
 
       const { data, error } = await supabase
@@ -1307,6 +1720,8 @@ export default function Campanias() {
           clickeados: 0,
           estado: isScheduled ? 'programado' : 'borrador',
           scheduled_at: isScheduled ? scheduledAt : null,
+          auto_reply_message: autoReplyMsg || null,
+          is_sequence: false,
           created_at: new Date().toISOString(),
         })
         .select()
@@ -1521,6 +1936,10 @@ export default function Campanias() {
           contactCount={contactCount}
           pais={filters.pais}
           rates={whatsappRates}
+          isSequence={isSequence}
+          setIsSequence={setIsSequence}
+          sequenceSteps={sequenceSteps}
+          setSequenceSteps={setSequenceSteps}
         />
       )}
       {view === 'step3' && (
@@ -1533,6 +1952,9 @@ export default function Campanias() {
           sending={sending}
           rates={whatsappRates}
           existingNames={broadcasts.map(b => b.nombre)}
+          isSequence={isSequence}
+          sequenceSteps={sequenceSteps}
+          templates={approvedTemplates}
         />
       )}
     </div>
