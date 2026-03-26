@@ -127,27 +127,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Auto-reply logic ──
-    if (config.auto_reply_enabled === 'false') {
-      return NextResponse.json({ ok: true, ignored: true, reason: 'auto-reply disabled', optout: isOptout || isQuickReplyOptout });
-    }
-
-    // 24h cooldown per phone
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { count } = await supabase
-      .from('comm_message_logs')
-      .select('id', { count: 'exact', head: true })
-      .eq('phone', normalizedPhone)
-      .eq('evento_tipo', 'auto_reply')
-      .gte('created_at', since);
-
-    if ((count ?? 0) > 0) {
-      return NextResponse.json({ ok: true, ignored: true, reason: 'cooldown 24h', optout: isOptout || isQuickReplyOptout });
-    }
-
-    // ── Campaign-specific auto-reply (priority) ──
-    // Look for a broadcast this phone received in the last 48h with a custom auto_reply_message
+    // ── Step 1: Check if there's a campaign-specific auto-reply ──
     let replyText: string | null = null;
+    let isCampaignReply = false;
     const since48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
     const { data: recentLog } = await supabase
       .from('comm_message_logs')
@@ -168,17 +150,34 @@ export async function POST(req: NextRequest) {
 
       if (broadcast?.auto_reply_message) {
         replyText = broadcast.auto_reply_message;
+        isCampaignReply = true;
       }
     }
 
-    // ── Global auto-reply (fallback) ──
+    // ── Step 2: If no campaign reply, check global toggle ──
     if (!replyText) {
+      if (config.auto_reply_enabled === 'false') {
+        return NextResponse.json({ ok: true, ignored: true, reason: 'auto-reply disabled', optout: isOptout || isQuickReplyOptout });
+      }
       replyText = config.auto_reply_message || DEFAULT_AUTO_REPLY;
       if (config.auto_reply_support_url) {
         replyText += `\n\n👉 ${config.auto_reply_support_url}`;
       } else if (config.auto_reply_support_number) {
         replyText += `\n\n📞 ${config.auto_reply_support_number}`;
       }
+    }
+
+    // ── Step 3: 24h cooldown ──
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { count } = await supabase
+      .from('comm_message_logs')
+      .select('id', { count: 'exact', head: true })
+      .eq('phone', normalizedPhone)
+      .eq('evento_tipo', 'auto_reply')
+      .gte('created_at', since);
+
+    if ((count ?? 0) > 0) {
+      return NextResponse.json({ ok: true, ignored: true, reason: 'cooldown 24h', optout: isOptout || isQuickReplyOptout });
     }
 
     try {
@@ -196,7 +195,7 @@ export async function POST(req: NextRequest) {
         created_at: new Date().toISOString(),
       });
 
-      return NextResponse.json({ ok: true, auto_reply_sent: true, campaign_reply: !!recentLog?.broadcast_id });
+      return NextResponse.json({ ok: true, auto_reply_sent: true, campaign_reply: isCampaignReply });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error('[status-update] auto-reply error:', errMsg);
