@@ -1890,17 +1890,49 @@ export default function Campanias() {
                       new Date(b.created_at).toLocaleDateString('es', { day: '2-digit', month: 'short' })
                     )}
                   </td>
-                  <td className="px-4 py-3">
-                    {b.kapso_broadcast_id && (
+                  <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                    <div className="flex items-center gap-1.5">
+                      {b.kapso_broadcast_id && (
+                        <button
+                          onClick={() => handleSync(b)}
+                          disabled={syncingId === b.id}
+                          title="Sincronizar métricas"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-[#3c527a] bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors disabled:opacity-50"
+                        >
+                          <span className={syncingId === b.id ? 'animate-spin inline-block' : ''}>↻</span>
+                          Sync
+                        </button>
+                      )}
                       <button
-                        onClick={e => { e.stopPropagation(); handleSync(b); }}
-                        disabled={syncingId === b.id}
-                        title="Sincronizar métricas"
-                        className="text-xs text-[#3c527a] hover:text-[#2a3d5c] font-medium flex items-center gap-1 disabled:opacity-50"
+                        onClick={() => {
+                          const sf = (b.segmento_filtros ?? {}) as Filters;
+                          setFilters({
+                            pais: sf.pais ?? 'Todos',
+                            plan_tipo: sf.plan_tipo ?? 'todos',
+                            plan_ids: sf.plan_ids ?? [],
+                            fecha_desde: sf.fecha_desde ?? '',
+                            fecha_hasta: sf.fecha_hasta ?? '',
+                            registro_desde: sf.registro_desde ?? '',
+                            registro_hasta: sf.registro_hasta ?? '',
+                            cancelado_desde: sf.cancelado_desde ?? '',
+                            cancelado_hasta: sf.cancelado_hasta ?? '',
+                            eventos_min: sf.eventos_min ?? '',
+                            eventos_max: sf.eventos_max ?? '',
+                            nivel: sf.nivel ?? '',
+                            grado: sf.grado ?? '',
+                            colegio: sf.colegio ?? '',
+                          });
+                          setSelectedTemplateId(null);
+                          setIsSequence(false);
+                          setView('step1');
+                          toast.success(`Segmento de "${b.nombre}" cargado`);
+                        }}
+                        title="Duplicar campaña"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-gray-500 bg-gray-50 hover:bg-gray-100 border border-gray-200 transition-colors"
                       >
-                        <span className={syncingId === b.id ? 'animate-spin inline-block' : ''}>↻</span>
+                        ⧉ Duplicar
                       </button>
-                    )}
+                    </div>
                   </td>
                 </tr>
               ))}
