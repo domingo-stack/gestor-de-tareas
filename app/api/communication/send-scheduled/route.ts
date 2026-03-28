@@ -26,13 +26,14 @@ export async function POST(req: NextRequest) {
   const supabase = getSupabase();
   const now = new Date().toISOString();
 
-  // Find all scheduled broadcasts that are due
+  // Find all scheduled broadcasts that are due (exclude sequences — those are handled by process-drip)
   const { data: due, error } = await supabase
     .from('comm_broadcasts')
     .select('id')
     .eq('estado', 'programado')
     .not('scheduled_at', 'is', null)
-    .lte('scheduled_at', now);
+    .lte('scheduled_at', now)
+    .or('is_sequence.is.null,is_sequence.eq.false');
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

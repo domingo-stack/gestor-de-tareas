@@ -53,6 +53,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Broadcast not found' }, { status: 404 });
   }
 
+  // Prevent re-sending completed/sending broadcasts
+  if (['completado', 'enviando'].includes(broadcast.estado)) {
+    return NextResponse.json({ error: 'Broadcast already sent', estado: broadcast.estado }, { status: 400 });
+  }
+
   const template = broadcast.comm_templates;
   if (!template || template.estado !== 'aprobado') {
     return NextResponse.json({ error: 'Template not approved' }, { status: 400 });
