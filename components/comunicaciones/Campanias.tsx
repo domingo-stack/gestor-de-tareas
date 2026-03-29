@@ -1465,6 +1465,8 @@ export default function Campanias() {
   const [sending, setSending] = useState(false);
 
   const [syncingId, setSyncingId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   const [whatsappRates, setWhatsappRates] = useState<Record<string, { marketing: number; utility: number }> | undefined>(undefined);
   const [planIds, setPlanIds] = useState<string[]>([]);
@@ -1603,6 +1605,40 @@ export default function Campanias() {
     }
   };
 
+  const deleteBroadcasts = async (ids: number[]) => {
+    if (!supabase || ids.length === 0) return;
+    setDeleting(true);
+    try {
+      // 1. Delete message logs
+      const { error: e1 } = await supabase.from('comm_message_logs').delete().in('broadcast_id', ids);
+      if (e1) { toast.error('Error al eliminar logs de mensajes'); return; }
+      // 2. Clear FK in drip steps (don't delete steps)
+      const { error: e2 } = await supabase.from('comm_drip_steps').update({ broadcast_id: null }).in('broadcast_id', ids);
+      if (e2) console.warn('No drip steps to clear or error:', e2.message);
+      // 3. Delete broadcasts
+      const { error: e3 } = await supabase.from('comm_broadcasts').delete().in('id', ids);
+      if (e3) { toast.error('Error al eliminar campañas'); return; }
+      setBroadcasts(prev => prev.filter(b => !ids.includes(b.id)));
+      setSelectedIds(new Set());
+      toast.success(`${ids.length === 1 ? 'Campaña eliminada' : `${ids.length} campañas eliminadas`} con todos sus registros`);
+    } catch {
+      toast.error('Error de red al eliminar');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm('¿Eliminar esta campaña y todos sus registros de envío? Esta acción no se puede deshacer.')) return;
+    await deleteBroadcasts([id]);
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (!confirm(`¿Eliminar ${ids.length} campaña${ids.length > 1 ? 's' : ''} y todos sus registros? Esta acción no se puede deshacer.`)) return;
+    await deleteBroadcasts(ids);
+  };
+
   const handleSend = async (campañaNombre: string, scheduledAt?: string, autoReplyMsg?: string) => {
     if (!supabase) return;
     if (!isSequence && !selectedTemplateId) return;
@@ -1739,12 +1775,34 @@ export default function Campanias() {
         return;
       }
 
-      // Trigger Kapso broadcast (server-side API route)
-      const kapsoRes = await fetch('/api/communication/send-broadcast', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ broadcastId: data.id }),
-      });
+      // Trigger Kapso broadcast (server-side API route) — 60s timeout
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 60000);
+      let kapsoRes: Response;
+      try {
+        kapsoRes = await fetch('/api/communication/send-broadcast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ broadcastId: data.id }),
+          signal: controller.signal,
+        });
+      } catch (fetchErr) {
+        clearTimeout(timeout);
+        // Re-fetch to show actual estado
+        const { data: stuckBroadcast } = await supabase
+          .from('comm_broadcasts')
+          .select('*')
+          .eq('id', data.id)
+          .single();
+        setBroadcasts(prev => [{ ...(stuckBroadcast ?? data), template_nombre: selectedTemplate?.nombre ?? '—' }, ...prev]);
+        setView('list');
+        toast.error(fetchErr instanceof DOMException && fetchErr.name === 'AbortError'
+          ? 'Timeout: Kapso no respondió en 60s. Revisa la campaña manualmente.'
+          : `Error de red al enviar: ${fetchErr instanceof Error ? fetchErr.message : 'desconocido'}`);
+        return;
+      } finally {
+        clearTimeout(timeout);
+      }
 
       if (!kapsoRes.ok) {
         const errData = await kapsoRes.json();
@@ -1809,13 +1867,24 @@ export default function Campanias() {
           <h2 className="text-xl font-bold text-[#383838]">Campañas</h2>
           <p className="text-sm text-gray-500 mt-0.5">Broadcasts manuales segmentados para el equipo de marketing</p>
         </div>
-        <button
-          onClick={() => { setView('step1'); setContactCount(0); }}
-          className="flex items-center gap-2 px-4 py-2 bg-[#ff8080] hover:bg-[#ff6b6b] text-white text-sm font-semibold rounded-lg transition-colors"
-        >
-          <span className="text-lg leading-none">+</span>
-          Nueva campaña
-        </button>
+        <div className="flex items-center gap-2">
+          {selectedIds.size > 0 && (
+            <button
+              onClick={handleBulkDelete}
+              disabled={deleting}
+              className="flex items-center gap-1.5 px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold rounded-lg border border-red-200 transition-colors disabled:opacity-50"
+            >
+              {deleting ? 'Eliminando...' : `Eliminar ${selectedIds.size} seleccionada${selectedIds.size > 1 ? 's' : ''}`}
+            </button>
+          )}
+          <button
+            onClick={() => { setView('step1'); setContactCount(0); }}
+            className="flex items-center gap-2 px-4 py-2 bg-[#ff8080] hover:bg-[#ff6b6b] text-white text-sm font-semibold rounded-lg transition-colors"
+          >
+            <span className="text-lg leading-none">+</span>
+            Nueva campaña
+          </button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -1848,6 +1917,17 @@ export default function Campanias() {
           <table className="w-full">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-4 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.size === broadcasts.length && broadcasts.length > 0}
+                    onChange={e => {
+                      if (e.target.checked) setSelectedIds(new Set(broadcasts.map(b => b.id)));
+                      else setSelectedIds(new Set());
+                    }}
+                    className="rounded border-gray-300"
+                  />
+                </th>
                 {['Campaña', 'Estado', 'Template', 'Dest.', 'Funnel', 'Fecha', ''].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-400 uppercase tracking-wide">{h}</th>
                 ))}
@@ -1860,6 +1940,18 @@ export default function Campanias() {
                   className="border-b border-gray-100 last:border-0 hover:bg-gray-50 cursor-pointer transition-colors"
                   onClick={() => { if (b.kapso_broadcast_id) { setDetailBroadcastId(b.id); setView('detail'); } }}
                 >
+                  <td className="px-4 py-3 w-8" onClick={e => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(b.id)}
+                      onChange={e => {
+                        const next = new Set(selectedIds);
+                        if (e.target.checked) next.add(b.id); else next.delete(b.id);
+                        setSelectedIds(next);
+                      }}
+                      className="rounded border-gray-300"
+                    />
+                  </td>
                   <td className="px-4 py-3 text-sm font-semibold text-[#383838]">{b.nombre}</td>
                   <td className="px-4 py-3"><EstadoBadge estado={b.estado} /></td>
                   <td className="px-4 py-3 text-sm text-gray-500 truncate max-w-[180px]">{b.template_nombre}</td>
@@ -1931,6 +2023,14 @@ export default function Campanias() {
                         className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-gray-500 bg-gray-50 hover:bg-gray-100 border border-gray-200 transition-colors"
                       >
                         ⧉ Duplicar
+                      </button>
+                      <button
+                        onClick={() => handleDelete(b.id)}
+                        disabled={deleting}
+                        title="Eliminar campaña"
+                        className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-red-500 bg-red-50 hover:bg-red-100 border border-red-200 transition-colors disabled:opacity-50"
+                      >
+                        ✕
                       </button>
                     </div>
                   </td>
