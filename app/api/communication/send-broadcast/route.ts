@@ -28,9 +28,11 @@ interface Filters {
   cancelado_hasta?: string;  // new range: max days since cancellation
   eventos_min: string;
   eventos_max?: string;      // new: upper bound for eventos_valor
+  last_login_desde?: string;
+  last_login_hasta?: string;
   nivel: string;
   grado: string;
-  colegio: string;
+  tiene_colegio?: string;    // '' | 'si' | 'no'
 }
 
 export async function POST(req: NextRequest) {
@@ -119,9 +121,12 @@ export async function POST(req: NextRequest) {
   }
   if (filters.eventos_min)                             query = query.gte('eventos_valor', parseInt(filters.eventos_min));
   if (filters.eventos_max)                             query = query.lte('eventos_valor', parseInt(filters.eventos_max));
+  if (filters.last_login_desde)                        query = query.gte('last_login', filters.last_login_desde);
+  if (filters.last_login_hasta)                        query = query.lte('last_login', `${filters.last_login_hasta}T23:59:59`);
   if (filters.nivel)                                   query = query.eq('nivel', filters.nivel);
   if (filters.grado)                                   query = query.ilike('grado', `%${filters.grado}%`);
-  if (filters.colegio)                                 query = query.ilike('colegio', `%${filters.colegio}%`);
+  if (filters.tiene_colegio === 'si')                  query = query.not('colegio', 'is', null).neq('colegio', '');
+  if (filters.tiene_colegio === 'no')                  query = query.or('colegio.is.null,colegio.eq.');
 
   const { data: contacts, error: cError } = await query;
 

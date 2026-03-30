@@ -50,9 +50,11 @@ interface Filters {
   cancelado_hasta: string; // solo para cancelados: días máximo desde cancelación
   eventos_min: string;
   eventos_max: string;
+  last_login_desde: string;
+  last_login_hasta: string;
   nivel: string;
   grado: string;
-  colegio: string;
+  tiene_colegio: string; // '' = sin filtro, 'si' = tiene colegio, 'no' = colegio null
 }
 
 const PAISES = ['Todos', 'Perú', 'México', 'Chile', 'Colombia', 'Argentina', 'Ecuador', 'Bolivia', 'Guatemala', 'Paraguay', 'Uruguay'];
@@ -169,7 +171,7 @@ function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, pla
 }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
-  const hasAdvanced = filters.nivel || filters.grado || filters.colegio;
+  const hasAdvanced = filters.nivel || filters.grado || filters.tiene_colegio || filters.last_login_desde || filters.last_login_hasta;
 
   return (
     <div>
@@ -325,6 +327,28 @@ function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, pla
         </div>
       </div>
 
+      {/* Last login (rango) */}
+      <div className="grid grid-cols-2 gap-4 mb-4">
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+            Último login (desde)
+            <InfoTip text="Filtra usuarios cuyo último login fue a partir de esta fecha." />
+          </label>
+          <input type="date"
+            value={filters.last_login_desde} onChange={e => setFilters({ ...filters, last_login_desde: e.target.value })}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
+        </div>
+        <div>
+          <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">
+            Último login (hasta)
+            <InfoTip text="Filtra usuarios cuyo último login fue hasta esta fecha. Útil para encontrar usuarios inactivos." />
+          </label>
+          <input type="date"
+            value={filters.last_login_hasta} onChange={e => setFilters({ ...filters, last_login_hasta: e.target.value })}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
+        </div>
+      </div>
+
       {/* ── Más filtros (colapsable) ── */}
       <button
         onClick={() => setShowAdvanced(v => !v)}
@@ -357,9 +381,14 @@ function Step1({ filters, setFilters, contactCount, loading, onNext, onBack, pla
             </div>
             <div className="col-span-2">
               <label className="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1.5">Colegio</label>
-              <input type="text" placeholder="Buscar por nombre parcial..."
-                value={filters.colegio} onChange={e => setFilters({ ...filters, colegio: e.target.value })}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors" />
+              <select
+                value={filters.tiene_colegio} onChange={e => setFilters({ ...filters, tiene_colegio: e.target.value })}
+                className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-sm bg-white outline-none focus:border-[#3c527a] transition-colors"
+              >
+                <option value="">Sin filtro</option>
+                <option value="si">Tiene colegio registrado</option>
+                <option value="no">No tiene colegio (vacío)</option>
+              </select>
             </div>
           </div>
         </div>
@@ -1474,7 +1503,7 @@ export default function Campanias() {
     pais: 'Todos', plan_tipo: 'todos', plan_ids: [],
     fecha_desde: '', fecha_hasta: '', registro_desde: '', registro_hasta: '',
     cancelado_desde: '', cancelado_hasta: '',
-    eventos_min: '', eventos_max: '', nivel: '', grado: '', colegio: '',
+    eventos_min: '', eventos_max: '', last_login_desde: '', last_login_hasta: '', nivel: '', grado: '', tiene_colegio: '',
   });
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null);
   const [isSequence, setIsSequence] = useState(false);
@@ -1557,9 +1586,12 @@ export default function Campanias() {
       }
       if (filters.eventos_min)               q = q.gte('eventos_valor', parseInt(filters.eventos_min));
       if (filters.eventos_max)               q = q.lte('eventos_valor', parseInt(filters.eventos_max));
+      if (filters.last_login_desde)          q = q.gte('last_login', filters.last_login_desde);
+      if (filters.last_login_hasta)          q = q.lte('last_login', `${filters.last_login_hasta}T23:59:59`);
       if (filters.nivel)                     q = q.eq('nivel', filters.nivel);
       if (filters.grado)                     q = q.ilike('grado', `%${filters.grado}%`);
-      if (filters.colegio)                   q = q.ilike('colegio', `%${filters.colegio}%`);
+      if (filters.tiene_colegio === 'si')    q = q.not('colegio', 'is', null).neq('colegio', '');
+      if (filters.tiene_colegio === 'no')    q = q.or('colegio.is.null,colegio.eq.');
       const { count, error } = await q;
       if (!error) setContactCount(count ?? 0);
       setCountLoading(false);
@@ -1735,7 +1767,7 @@ export default function Campanias() {
         setIsSequence(false);
         setSequenceSteps([{ template_id: null, delay_days: 0, delay_hours: 0, send_at_hour: 9, send_date: '', send_time: '09:00' }]);
         setSelectedTemplateId(null);
-        setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_ids: [], fecha_desde: '', fecha_hasta: '', cancelado_desde: '', cancelado_hasta: '', eventos_min: '', eventos_max: '', nivel: '', grado: '', colegio: '' });
+        setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_ids: [], fecha_desde: '', fecha_hasta: '', cancelado_desde: '', cancelado_hasta: '', eventos_min: '', eventos_max: '', last_login_desde: '', last_login_hasta: '', nivel: '', grado: '', tiene_colegio: '' });
         toast.success(`Secuencia activada: ${sequenceSteps.length} mensajes programados`);
         return;
       }
@@ -1769,7 +1801,7 @@ export default function Campanias() {
         setBroadcasts(prev => [{ ...data, template_nombre: selectedTemplate?.nombre ?? '—' }, ...prev]);
         setView('list');
         setSelectedTemplateId(null);
-        setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_ids: [], fecha_desde: '', fecha_hasta: '', cancelado_desde: '', cancelado_hasta: '', eventos_min: '', eventos_max: '', nivel: '', grado: '', colegio: '' });
+        setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_ids: [], fecha_desde: '', fecha_hasta: '', cancelado_desde: '', cancelado_hasta: '', eventos_min: '', eventos_max: '', last_login_desde: '', last_login_hasta: '', nivel: '', grado: '', tiene_colegio: '' });
         const dt = new Date(scheduledAt);
         toast.success(`Campaña programada para ${dt.toLocaleDateString('es')} a las ${dt.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`);
         return;
@@ -1833,7 +1865,7 @@ export default function Campanias() {
       }, ...prev]);
       setView('list');
       setSelectedTemplateId(null);
-      setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_ids: [], fecha_desde: '', fecha_hasta: '', cancelado_desde: '', cancelado_hasta: '', eventos_min: '', eventos_max: '', nivel: '', grado: '', colegio: '' });
+      setFilters({ pais: 'Todos', plan_tipo: 'todos', plan_ids: [], fecha_desde: '', fecha_hasta: '', cancelado_desde: '', cancelado_hasta: '', eventos_min: '', eventos_max: '', last_login_desde: '', last_login_hasta: '', nivel: '', grado: '', tiene_colegio: '' });
       toast.success(`Campaña enviada a ${kapsoData.recipients_added?.toLocaleString('es') ?? contactCount.toLocaleString('es')} contactos`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Error al crear campaña';
@@ -2010,9 +2042,11 @@ export default function Campanias() {
                             cancelado_hasta: sf.cancelado_hasta ?? '',
                             eventos_min: sf.eventos_min ?? '',
                             eventos_max: sf.eventos_max ?? '',
+                            last_login_desde: sf.last_login_desde ?? '',
+                            last_login_hasta: sf.last_login_hasta ?? '',
                             nivel: sf.nivel ?? '',
                             grado: sf.grado ?? '',
-                            colegio: sf.colegio ?? '',
+                            tiene_colegio: sf.tiene_colegio ?? sf.colegio ? 'si' : '',
                           });
                           setSelectedTemplateId(null);
                           setIsSequence(false);
