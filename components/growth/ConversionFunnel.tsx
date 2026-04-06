@@ -1,8 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { ExclamationTriangleIcon, EyeIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
+import {
+  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts';
 import { fmtNum, fmtPct } from './formatters';
 import WeekSelector, { getCurrentWeekStart, toDateStr } from './WeekSelector';
 
@@ -44,6 +47,22 @@ interface ConversionData {
   weekly?: WeeklyRow[];
 }
 
+interface TrendWeek {
+  weekLabel: string;
+  weekStart: string;
+  registered: number;
+  activated: number;
+  paid: number;
+  activationPct: number;
+  conversionPct: number;
+  activatedToPayPct: number;
+}
+
+interface TrendData {
+  country_options: string[];
+  weekly: TrendWeek[];
+}
+
 // 8-step funnel colors — warm gradient ending in green for $
 const FUNNEL_COLORS = [
   { bg: '#3B82F6', light: '#EFF6FF' }, // blue
@@ -83,6 +102,11 @@ export default function ConversionFunnel() {
   const [planStatus, setPlanStatus] = useState('all');
   const [planId, setPlanId] = useState('all');
 
+  // Trend chart (last 12 weeks) — independent of WeekSelector
+  const [trendData, setTrendData] = useState<TrendData | null>(null);
+  const [trendLoading, setTrendLoading] = useState(true);
+  const [trendCountry, setTrendCountry] = useState('all');
+
   useEffect(() => {
     if (!supabase) return;
     const fetchData = async () => {
@@ -112,6 +136,42 @@ export default function ConversionFunnel() {
   useEffect(() => {
     if (planStatus !== 'paid') setPlanId('all');
   }, [planStatus]);
+
+  // Independent fetch for 12-week trend (only depends on country filter)
+  useEffect(() => {
+    if (!supabase) return;
+    const fetchTrend = async () => {
+      setTrendLoading(true);
+      const { data: result, error } = await supabase.rpc('get_conversion_trend_12w', {
+        p_country: trendCountry,
+      });
+      if (error) {
+        console.error('RPC get_conversion_trend_12w error:', error);
+        setTrendData(null);
+      } else if (result) {
+        const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+        setTrendData(parsed as TrendData);
+      } else {
+        setTrendData(null);
+      }
+      setTrendLoading(false);
+    };
+    fetchTrend();
+  }, [supabase, trendCountry]);
+
+  // Averages across last 12 weeks for the summary strip under the chart
+  const trendAverages = useMemo(() => {
+    const rows = trendData?.weekly || [];
+    if (rows.length === 0) return { activation: 0, conversion: 0, activToPay: 0 };
+    const totalReg = rows.reduce((s, r) => s + r.registered, 0);
+    const totalAct = rows.reduce((s, r) => s + r.activated, 0);
+    const totalPaid = rows.reduce((s, r) => s + r.paid, 0);
+    return {
+      activation: totalReg > 0 ? (totalAct / totalReg) * 100 : 0,
+      conversion: totalReg > 0 ? (totalPaid / totalReg) * 100 : 0,
+      activToPay: totalAct > 0 ? (totalPaid / totalAct) * 100 : 0,
+    };
+  }, [trendData]);
 
   if (loading) {
     return <div className="flex items-center justify-center py-20"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>;
@@ -307,6 +367,125 @@ export default function ConversionFunnel() {
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* ===== 12-week Trend Chart (independent) ===== */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+          <div>
+            <h3 className="font-semibold text-gray-700">Tendencia 12 semanas</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Registrados, activados y pagados por semana — independiente del selector de arriba</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">Pais:</span>
+            <select
+              value={trendCountry}
+              onChange={(e) => setTrendCountry(e.target.value)}
+              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="all">Todos</option>
+              {(trendData?.country_options || []).map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="h-80 w-full">
+          {trendLoading ? (
+            <div className="h-full flex items-center justify-center text-gray-400">Cargando...</div>
+          ) : (trendData?.weekly || []).length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={trendData!.weekly} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                <XAxis dataKey="weekLabel" stroke="#9CA3AF" fontSize={11} />
+                <YAxis yAxisId="left" stroke="#9CA3AF" fontSize={12} tickFormatter={(v: number) => fmtNum(v)} />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  stroke="#F59E0B"
+                  fontSize={12}
+                  domain={[0, 100]}
+                  tickFormatter={(v: number) => `${v}%`}
+                />
+                <Tooltip
+                  cursor={{ fill: '#F3F4F6' }}
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload || payload.length === 0) return null;
+                    const row = payload[0].payload as TrendWeek;
+                    return (
+                      <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-xs">
+                        <div className="font-semibold text-gray-800 mb-2">{label}</div>
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-[#3B82F6]" />Registrados</span>
+                            <span className="font-medium text-gray-800">{fmtNum(row.registered)}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-[#A855F7]" />Activados (4+ ev)</span>
+                            <span className="font-medium text-gray-800">{fmtNum(row.activated)}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-[#10B981]" />Pagados</span>
+                            <span className="font-medium text-gray-800">{fmtNum(row.paid)}</span>
+                          </div>
+                        </div>
+                        <div className="border-t border-gray-100 mt-2 pt-2 space-y-1">
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="text-gray-500">% Activacion</span>
+                            <span className="font-medium text-amber-600">{fmtPct(row.activationPct)}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="text-gray-500">% Conversion (Reg&rarr;Pago)</span>
+                            <span className="font-medium text-emerald-600">{fmtPct(row.conversionPct)}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-4">
+                            <span className="text-gray-500">Activ&rarr;Pago</span>
+                            <span className="font-medium text-gray-700">{fmtPct(row.activatedToPayPct)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }}
+                />
+                <Legend
+                  verticalAlign="top"
+                  height={36}
+                  formatter={(value: string) => <span className="text-xs text-gray-600">{value}</span>}
+                />
+                <Bar yAxisId="left" dataKey="registered" fill="#3B82F6" name="Registrados" barSize={14} radius={[3, 3, 0, 0]} />
+                <Bar yAxisId="left" dataKey="activated" fill="#A855F7" name="Activados" barSize={14} radius={[3, 3, 0, 0]} />
+                <Bar yAxisId="left" dataKey="paid" fill="#10B981" name="Pagados" barSize={14} radius={[3, 3, 0, 0]} />
+                <Line yAxisId="right" type="monotone" dataKey="activationPct" stroke="#F59E0B" strokeWidth={2} strokeDasharray="4 4" dot={{ r: 3, fill: '#F59E0B' }} name="% Activacion" />
+                <Line yAxisId="right" type="monotone" dataKey="conversionPct" stroke="#059669" strokeWidth={2} dot={{ r: 3, fill: '#059669' }} name="% Conversion" />
+              </ComposedChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-full flex items-center justify-center text-gray-400 text-sm">Sin datos de tendencia</div>
+          )}
+        </div>
+
+        {/* Averages summary — same style as the funnel footer */}
+        {(trendData?.weekly || []).length > 0 && (
+          <div className="flex items-center gap-4 mt-5 pt-4 border-t border-gray-100">
+            <span className="text-[11px] uppercase tracking-wider text-gray-400 font-medium">Promedio 12 semanas:</span>
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#A855F7' }} />
+              <span className="text-[11px] text-gray-500">Reg&rarr;Activ</span>
+              <span className="text-[11px] font-bold text-gray-700">{fmtPct(trendAverages.activation)}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#10B981' }} />
+              <span className="text-[11px] text-gray-500">Reg&rarr;Pago</span>
+              <span className="text-[11px] font-bold text-gray-700">{fmtPct(trendAverages.conversion)}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#3c527a' }} />
+              <span className="text-[11px] text-gray-500">Activ&rarr;Pago</span>
+              <span className="text-[11px] font-bold text-gray-700">{fmtPct(trendAverages.activToPay)}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Mixpanel placeholder */}
