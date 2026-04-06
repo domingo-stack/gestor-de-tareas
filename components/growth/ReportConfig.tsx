@@ -108,81 +108,142 @@ export default function ReportConfig() {
   // Send result state
   const [sendResult, setSendResult] = useState<{ type: 'success' | 'error'; message: string; detail?: string } | null>(null);
 
-  // Send test report
+  // Manual send state
+  const [manualSending, setManualSending] = useState(false);
+  const [selectedWeek, setSelectedWeek] = useState<string>(''); // YYYY-MM-DD del domingo
+  const [showManualConfirm, setShowManualConfirm] = useState(false);
+
+  // Calcular últimas 4 semanas Dom-Sáb (en hora Lima)
+  const getLastNSundays = (n: number) => {
+    // Domingo de hoy en Lima
+    const now = new Date();
+    const utc5 = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+    const dow = utc5.getUTCDay();
+    utc5.setUTCDate(utc5.getUTCDate() - dow);
+    utc5.setUTCHours(0, 0, 0, 0);
+    const todaySunday = new Date(utc5.getUTCFullYear(), utc5.getUTCMonth(), utc5.getUTCDate());
+    // Última semana cerrada = domingo anterior
+    const lastClosed = new Date(todaySunday);
+    lastClosed.setDate(lastClosed.getDate() - 7);
+    const result: { value: string; label: string }[] = [];
+    const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    for (let i = 0; i < n; i++) {
+      const sunday = new Date(lastClosed);
+      sunday.setDate(sunday.getDate() - i * 7);
+      const saturday = new Date(sunday);
+      saturday.setDate(saturday.getDate() + 6);
+      const value = `${sunday.getFullYear()}-${String(sunday.getMonth() + 1).padStart(2, '0')}-${String(sunday.getDate()).padStart(2, '0')}`;
+      const label = `${sunday.getDate()} ${months[sunday.getMonth()]} – ${saturday.getDate()} ${months[saturday.getMonth()]} ${saturday.getFullYear()}${i === 0 ? ' (más reciente)' : ''}`;
+      result.push({ value, label });
+    }
+    return result;
+  };
+  const weekOptions = getLastNSundays(8);
+
+  // Inicializar selectedWeek con la última semana cerrada
+  useEffect(() => {
+    if (!selectedWeek && weekOptions.length > 0) {
+      setSelectedWeek(weekOptions[0].value);
+    }
+  }, [weekOptions, selectedWeek]);
+
+  // Helper: invocar el edge function send-growth-report
+  const callSendReport = async (body: Record<string, unknown>) => {
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    if (!supabaseUrl || !anonKey) {
+      throw new Error('Faltan NEXT_PUBLIC_SUPABASE_URL o NEXT_PUBLIC_SUPABASE_ANON_KEY');
+    }
+    const response = await fetch(`${supabaseUrl}/functions/v1/send-growth-report`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${anonKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+    let result: any = {};
+    try { result = await response.json(); } catch { /* not JSON */ }
+    return { ok: response.ok, status: response.status, result };
+  };
+
+  // Send test report — manda al email del usuario logueado
   const handleSendTest = async () => {
+    if (!supabase || !user?.email) {
+      toast.error('No se detectó tu email de usuario');
+      return;
+    }
+    setSending(true);
+    setSendResult(null);
+    try {
+      const { ok, status, result } = await callSendReport({ test: true, to: user.email });
+      if (ok) {
+        const msg = `Reporte de prueba enviado a ${user.email}`;
+        setSendResult({
+          type: 'success',
+          message: msg,
+          detail: `Semana: ${result.week_label || 'actual'} · Tamaño: ${result.html_size_kb || '?'} KB`,
+        });
+        toast.success(msg);
+        // Refresh logs
+        const { data: newLogs } = await supabase.from('growth_report_log').select('*').order('sent_at', { ascending: false }).limit(20);
+        setLogs(newLogs || []);
+      } else if (status === 404) {
+        setSendResult({ type: 'error', message: 'Edge Function no encontrada', detail: 'Ejecuta: npx supabase functions deploy send-growth-report' });
+      } else if (status === 401) {
+        setSendResult({ type: 'error', message: 'No autorizado', detail: 'Verifica CRON_SECRET en Supabase secrets.' });
+      } else {
+        setSendResult({ type: 'error', message: result.error || `Error ${status}`, detail: `Status ${status}` });
+      }
+    } catch (err: any) {
+      setSendResult({ type: 'error', message: 'Error de red', detail: err.message || 'unknown' });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Manual send — envía el reporte real a TODOS los recipients activos para una semana específica
+  const handleManualSend = async () => {
     if (!supabase) return;
     const activeRecipients = recipients.filter(r => r.is_active);
     if (activeRecipients.length === 0) {
       toast.error('No hay destinatarios activos');
       return;
     }
-
-    setSending(true);
+    if (!selectedWeek) {
+      toast.error('Selecciona una semana');
+      return;
+    }
+    setManualSending(true);
     setSendResult(null);
+    setShowManualConfirm(false);
     try {
-      const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-
-      if (!supabaseUrl || !anonKey) {
-        setSendResult({ type: 'error', message: 'Configuracion incompleta', detail: 'Faltan variables de entorno NEXT_PUBLIC_SUPABASE_URL o NEXT_PUBLIC_SUPABASE_ANON_KEY' });
-        setSending(false);
-        return;
-      }
-
-      const response = await fetch(`${supabaseUrl}/functions/v1/send-growth-report`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${anonKey}`,
-        },
-        body: JSON.stringify({ test: true }),
+      // force: true bypassa el idempotency guard, week_start_override define la semana exacta
+      const { ok, status, result } = await callSendReport({
+        week_start_override: selectedWeek,
+        force: true,
       });
-
-      let result: any = {};
-      try {
-        result = await response.json();
-      } catch {
-        // Response wasn't JSON
-      }
-
-      if (response.ok) {
-        const msg = `Reporte enviado exitosamente a ${result.recipients_count || activeRecipients.length} destinatario(s)`;
+      if (ok) {
+        const msg = `Reporte enviado a ${result.recipients_count || activeRecipients.length} destinatarios`;
         setSendResult({
           type: 'success',
           message: msg,
-          detail: result.failed > 0 ? `${result.failed} envio(s) fallaron` : `Semana: ${result.week || 'actual'}`,
+          detail: `Semana: ${result.week_label || selectedWeek} · ${result.failed > 0 ? `${result.failed} fallaron · ` : ''}${result.html_size_kb || '?'} KB`,
         });
         toast.success(msg);
-        // Refresh logs
         const { data: newLogs } = await supabase.from('growth_report_log').select('*').order('sent_at', { ascending: false }).limit(20);
         setLogs(newLogs || []);
-      } else if (response.status === 404) {
-        setSendResult({
-          type: 'error',
-          message: 'Edge Function no encontrada',
-          detail: 'La funcion send-growth-report no esta desplegada. Ejecuta: npx supabase functions deploy send-growth-report --no-verify-jwt',
-        });
-      } else if (response.status === 401) {
-        setSendResult({
-          type: 'error',
-          message: 'No autorizado',
-          detail: 'Verifica que CRON_SECRET este configurado en las variables de entorno de Supabase Edge Functions.',
-        });
       } else {
         setSendResult({
           type: 'error',
-          message: result.error || `Error del servidor (${response.status})`,
-          detail: `Status: ${response.status}. ${result.error || 'Revisa los logs de la Edge Function en el dashboard de Supabase.'}`,
+          message: result.error || `Error ${status}`,
+          detail: `Status ${status}. Revisa los logs de la edge function en Supabase.`,
         });
       }
     } catch (err: any) {
-      setSendResult({
-        type: 'error',
-        message: 'No se pudo conectar con la Edge Function',
-        detail: `${err.message || 'Error de red'}. Verifica que la funcion este desplegada y que la URL de Supabase sea correcta.`,
-      });
+      setSendResult({ type: 'error', message: 'Error de red', detail: err.message || 'unknown' });
     } finally {
-      setSending(false);
+      setManualSending(false);
     }
   };
 
@@ -219,11 +280,12 @@ export default function ReportConfig() {
           </button>
           <button
             onClick={handleSendTest}
-            disabled={sending || activeCount === 0}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${sending || activeCount === 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+            disabled={sending || !user?.email}
+            title={user?.email ? `Enviar prueba a ${user.email}` : 'Sin email de usuario'}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${sending || !user?.email ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
           >
             <PaperAirplaneIcon className="w-4 h-4" />
-            {sending ? 'Enviando...' : 'Enviar reporte de prueba'}
+            {sending ? 'Enviando...' : `Enviar prueba a ${user?.email ?? 'mí'}`}
           </button>
         </div>
       </div>
@@ -394,11 +456,78 @@ export default function ReportConfig() {
         )}
       </div>
 
+      {/* Manual send — para reenvíos o envíos fuera del cron */}
+      <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="flex-grow">
+            <h3 className="text-sm font-semibold text-amber-900 mb-1">Envío manual a destinatarios reales</h3>
+            <p className="text-xs text-amber-700">
+              Envía el reporte de una semana específica a los <strong>{activeCount} destinatarios activos</strong>.
+              Útil si el cron falló, para reenviar una semana pasada, o para análisis del board.
+              Bypassa el guard de duplicados (puede enviar la misma semana dos veces).
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+            <select
+              value={selectedWeek}
+              onChange={(e) => setSelectedWeek(e.target.value)}
+              disabled={manualSending}
+              className="text-sm rounded-md border-amber-300 bg-white px-3 py-2 border min-w-[260px] text-gray-700 focus:ring-2 focus:ring-amber-500"
+            >
+              {weekOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => setShowManualConfirm(true)}
+              disabled={manualSending || activeCount === 0 || !selectedWeek}
+              className={`inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${manualSending || activeCount === 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-amber-600 text-white hover:bg-amber-700'}`}
+            >
+              <PaperAirplaneIcon className="w-4 h-4" />
+              {manualSending ? 'Enviando...' : 'Enviar a todos'}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Confirmación modal de envío manual */}
+      {showManualConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setShowManualConfirm(false)}>
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <ExclamationTriangleIcon className="w-6 h-6 text-amber-500 flex-shrink-0 mt-0.5" />
+              <div className="flex-grow">
+                <h3 className="text-base font-semibold text-gray-900 mb-2">Confirmar envío manual</h3>
+                <p className="text-sm text-gray-600 mb-3">
+                  Vas a enviar el reporte de la semana <strong className="text-gray-900">{weekOptions.find(o => o.value === selectedWeek)?.label}</strong> a <strong className="text-gray-900">{activeCount} destinatario{activeCount !== 1 ? 's' : ''} reales</strong>.
+                </p>
+                <p className="text-xs text-gray-500 mb-4">
+                  Esto no es una prueba — los emails se mandan al board ahora mismo. Si ya enviaste este reporte antes, recibirán otra copia (force=true).
+                </p>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => setShowManualConfirm(false)}
+                    className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleManualSend}
+                    className="px-4 py-2 bg-amber-600 text-white rounded-md text-sm font-medium hover:bg-amber-700"
+                  >
+                    Sí, enviar ahora
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Cron info */}
       <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
         <p className="text-xs text-gray-500">
-          <strong>Envio automatico:</strong> El reporte se envia automaticamente cada lunes a las 07:00 UTC via cron externo.
-          El boton "Enviar reporte de prueba" genera y envia el reporte de la semana actual inmediatamente.
+          <strong>Envío automático:</strong> el reporte se envía cada <strong>lunes 14:00 UTC = 9:00 AM hora Lima</strong> (UTC-5) vía pg_cron a los destinatarios activos. La semana incluida es la última semana cerrada Domingo–Sábado (la que terminó el sábado anterior al envío). El botón "Enviar prueba" manda el reporte de la semana actual solo a tu email logueado, sin afectar el log ni los snapshots.
         </p>
       </div>
     </div>
