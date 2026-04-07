@@ -104,12 +104,12 @@ function fmtDateEs(d: Date): string {
 
 type RpcResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
-async function callRpc<T = unknown>(
+async function callRpcOnce<T = unknown>(
   // deno-lint-ignore no-explicit-any
   supabase: any,
   name: string,
   params: Record<string, unknown>,
-  timeoutMs = RPC_TIMEOUT_MS,
+  timeoutMs: number,
 ): Promise<RpcResult<T>> {
   try {
     const timeoutPromise = new Promise<never>((_, reject) =>
@@ -123,6 +123,32 @@ async function callRpc<T = unknown>(
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }
+}
+
+/**
+ * Llama un RPC con retry automático si falla por timeout.
+ * El primer intento usa el timeout normal. Si falla por timeout o
+ * statement_timeout, espera 2s y reintenta UNA vez con timeout extendido.
+ * Esto cubre cold-starts del edge function donde la primera invocación es lenta.
+ */
+async function callRpc<T = unknown>(
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
+  name: string,
+  params: Record<string, unknown>,
+  timeoutMs = RPC_TIMEOUT_MS,
+): Promise<RpcResult<T>> {
+  const first = await callRpcOnce<T>(supabase, name, params, timeoutMs);
+  if (first.ok) return first;
+  // Detectar errores de timeout (cliente o postgres statement_timeout)
+  const isTimeout = /timeout|statement timeout|canceling statement/i.test(first.error);
+  if (!isTimeout) return first;
+  // Retry: esperar 2s y reintentar con timeout 1.5x
+  await new Promise((r) => setTimeout(r, 2000));
+  const retryTimeout = Math.round(timeoutMs * 1.5);
+  const second = await callRpcOnce<T>(supabase, name, params, retryTimeout);
+  if (second.ok) return second;
+  return { ok: false, error: `Failed after retry. First: ${first.error}. Second: ${second.error}` };
 }
 
 // ============================================================================
