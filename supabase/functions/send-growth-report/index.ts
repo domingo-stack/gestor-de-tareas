@@ -5,20 +5,23 @@
 // Consume RPCs existentes del dashboard /revenue + get_yoy_revenue_matrix.
 //
 // Body contract:
-//   {}                          → envío real, idempotency guard, todos los
-//                                 recipients is_active (requiere CRON_SECRET)
-//   { force: true }             → bypass idempotency guard (reenvío manual,
-//                                 requiere CRON_SECRET)
+//   {}                          → envío real (CRON), todos los recipients
+//                                 is_active. Requiere x-cron-secret header.
+//                                 Aplica idempotency guard.
+//   { force: true }             → idem pero bypass idempotency. Requiere CRON.
 //   { week_start_override: "YYYY-MM-DD" } → enviar reporte de una semana
-//                                 específica (debe ser un domingo). Útil para
-//                                 reenviar semanas pasadas desde la UI.
-//                                 Combinable con force: true.
+//                                 específica (debe ser un domingo). Combinable
+//                                 con cron OR manual.
 //   { preview: true }           → retorna { html } sin enviar, sin loggear,
-//                                 sin upsert snapshot. Para iframe de preview
-//                                 desde el dashboard. No requiere CRON_SECRET
-//                                 si viene con Authorization Bearer válido.
+//                                 sin upsert snapshot. No requiere CRON_SECRET
+//                                 (cualquier Bearer válido).
 //   { test: true, to: "email" } → envía solo al email especificado,
-//                                 loggea como status='test', no upsert snapshot.
+//                                 loggea como status='test'. Sin CRON_SECRET.
+//   { manual: true }            → envío real desde la UI (ReportConfig tab).
+//                                 Requiere Authorization Bearer = user JWT,
+//                                 y el usuario debe tener rol superadmin.
+//                                 Implícitamente bypassa idempotency guard.
+//                                 Combinable con week_start_override.
 //
 // Auth:
 //   - CRON_SECRET header (x-cron-secret) o query (?secret=) para envío real
@@ -888,30 +891,82 @@ serve(async (req: Request) => {
       to?: string;
       force?: boolean;
       week_start_override?: string;
+      manual?: boolean;
     } = {};
     try {
       body = await req.clone().json();
     } catch { /* no body */ }
 
-    const { preview = false, test = false, to = '', force = false, week_start_override } = body;
+    const {
+      preview = false,
+      test = false,
+      to = '',
+      force = false,
+      week_start_override,
+      manual = false,
+    } = body;
 
-    // Auth: preview/test aceptan Bearer token normal; envío real requiere CRON_SECRET
-    const isCronInvocation = !preview && !test;
+    // Supabase client (service role) — necesario tanto para auth checks como para data
+    const supabaseAdmin = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    );
+
+    // ===== Auth flow =====
+    //   - cron: requiere CRON_SECRET (header o query)
+    //   - manual: requiere user JWT válido + rol superadmin
+    //   - preview/test: cualquier Bearer es OK (low-risk paths)
+    const isCronInvocation = !preview && !test && !manual;
     if (isCronInvocation) {
       const cronSecret = Deno.env.get('CRON_SECRET');
       const url = new URL(req.url);
       const querySecret = url.searchParams.get('secret') || '';
       const headerSecret = req.headers.get('x-cron-secret') || '';
       if (cronSecret && headerSecret !== cronSecret && querySecret !== cronSecret) {
-        return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: JSON_HEADERS });
+        return new Response(
+          JSON.stringify({ error: 'Unauthorized: cron requires CRON_SECRET' }),
+          { status: 401, headers: JSON_HEADERS },
+        );
       }
     }
 
-    // Supabase client (service role)
-    const supabaseAdmin = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    );
+    if (manual) {
+      // Verificar JWT del usuario y rol superadmin
+      const authHeader = req.headers.get('authorization') || '';
+      const jwt = authHeader.replace(/^Bearer\s+/i, '').trim();
+      if (!jwt) {
+        return new Response(
+          JSON.stringify({ error: 'Manual send requires Authorization: Bearer <user-jwt>' }),
+          { status: 401, headers: JSON_HEADERS },
+        );
+      }
+      const { data: userData, error: authError } = await supabaseAdmin.auth.getUser(jwt);
+      if (authError || !userData?.user) {
+        return new Response(
+          JSON.stringify({
+            error: 'Invalid or expired user token',
+            detail: authError?.message || 'no user',
+          }),
+          { status: 401, headers: JSON_HEADERS },
+        );
+      }
+      // Verificar rol superadmin (consultando la tabla profiles)
+      const { data: profileData } = await supabaseAdmin
+        .from('profiles')
+        .select('role')
+        .eq('id', userData.user.id)
+        .maybeSingle();
+      if (!profileData || profileData.role !== 'superadmin') {
+        return new Response(
+          JSON.stringify({
+            error: 'Manual send requires superadmin role',
+            detail: `User ${userData.user.email} has role: ${profileData?.role || 'none'}`,
+          }),
+          { status: 403, headers: JSON_HEADERS },
+        );
+      }
+      // Auth OK — continúa el flow como envío real (sin idempotency guard)
+    }
 
     // Resend client
     const resendApiKey = Deno.env.get('RESEND_API_KEY');

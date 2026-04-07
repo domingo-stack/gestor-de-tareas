@@ -148,17 +148,32 @@ export default function ReportConfig() {
   }, [weekOptions, selectedWeek]);
 
   // Helper: invocar el edge function send-growth-report
-  const callSendReport = async (body: Record<string, unknown>) => {
+  // Si useUserJwt=true, manda el JWT del usuario logueado (necesario para
+  // manual: true). Si false, manda el anon key (suficiente para test/preview).
+  const callSendReport = async (
+    body: Record<string, unknown>,
+    useUserJwt = false,
+  ) => {
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!supabaseUrl || !anonKey) {
       throw new Error('Faltan NEXT_PUBLIC_SUPABASE_URL o NEXT_PUBLIC_SUPABASE_ANON_KEY');
     }
+    let bearer = anonKey;
+    if (useUserJwt) {
+      if (!supabase) throw new Error('Supabase client no inicializado');
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData.session?.access_token;
+      if (!accessToken) {
+        throw new Error('Sesión expirada — recarga la página y vuelve a intentar');
+      }
+      bearer = accessToken;
+    }
     const response = await fetch(`${supabaseUrl}/functions/v1/send-growth-report`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${anonKey}`,
+        'Authorization': `Bearer ${bearer}`,
       },
       body: JSON.stringify(body),
     });
@@ -218,11 +233,12 @@ export default function ReportConfig() {
     setSendResult(null);
     setShowManualConfirm(false);
     try {
-      // force: true bypassa el idempotency guard, week_start_override define la semana exacta
+      // manual: true → autenticación con user JWT + verificación de rol superadmin
+      // implícitamente bypassa el idempotency guard
       const { ok, status, result } = await callSendReport({
+        manual: true,
         week_start_override: selectedWeek,
-        force: true,
-      });
+      }, /* useUserJwt */ true);
       if (ok) {
         const msg = `Reporte enviado a ${result.recipients_count || activeRecipients.length} destinatarios`;
         setSendResult({
