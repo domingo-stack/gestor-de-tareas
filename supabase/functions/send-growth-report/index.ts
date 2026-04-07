@@ -337,44 +337,101 @@ function renderRevenueByCountry(revByCountry: RpcResult<any>): string {
   if (!revByCountry.ok) return placeholderSection('Revenue por País', revByCountry.error);
   const payload = revByCountry.data;
   const rowsData = payload?.rows ?? [];
-  const periodKeys: string[] = payload?.period_keys ?? [];
+  const allPeriodKeys: string[] = payload?.period_keys ?? [];
   if (!Array.isArray(rowsData) || !rowsData.length) return placeholderSection('Revenue por País');
-  if (!periodKeys.length) return placeholderSection('Revenue por País', 'period_keys vacío');
+  if (!allPeriodKeys.length) return placeholderSection('Revenue por País', 'period_keys vacío');
 
-  // Top 10 países por total
-  const sorted = [...rowsData]
-    .sort((a, b) => Number(b.total ?? 0) - Number(a.total ?? 0))
-    .slice(0, 10);
+  // Tomar últimas 8 semanas (period_keys son fechas de domingo en orden cronológico)
+  const periodKeys = allPeriodKeys.slice(-8);
 
-  const rows: MatrixRow[] = sorted.map((r: any) => ({
-    label: r.country || '-',
-    cells: [
-      ...periodKeys.map((k) => {
-        // Si el periodo no existe en periods → null (no había data)
-        // Si existe pero es 0 → mostrar $0
-        const raw = r.periods?.[k];
-        if (raw === undefined || raw === null) return '—';
-        return fmtUSD(Number(raw));
-      }),
-      fmtUSD(Number(r.total ?? 0)),
-    ],
-  }));
+  // Helper: formatear key "2026-03-29" → "29/3 - 4/4"
+  const formatWeekLabel = (sundayStr: string): string => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(sundayStr);
+    if (!m) return sundayStr;
+    const sunday = new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+    const saturday = new Date(sunday);
+    saturday.setDate(saturday.getDate() + 6);
+    return `${sunday.getDate()}/${sunday.getMonth() + 1} - ${saturday.getDate()}/${saturday.getMonth() + 1}`;
+  };
 
-  // Fila de totales
+  // Helper: normalizar nombre de país (remover mojibake)
+  const normCountry = (c: string): string => {
+    if (!c) return '';
+    if (c.includes('\uFFFD') || c.includes('Ã')) return ''; // mojibake
+    return c.trim();
+  };
+
+  // Lista fija de países top + Otros
+  const TOP_COUNTRIES = ['Perú', 'México', 'Chile'];
+
+  // Buckets
+  type Bucket = { weekly: Record<string, number>; total: number };
+  const buckets: Record<string, Bucket> = {
+    'Perú': { weekly: {}, total: 0 },
+    'México': { weekly: {}, total: 0 },
+    'Chile': { weekly: {}, total: 0 },
+    'Otros': { weekly: {}, total: 0 },
+  };
+  // Track top país dentro de "Otros" (por total acumulado en las semanas mostradas)
+  const otrosBreakdown: Record<string, number> = {};
+
+  for (const r of rowsData) {
+    const country = normCountry(r.country || '');
+    if (!country) continue;
+    const target = TOP_COUNTRIES.includes(country) ? country : 'Otros';
+    for (const k of periodKeys) {
+      const v = Number(r.periods?.[k] ?? 0);
+      if (!Number.isFinite(v)) continue;
+      buckets[target].weekly[k] = (buckets[target].weekly[k] || 0) + v;
+      buckets[target].total += v;
+      if (target === 'Otros') {
+        otrosBreakdown[country] = (otrosBreakdown[country] || 0) + v;
+      }
+    }
+  }
+
+  // Construir filas de la tabla en orden Perú/México/Chile/Otros
+  const orderedCountries = ['Perú', 'México', 'Chile', 'Otros'];
+  const rows: MatrixRow[] = orderedCountries.map((country) => {
+    const bucket = buckets[country];
+    return {
+      label: country,
+      cells: [
+        ...periodKeys.map((k) => fmtUSD(bucket.weekly[k] ?? 0)),
+        fmtUSD(bucket.total),
+      ],
+    };
+  });
+
+  // Fila de totales por semana
   const totalsRow: MatrixRow = {
     label: 'TOTAL',
     bold: true,
     cells: [
-      ...periodKeys.map((k) => fmtUSD(Number(payload?.totals?.[k] ?? 0))),
-      fmtUSD(periodKeys.reduce((s, k) => s + Number(payload?.totals?.[k] ?? 0), 0)),
+      ...periodKeys.map((k) =>
+        fmtUSD(orderedCountries.reduce((s, c) => s + (buckets[c].weekly[k] ?? 0), 0)),
+      ),
+      fmtUSD(orderedCountries.reduce((s, c) => s + buckets[c].total, 0)),
     ],
   };
 
-  return section(`Revenue por País × Mes (top 10, ${payload.year ?? 'año actual'})`, matrix({
-    headers: ['País', ...periodKeys, 'Total'],
+  // Top 5 países dentro de "Otros"
+  const otrosTop = Object.entries(otrosBreakdown)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  const tableHtml = matrix({
+    headers: ['País', ...periodKeys.map(formatWeekLabel), 'Total'],
     rows: [...rows, totalsRow],
     compact: true,
-  }));
+  });
+
+  // Caption con el detalle de Otros
+  const otrosCaption = otrosTop.length > 0
+    ? `<p style="font-size:12px;color:${COLOR.mute};margin:8px 0 0;line-height:1.6;"><strong style="color:${COLOR.neutral};">Dentro de "Otros" (top 5):</strong> ${otrosTop.map(([c, v], i) => `${i + 1}. ${c} <strong style="color:${COLOR.neutral};">${fmtUSD(v)}</strong>`).join(' · ')}</p>`
+    : '';
+
+  return section('Revenue por País × Semana (8 semanas)', tableHtml + otrosCaption);
 }
 
 function renderChurn(churnRenewal: RpcResult<any>): string {
@@ -523,64 +580,189 @@ function renderConversionFunnel(funnel: RpcResult<any>): string {
   return section('Funnel de Conversión Semanal', chart + narrativeBlock(items));
 }
 
-function renderAcquisitionCountry(acq: RpcResult<any>): string {
-  if (!acq.ok) return placeholderSection('País × Status', acq.error);
-  const table = acq.data?.country_table ?? [];
-  if (!Array.isArray(table) || !table.length) return placeholderSection('País × Status');
+// ============================================================================
+// Acquisition renderers (NEW - 3 vistas con la RPC get_acquisition_weekly_breakdown)
+// ============================================================================
 
-  // Filtrar mojibake (Per�� y similares) y top 10 por total
-  const clean = table.filter((r: any) => r.key && !r.key.includes('\uFFFD') && !r.key.includes('Ã'));
-  const top = [...clean]
-    .sort((a, b) => Number(b.total ?? 0) - Number(a.total ?? 0))
-    .slice(0, 10);
+function renderChannelByWeek(acqWeekly: RpcResult<any>): string {
+  if (!acqWeekly.ok) return placeholderSection('Canal × Semana', acqWeekly.error);
+  const channelWeek = acqWeekly.data?.channel_week ?? [];
+  const weeksMeta = acqWeekly.data?.weeks ?? [];
+  if (!Array.isArray(channelWeek) || !channelWeek.length || !weeksMeta.length) {
+    return placeholderSection('Canal × Semana');
+  }
 
-  const rows: MatrixRow[] = top.map((r: any) => {
-    const convPct = Number(r.conversionPct ?? 0);
+  // Solo últimas 4 semanas
+  const last4WeeksMeta = weeksMeta.slice(-4);
+  const weekValues: string[] = last4WeeksMeta.map((w: any) => w.value);
+  const weekLabels: string[] = last4WeeksMeta.map((w: any) => w.label);
+
+  // Total por semana (para calcular porcentajes)
+  const totalsByWeek: Record<string, number> = {};
+  for (const wv of weekValues) {
+    totalsByWeek[wv] = channelWeek.reduce((s: number, r: any) => s + Number(r.weekly?.[wv] ?? 0), 0);
+  }
+  const grandTotal = weekValues.reduce((s, wv) => s + (totalsByWeek[wv] ?? 0), 0);
+
+  // Helper: render celda "# (%)"
+  const cellNumPct = (n: number, total: number): string => {
+    const pct = total > 0 ? (n / total) * 100 : 0;
+    return `${fmtNum(n)} <span style="color:${COLOR.mute};font-weight:400;font-size:11px;">(${pct.toFixed(1)}%)</span>`;
+  };
+
+  // Filtrar canales que tienen al menos algún registro en las 4 semanas
+  const relevantChannels = channelWeek.filter((r: any) =>
+    weekValues.some((wv) => Number(r.weekly?.[wv] ?? 0) > 0),
+  );
+
+  const rows: MatrixRow[] = relevantChannels.map((row: any) => {
+    const channelTotal = weekValues.reduce((s: number, wv: string) => s + Number(row.weekly?.[wv] ?? 0), 0);
     return {
-      label: r.key || '-',
+      label: row.channel || '-',
       cells: [
-        fmtNum(r.gratisActivado ?? 0),
-        fmtNum(r.noActivado ?? 0),
-        fmtNum(r.pago ?? 0),
-        fmtNum(r.total ?? 0),
-        fmtPct(Number(r.pctOfGrandTotal ?? 0)),
-        rawCell(colorCell(convPct, THRESHOLDS.conversionPct)),
+        ...weekValues.map((wv) => {
+          const v = Number(row.weekly?.[wv] ?? 0);
+          return cellNumPct(v, totalsByWeek[wv] ?? 0);
+        }),
+        cellNumPct(channelTotal, grandTotal),
       ],
     };
   });
 
-  return section('País × Status (top 10 acumulado)', matrix({
-    headers: ['País', 'Gratis activ.', 'No activ.', 'Pago', 'Total', '% del total', '% Conv.'],
-    rows,
+  // Fila de totales por semana
+  const totalsRow: MatrixRow = {
+    label: 'TOTAL',
+    bold: true,
+    cells: [
+      ...weekValues.map((wv) => fmtNum(totalsByWeek[wv] ?? 0)),
+      fmtNum(grandTotal),
+    ],
+  };
+
+  return section('Canal de Adquisición × Semana (últimas 4)', matrix({
+    headers: ['Canal', ...weekLabels, 'Total 4w'],
+    rows: [...rows, totalsRow],
     compact: true,
   }));
 }
 
-function renderAcquisitionChannel(acq: RpcResult<any>): string {
-  if (!acq.ok) return placeholderSection('Canal de Adquisición', acq.error);
-  const channelTable = acq.data?.channel_table ?? [];
-  if (!Array.isArray(channelTable) || !channelTable.length) return placeholderSection('Canal de Adquisición');
+// Helper compartido: render Channel × Country con doble columna # y %
+// El % es: canal/total_pais (qué % del total de cada país representa cada canal)
+function renderChannelCountryDoubleCol(opts: {
+  data: any[];
+  title: string;
+  caption: string;
+}): string {
+  const { data, title, caption } = opts;
 
-  const rows: MatrixRow[] = channelTable.map((r: any) => {
-    const convPct = Number(r.conversionPct ?? 0);
+  // Totales por país (denominador para los porcentajes)
+  const totalsByCountry = {
+    peru:   data.reduce((s, r) => s + Number(r.peru   ?? 0), 0),
+    mexico: data.reduce((s, r) => s + Number(r.mexico ?? 0), 0),
+    chile:  data.reduce((s, r) => s + Number(r.chile  ?? 0), 0),
+    otros:  data.reduce((s, r) => s + Number(r.otros  ?? 0), 0),
+  };
+  const grandTotal = totalsByCountry.peru + totalsByCountry.mexico + totalsByCountry.chile + totalsByCountry.otros;
+
+  // Helper: celda de #
+  const numCell = (n: number) => fmtNum(n);
+  // Helper: celda de % (porcentaje del total de la columna)
+  const pctCell = (n: number, total: number): string => {
+    if (total <= 0) return '<span style="color:#9ca3af;">—</span>';
+    const pct = (n / total) * 100;
+    return `<span style="color:${COLOR.mute};">${pct.toFixed(1)}%</span>`;
+  };
+
+  const rows: MatrixRow[] = data.map((r: any) => {
+    const peru = Number(r.peru ?? 0);
+    const mexico = Number(r.mexico ?? 0);
+    const chile = Number(r.chile ?? 0);
+    const otros = Number(r.otros ?? 0);
+    const total = Number(r.total ?? 0);
     return {
-      label: r.key || '-',
+      label: r.channel || '-',
       cells: [
-        fmtNum(r.gratisActivado ?? 0),
-        fmtNum(r.noActivado ?? 0),
-        fmtNum(r.pago ?? 0),
-        fmtNum(r.total ?? 0),
-        fmtPct(Number(r.pctOfGrandTotal ?? 0)),
-        rawCell(colorCell(convPct, THRESHOLDS.conversionPct)),
+        numCell(peru),   pctCell(peru, totalsByCountry.peru),
+        numCell(mexico), pctCell(mexico, totalsByCountry.mexico),
+        numCell(chile),  pctCell(chile, totalsByCountry.chile),
+        numCell(otros),  pctCell(otros, totalsByCountry.otros),
+        numCell(total),  pctCell(total, grandTotal),
       ],
     };
   });
 
-  return section('Canal de Adquisición × Status (acumulado)', matrix({
-    headers: ['Canal', 'Gratis activ.', 'No activ.', 'Pago', 'Total', '% del total', '% Conv.'],
-    rows,
+  // Fila de totales — los % son siempre 100%
+  const totalsRow: MatrixRow = {
+    label: 'TOTAL',
+    bold: true,
+    cells: [
+      fmtNum(totalsByCountry.peru),   '100%',
+      fmtNum(totalsByCountry.mexico), '100%',
+      fmtNum(totalsByCountry.chile),  '100%',
+      fmtNum(totalsByCountry.otros),  '100%',
+      fmtNum(grandTotal),             '100%',
+    ],
+  };
+
+  return section(title, matrix({
+    headers: ['Canal', 'Perú #', 'Perú %', 'México #', 'México %', 'Chile #', 'Chile %', 'Otros #', 'Otros %', 'Total #', 'Total %'],
+    rows: [...rows, totalsRow],
     compact: true,
-  }));
+  }) + caption);
+}
+
+function renderChannelByCountryAcumulado(acqWeekly: RpcResult<any>): string {
+  if (!acqWeekly.ok) return placeholderSection('Canal × País acumulado', acqWeekly.error);
+  const data = acqWeekly.data?.channel_country_acumulado ?? [];
+  if (!Array.isArray(data) || !data.length) return placeholderSection('Canal × País acumulado');
+
+  // Caption: top canal por país (en porcentaje)
+  const totalsByCountry = {
+    peru:   data.reduce((s: number, r: any) => s + Number(r.peru   ?? 0), 0),
+    mexico: data.reduce((s: number, r: any) => s + Number(r.mexico ?? 0), 0),
+    chile:  data.reduce((s: number, r: any) => s + Number(r.chile  ?? 0), 0),
+    otros:  data.reduce((s: number, r: any) => s + Number(r.otros  ?? 0), 0),
+  };
+  const top = (col: 'peru' | 'mexico' | 'chile' | 'otros') => {
+    const sorted = [...data].sort((a, b) => Number(b[col] ?? 0) - Number(a[col] ?? 0));
+    const winner = sorted[0];
+    if (!winner) return '-';
+    const pct = totalsByCountry[col] > 0 ? (Number(winner[col] ?? 0) / totalsByCountry[col]) * 100 : 0;
+    return `${winner.channel} (${pct.toFixed(1)}%)`;
+  };
+  const caption = `<p style="font-size:12px;color:${COLOR.mute};margin:8px 0 0;line-height:1.6;"><strong style="color:${COLOR.neutral};">Top canal por país:</strong> Perú: ${top('peru')} · México: ${top('mexico')} · Chile: ${top('chile')} · Otros: ${top('otros')}</p>`;
+
+  return renderChannelCountryDoubleCol({
+    data,
+    title: 'Canal × País — Acumulado all-time',
+    caption,
+  });
+}
+
+function renderChannelByCountryLastWeek(acqWeekly: RpcResult<any>): string {
+  if (!acqWeekly.ok) return placeholderSection('Canal × País última semana', acqWeekly.error);
+  const data = acqWeekly.data?.channel_country_last_week ?? [];
+  const lastSunday = acqWeekly.data?.meta?.last_closed_sunday;
+  const lastSaturday = acqWeekly.data?.meta?.last_closed_saturday;
+  if (!Array.isArray(data) || !data.length) return placeholderSection('Canal × País última semana');
+
+  // Caption: top 3 canales en total (no por país)
+  const sortedByTotal = [...data].sort((a, b) => Number(b.total ?? 0) - Number(a.total ?? 0));
+  const grandTotal = sortedByTotal.reduce((s, r) => s + Number(r.total ?? 0), 0);
+  const top1 = sortedByTotal[0];
+  const top2 = sortedByTotal[1];
+  const top3 = sortedByTotal[2];
+  const pctOf = (v: number) => grandTotal > 0 ? `${((v / grandTotal) * 100).toFixed(1)}%` : '—';
+  const dateRange = lastSunday && lastSaturday
+    ? ` (${lastSunday.slice(5)} – ${lastSaturday.slice(5)})`
+    : '';
+  const caption = `<p style="font-size:12px;color:${COLOR.mute};margin:8px 0 0;line-height:1.6;"><strong style="color:${COLOR.neutral};">Top 3 canales esta semana:</strong> 1. ${top1?.channel ?? '-'} ${fmtNum(Number(top1?.total ?? 0))} (${pctOf(Number(top1?.total ?? 0))}) · 2. ${top2?.channel ?? '-'} ${fmtNum(Number(top2?.total ?? 0))} (${pctOf(Number(top2?.total ?? 0))}) · 3. ${top3?.channel ?? '-'} ${fmtNum(Number(top3?.total ?? 0))} (${pctOf(Number(top3?.total ?? 0))})</p>`;
+
+  return renderChannelCountryDoubleCol({
+    data,
+    title: `Canal × País — Última semana cerrada${dateRange}`,
+    caption,
+  });
 }
 
 function renderChannelPlan(acq: RpcResult<any>): string {
@@ -610,34 +792,57 @@ function renderChannelPlan(acq: RpcResult<any>): string {
   }));
 }
 
-function renderCountryRegistrations(execSummary: RpcResult<any>): string {
-  if (!execSummary.ok) return placeholderSection('Registros por País (semana)', execSummary.error);
-  const cr = execSummary.data?.country_registrations ?? [];
-  if (!Array.isArray(cr) || !cr.length) return placeholderSection('Registros por País (semana)');
+function renderCountryRegistrationsTrend(acqWeekly: RpcResult<any>): string {
+  if (!acqWeekly.ok) return placeholderSection('Registros por País — Tendencia', acqWeekly.error);
+  const countryWeek = acqWeekly.data?.country_week ?? [];
+  const weeksMeta = acqWeekly.data?.weeks ?? [];
+  if (!Array.isArray(countryWeek) || !countryWeek.length || !weeksMeta.length) {
+    return placeholderSection('Registros por País — Tendencia');
+  }
 
-  // Top 10
-  const top = [...cr]
-    .filter((r: any) => r.country && !r.country.includes('\uFFFD') && !r.country.includes('Ã'))
-    .sort((a, b) => Number(b.registrations ?? 0) - Number(a.registrations ?? 0))
-    .slice(0, 10);
+  const weekValues: string[] = weeksMeta.map((w: any) => w.value);
+  const weekLabels: string[] = weeksMeta.map((w: any) => w.label);
 
-  const rows: MatrixRow[] = top.map((r: any) => {
-    const convPct = Number(r.conversion_pct ?? 0);
+  // Mapear a series para multiLineChart — orden: Perú, México, Chile, Otros
+  const orderedCountries = ['Perú', 'México', 'Chile', 'Otros'];
+  const countryColors: Record<string, string> = {
+    'Perú': CHART_COLORS.primary,   // rojo Califica (mercado principal)
+    'México': CHART_COLORS.blue,
+    'Chile': CHART_COLORS.green,
+    'Otros': CHART_COLORS.gray,
+  };
+
+  const series = orderedCountries.map((country) => {
+    const row = countryWeek.find((c: any) => c.country === country);
     return {
-      label: r.country || '-',
-      cells: [
-        fmtNum(r.registrations ?? 0),
-        fmtNum(r.paid ?? 0),
-        rawCell(colorCell(convPct, THRESHOLDS.conversionPct)),
-      ],
+      name: country,
+      data: weekValues.map((wv) => Number(row?.weekly?.[wv] ?? 0)),
+      color: countryColors[country],
     };
   });
 
-  return section('Registros por País — semana cerrada (top 10)', matrix({
-    headers: ['País', 'Registros', 'Pagaron', '% Conv.'],
-    rows,
-    compact: true,
-  }));
+  const chart = multiLineChart({
+    title: 'Registros por País × Semana (8 semanas)',
+    labels: weekLabels,
+    series,
+    yAxisLabel: 'Registros',
+  });
+
+  // Narrativa: últimas 3 semanas con cifras concretas
+  const last3Weeks = weekValues.slice(-3);
+  const last3Labels = weekLabels.slice(-3);
+  const items = last3Weeks.map((wv, i) => {
+    const isLast = i === last3Weeks.length - 1;
+    const peru = orderedCountries[0] && Number(countryWeek.find((c: any) => c.country === 'Perú')?.weekly?.[wv] ?? 0);
+    const mex = Number(countryWeek.find((c: any) => c.country === 'México')?.weekly?.[wv] ?? 0);
+    const chi = Number(countryWeek.find((c: any) => c.country === 'Chile')?.weekly?.[wv] ?? 0);
+    const otr = Number(countryWeek.find((c: any) => c.country === 'Otros')?.weekly?.[wv] ?? 0);
+    const total = (peru || 0) + mex + chi + otr;
+    const marker = isLast ? ' <span style="color:#9ca3af;">← cerrada</span>' : '';
+    return `<strong>${last3Labels[i]}</strong>: <strong style="color:${COLOR.neutral};">${fmtNum(total)} reg</strong> · Perú <strong style="color:${CHART_COLORS.primary};">${fmtNum(peru || 0)}</strong> · México <strong style="color:${CHART_COLORS.blue};">${fmtNum(mex)}</strong> · Chile <strong style="color:${CHART_COLORS.green};">${fmtNum(chi)}</strong> · Otros <strong style="color:${CHART_COLORS.gray};">${fmtNum(otr)}</strong>${marker}`;
+  });
+
+  return section('Registros por País — Tendencia', chart + narrativeBlock(items));
 }
 
 // ============================================================================
@@ -756,14 +961,14 @@ serve(async (req: Request) => {
       revByCountry,
       churnRenewal,
       convFunnel,
-      acqStats,
+      acqWeeklyBreakdown,
     ] = await Promise.all([
       callRpc(supabaseAdmin, 'get_executive_summary', { p_week_start: weekStartStr }),
       callRpc(supabaseAdmin, 'get_yoy_revenue_matrix', { p_week_start: weekStartStr }),
       callRpc(supabaseAdmin, 'get_revenue_by_country', {
         p_year: currentYear,
-        p_granularity: 'monthly',
-        p_prev_year_yoy: true,
+        p_granularity: 'weekly',
+        p_prev_year_yoy: false,
       }),
       callRpc(supabaseAdmin, 'get_churn_renewal', {
         p_week_start: weekStartStr,
@@ -778,10 +983,9 @@ serve(async (req: Request) => {
         p_plan_status: 'all',
         p_plan_id: 'all',
       }),
-      callRpc(supabaseAdmin, 'get_acquisition_stats', {
-        p_week_start: null,
-        p_country_filter: null,
-      }, 30000), // 30s timeout — esta RPC agrega sobre 367k usuarios all-time
+      callRpc(supabaseAdmin, 'get_acquisition_weekly_breakdown', {
+        p_weeks: 8,
+      }, 30000), // 30s timeout — agrega sobre todo growth_users
     ]);
 
     // -------------------------------------------------------------------------
@@ -797,9 +1001,10 @@ serve(async (req: Request) => {
       renderRenewalNarrative(churnRenewal),
       renderRenewalTable(churnRenewal),
       renderConversionFunnel(convFunnel),
-      renderCountryRegistrations(execSummary),
-      renderAcquisitionCountry(acqStats),
-      renderAcquisitionChannel(acqStats),
+      renderCountryRegistrationsTrend(acqWeeklyBreakdown),
+      renderChannelByWeek(acqWeeklyBreakdown),
+      renderChannelByCountryAcumulado(acqWeeklyBreakdown),
+      renderChannelByCountryLastWeek(acqWeeklyBreakdown),
     ].join('\n');
 
     const html = emailShell({
@@ -815,7 +1020,7 @@ serve(async (req: Request) => {
       revenue_by_country: revByCountry.ok,
       churn_renewal: churnRenewal.ok,
       conversion_funnel: convFunnel.ok,
-      acquisition_stats: acqStats.ok,
+      acquisition_weekly_breakdown: acqWeeklyBreakdown.ok,
     };
     const failedRpcs = Object.entries(rpcStatus).filter(([, ok]) => !ok).map(([k]) => k);
     const rpcErrors = {
@@ -824,7 +1029,7 @@ serve(async (req: Request) => {
       revenue_by_country: revByCountry.ok ? null : revByCountry.error,
       churn_renewal: churnRenewal.ok ? null : churnRenewal.error,
       conversion_funnel: convFunnel.ok ? null : convFunnel.error,
-      acquisition_stats: acqStats.ok ? null : acqStats.error,
+      acquisition_weekly_breakdown: acqWeeklyBreakdown.ok ? null : acqWeeklyBreakdown.error,
     };
 
     // -------------------------------------------------------------------------
