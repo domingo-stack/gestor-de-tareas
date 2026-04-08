@@ -20,6 +20,7 @@ type AdminUser = {
   mod_customer_success: boolean;
   mod_comunicaciones: boolean;
   mod_marketing: boolean;
+  mod_crm: boolean;
   created_at: string;
 };
 
@@ -34,6 +35,7 @@ const MODULES: { key: keyof AdminUser; label: string }[] = [
   { key: 'mod_customer_success', label: 'Customer Success' },
   { key: 'mod_comunicaciones', label: 'Comunicaciones' },
   { key: 'mod_marketing', label: 'Marketing' },
+  { key: 'mod_crm', label: 'CRM' },
 ];
 
 function countActiveModules(user: AdminUser): number {
