@@ -15,6 +15,7 @@ import {
   ChatBubbleLeftRightIcon,
   MegaphoneIcon,
   PresentationChartLineIcon,
+  BriefcaseIcon,
   Cog6ToothIcon,
   ArrowRightStartOnRectangleIcon,
   Bars3Icon,
@@ -25,7 +26,7 @@ const STORAGE_KEY = 'sidebar-expanded'
 
 export default function Sidebar() {
   const { user, supabase } = useAuth()
-  const { role, mod_calendario, mod_finanzas, mod_revenue, mod_producto, mod_customer_success, mod_comunicaciones, mod_marketing } = usePermissions()
+  const { role, mod_calendario, mod_finanzas, mod_revenue, mod_producto, mod_customer_success, mod_comunicaciones, mod_marketing, mod_crm } = usePermissions()
   const router = useRouter()
   const pathname = usePathname()
 
@@ -64,6 +65,7 @@ export default function Sidebar() {
     { href: '/finance', label: 'Finanzas', icon: BanknotesIcon, visible: role === 'superadmin' || !!mod_finanzas },
     { href: '/revenue', label: 'Growth', icon: ChartBarIcon, visible: role === 'superadmin' || !!mod_revenue },
     { href: '/producto', label: 'Producto', icon: RocketLaunchIcon, visible: role === 'superadmin' || !!mod_producto },
+    { href: '/crm', label: 'CRM', icon: BriefcaseIcon, visible: role === 'superadmin' || !!mod_crm },
     { href: '/customer-success', label: 'Customer Success', icon: ChatBubbleLeftRightIcon, visible: role === 'superadmin' || !!mod_customer_success },
     { href: '/comunicaciones', label: 'Comunicaciones', icon: MegaphoneIcon, visible: role === 'superadmin' || !!mod_comunicaciones },
     { href: '/marketing', label: 'Marketing', icon: PresentationChartLineIcon, visible: role === 'superadmin' || !!mod_marketing },
