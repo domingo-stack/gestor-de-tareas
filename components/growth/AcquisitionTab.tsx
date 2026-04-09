@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { ExclamationTriangleIcon, EyeIcon } from '@heroicons/react/24/outline';
+import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import { fmtNum, fmtPct } from './formatters';
 import WeekSelector, { getCurrentWeekStart, toDateStr } from './WeekSelector';
 
@@ -323,12 +323,7 @@ export default function AcquisitionTab() {
         </div>
       )}
 
-      {/* Mixpanel placeholder */}
-      <div className="bg-gray-50 border border-gray-200 rounded-xl p-6 text-center">
-        <EyeIcon className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-        <p className="text-sm font-medium text-gray-600">Journeys de adquisicion (Mixpanel)</p>
-        <p className="text-xs text-gray-400 mt-1">Los journeys detallados de adquisicion estaran disponibles cuando se configure el pipeline de Mixpanel (Fase 3).</p>
-      </div>
+      {/* Mixpanel journeys — se mostraran en tab Comportamiento */}
     </div>
   );
 }

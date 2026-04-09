@@ -10,7 +10,6 @@ import {
   UserPlusIcon,
   CurrencyDollarIcon,
   ArrowPathIcon,
-  EyeIcon,
   GlobeAltIcon,
 } from '@heroicons/react/24/outline';
 import {
@@ -151,7 +150,7 @@ export default function ExecutiveSummary() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <KpiCard title="Nuevos Registros" value={fmtNum(d.new_users)} subtext="Esta semana" icon={UserPlusIcon} colorClass="bg-blue-500" loading={loading} />
-            <KpiCard title="% Activacion" value={fmtPct(d.activation_pct)} subtext="1+ evento de valor" icon={ArrowTrendingUpIcon} colorClass="bg-amber-500" loading={loading} />
+            <KpiCard title="% Activacion" value={fmtPct(d.activation_pct)} subtext="5+ eventos de valor" icon={ArrowTrendingUpIcon} colorClass="bg-amber-500" loading={loading} />
             <KpiCard title="% Conversion" value={fmtPct(d.conversion_pct)} subtext="Registrados que pagaron" icon={ChartBarIcon} colorClass="bg-red-500" loading={loading} />
           </div>
         </div>
@@ -238,12 +237,7 @@ export default function ExecutiveSummary() {
         </div>
       )}
 
-      {/* Mixpanel placeholder */}
-      <div className="bg-gray-50 border border-gray-200 rounded-xl p-6 text-center">
-        <EyeIcon className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-        <p className="text-sm font-medium text-gray-600">Metricas de comportamiento (Mixpanel)</p>
-        <p className="text-xs text-gray-400 mt-1">DAU, WAU, MAU y Paywall Views estaran disponibles cuando se configure el pipeline de Mixpanel.</p>
-      </div>
+      {/* Mixpanel — se muestra en tab Comportamiento */}
     </div>
   );
 }

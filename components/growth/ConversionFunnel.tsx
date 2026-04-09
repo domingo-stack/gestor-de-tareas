@@ -30,8 +30,12 @@ interface WeeklyRow {
   ev1: number;
   ev2: number;
   ev3: number;
-  activated: number;
-  ev5plus: number;
+  ev4: number;
+  activated: number; // 5+ eventos de valor
+  ev6: number;
+  ev7: number;
+  ev8: number;
+  ev9: number;
   ev10plus: number;
   paid: number;
   free: number;
@@ -63,16 +67,20 @@ interface TrendData {
   weekly: TrendWeek[];
 }
 
-// 8-step funnel colors — warm gradient ending in green for $
+// 12-step funnel colors: Registrados → 1+ → 2+ → ... → 10+ → Pagaron
 const FUNNEL_COLORS = [
-  { bg: '#3B82F6', light: '#EFF6FF' }, // blue
-  { bg: '#6366F1', light: '#EEF2FF' }, // indigo
-  { bg: '#7C3AED', light: '#F5F3FF' }, // violet
-  { bg: '#9333EA', light: '#FAF5FF' }, // purple
-  { bg: '#A855F7', light: '#FAF5FF' }, // purple light
-  { bg: '#D946EF', light: '#FDF4FF' }, // fuchsia
-  { bg: '#EC4899', light: '#FDF2F8' }, // pink
-  { bg: '#10B981', light: '#ECFDF5' }, // emerald
+  { bg: '#3B82F6', light: '#EFF6FF' }, // blue — registrados
+  { bg: '#6366F1', light: '#EEF2FF' }, // indigo — 1+
+  { bg: '#7C3AED', light: '#F5F3FF' }, // violet — 2+
+  { bg: '#8B5CF6', light: '#F5F3FF' }, // violet-500 — 3+
+  { bg: '#9333EA', light: '#FAF5FF' }, // purple — 4+
+  { bg: '#A855F7', light: '#FAF5FF' }, // purple-light — 5+ (activados)
+  { bg: '#C026D3', light: '#FDF4FF' }, // fuchsia-600 — 6+
+  { bg: '#D946EF', light: '#FDF4FF' }, // fuchsia — 7+
+  { bg: '#E879F9', light: '#FDF4FF' }, // fuchsia-300 — 8+
+  { bg: '#EC4899', light: '#FDF2F8' }, // pink — 9+
+  { bg: '#F43F5E', light: '#FFF1F2' }, // rose — 10+
+  { bg: '#10B981', light: '#ECFDF5' }, // emerald — pagaron
 ];
 
 const EVENTOS_OPTIONS: { value: string; label: string }[] = [
@@ -83,6 +91,11 @@ const EVENTOS_OPTIONS: { value: string; label: string }[] = [
   { value: '3', label: '3 eventos' },
   { value: '4', label: '4 eventos' },
   { value: '5+', label: '5+ eventos' },
+  { value: '6', label: '6 eventos' },
+  { value: '7', label: '7 eventos' },
+  { value: '8', label: '8 eventos' },
+  { value: '9', label: '9 eventos' },
+  { value: '10+', label: '10+ eventos' },
 ];
 
 const PLAN_STATUS_OPTIONS: { value: string; label: string }[] = [
@@ -197,9 +210,10 @@ export default function ConversionFunnel() {
   const planOptions = data.plan_options || [];
 
   // Calculate key conversion metrics for summary cards
+  // Funnel: [Registrados, 1+, 2+, 3+, 4+, 5+(activ), 6+, 7+, 8+, 9+, 10+, Pagaron]
   const totalReg = funnelWeek[0]?.count || 0;
-  const activatedCount = funnelWeek[4]?.count || 0;
-  const paidCount = funnelWeek[7]?.count || 0;
+  const activatedCount = funnelWeek[5]?.count || 0; // 5+ = index 5
+  const paidCount = funnelWeek[funnelWeek.length - 1]?.count || 0;
   const activationRate = totalReg > 0 ? (activatedCount / totalReg) * 100 : 0;
   const conversionRate = totalReg > 0 ? (paidCount / totalReg) * 100 : 0;
   const activatedToPayRate = activatedCount > 0 ? (paidCount / activatedCount) * 100 : 0;
@@ -244,8 +258,12 @@ export default function ConversionFunnel() {
           {funnelWeek.map((step, i) => {
             const color = FUNNEL_COLORS[i] || FUNNEL_COLORS[0];
             const widthPct = Math.max(step.pctOfTotal * 0.82 + 18, 18);
-            const isActivated = i === 4;
+            const isActivated = i === 5; // 5+ eventos = index 5
             const isPaid = i === funnelWeek.length - 1;
+            const showConvToPaid = i >= 5 && i <= 7 && !isPaid; // Solo 5+, 6+, 7+ (después supera 100%)
+            const convToPaidPct = showConvToPaid && step.count > 0
+              ? (paidCount / step.count) * 100
+              : 0;
             const dropOff = i > 0 ? funnelWeek[i - 1].count - step.count : 0;
             const dropOffPct = i > 0 && funnelWeek[i - 1].count > 0
               ? ((dropOff / funnelWeek[i - 1].count) * 100)
@@ -289,6 +307,11 @@ export default function ConversionFunnel() {
                     <span className="text-sm font-medium text-white drop-shadow-sm">{step.label}</span>
                   </div>
                   <div className="relative flex items-center gap-3">
+                    {showConvToPaid && (
+                      <span className="text-[10px] text-white/80 bg-white/15 px-1.5 py-0.5 rounded font-medium">
+                        →$ {fmtPct(convToPaidPct)}
+                      </span>
+                    )}
                     <span className="text-lg font-bold text-white drop-shadow-sm">{fmtNum(step.count)}</span>
                     <span className="text-xs text-white/75 font-medium min-w-[45px] text-right">{fmtPct(step.pctOfTotal)}</span>
                   </div>
@@ -324,7 +347,7 @@ export default function ConversionFunnel() {
           <h3 className="font-semibold text-gray-700">Conversion Semanal (por cohorte de registro)</h3>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[1400px]">
             <thead className="bg-gray-50 text-gray-500 font-medium border-b">
               <tr>
                 <th className="px-3 py-3 text-left whitespace-nowrap">Semana</th>
@@ -332,8 +355,12 @@ export default function ConversionFunnel() {
                 <th className="px-3 py-3 text-right whitespace-nowrap">1 ev</th>
                 <th className="px-3 py-3 text-right whitespace-nowrap">2 ev</th>
                 <th className="px-3 py-3 text-right whitespace-nowrap">3 ev</th>
-                <th className="px-3 py-3 text-right whitespace-nowrap">Activ. (4+)</th>
-                <th className="px-3 py-3 text-right whitespace-nowrap">5+ ev</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">4 ev</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap font-semibold text-purple-700">Activ. (5+)</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">6 ev</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">7 ev</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">8 ev</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap">9 ev</th>
                 <th className="px-3 py-3 text-right whitespace-nowrap">10+ ev</th>
                 <th className="px-3 py-3 text-right whitespace-nowrap">Pagaron</th>
                 <th className="px-3 py-3 text-right whitespace-nowrap">% Activ.</th>
@@ -348,12 +375,16 @@ export default function ConversionFunnel() {
                   <td className="px-3 py-3 text-right text-indigo-600">{fmtNum(w.ev1)}</td>
                   <td className="px-3 py-3 text-right text-violet-600">{fmtNum(w.ev2)}</td>
                   <td className="px-3 py-3 text-right text-purple-600">{fmtNum(w.ev3)}</td>
-                  <td className="px-3 py-3 text-right text-purple-700 font-medium">{fmtNum(w.activated)}</td>
-                  <td className="px-3 py-3 text-right text-fuchsia-600">{fmtNum(w.ev5plus)}</td>
-                  <td className="px-3 py-3 text-right text-pink-600">{fmtNum(w.ev10plus)}</td>
+                  <td className="px-3 py-3 text-right text-purple-600">{fmtNum(w.ev4)}</td>
+                  <td className="px-3 py-3 text-right text-purple-700 font-semibold bg-purple-50/50">{fmtNum(w.activated)}</td>
+                  <td className="px-3 py-3 text-right text-fuchsia-600">{fmtNum(w.ev6)}</td>
+                  <td className="px-3 py-3 text-right text-fuchsia-600">{fmtNum(w.ev7)}</td>
+                  <td className="px-3 py-3 text-right text-fuchsia-700">{fmtNum(w.ev8)}</td>
+                  <td className="px-3 py-3 text-right text-pink-600">{fmtNum(w.ev9)}</td>
+                  <td className="px-3 py-3 text-right text-pink-700">{fmtNum(w.ev10plus)}</td>
                   <td className="px-3 py-3 text-right text-emerald-600 font-medium">{fmtNum(w.paid)}</td>
                   <td className="px-3 py-3 text-right">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${w.activationPct >= 50 ? 'bg-green-50 text-green-700' : w.activationPct >= 25 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${w.activationPct >= 20 ? 'bg-green-50 text-green-700' : w.activationPct >= 10 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
                       {fmtPct(w.activationPct)}
                     </span>
                   </td>
@@ -422,7 +453,7 @@ export default function ConversionFunnel() {
                             <span className="font-medium text-gray-800">{fmtNum(row.registered)}</span>
                           </div>
                           <div className="flex items-center justify-between gap-4">
-                            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-[#A855F7]" />Activados (4+ ev)</span>
+                            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-[#A855F7]" />Activados (5+ ev)</span>
                             <span className="font-medium text-gray-800">{fmtNum(row.activated)}</span>
                           </div>
                           <div className="flex items-center justify-between gap-4">
@@ -488,12 +519,130 @@ export default function ConversionFunnel() {
         )}
       </div>
 
-      {/* Mixpanel placeholder */}
+      {/* ===== Onboarding & Paywall Funnels (Mixpanel) ===== */}
+      <OnboardingFunnelSection supabase={supabase} />
+    </div>
+  );
+}
+
+// ─── Onboarding Funnel Section (Mixpanel) ──────────────────
+
+interface OnboardingStep {
+  step: number;
+  name: string;
+  count: number;
+  pct: number;
+}
+
+interface OnboardingData {
+  has_data: boolean;
+  onboarding: OnboardingStep[];
+  paywall: OnboardingStep[];
+}
+
+function OnboardingFunnelSection({ supabase }: { supabase: ReturnType<typeof useAuth>['supabase'] }) {
+  const [data, setData] = useState<OnboardingData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const fetch = async () => {
+      setLoading(true);
+      const { data: result, error } = await supabase.rpc('get_onboarding_funnel', { p_weeks: 4 });
+      if (error) {
+        console.error('RPC get_onboarding_funnel error:', error);
+        setData(null);
+      } else if (result) {
+        const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+        setData(parsed as OnboardingData);
+      }
+      setLoading(false);
+    };
+    fetch();
+  }, [supabase]);
+
+  if (loading) {
+    return <div className="bg-gray-50 border border-gray-200 rounded-xl p-6 text-center"><div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto"></div></div>;
+  }
+
+  if (!data?.has_data) {
+    return (
       <div className="bg-gray-50 border border-gray-200 rounded-xl p-6 text-center">
         <EyeIcon className="w-8 h-8 text-gray-400 mx-auto mb-2" />
         <p className="text-sm font-medium text-gray-600">Funnel de Onboarding (Mixpanel)</p>
-        <p className="text-xs text-gray-400 mt-1">El funnel detallado de onboarding (paso a paso) y el funnel Paywall View → Pago estaran disponibles cuando se configure el pipeline de Mixpanel (Fase 3).</p>
+        <p className="text-xs text-gray-400 mt-1">Configura el pipeline <code className="bg-gray-100 px-1 rounded">GRW_Sync_Mixpanel_Funnels</code> para ver el funnel de onboarding y paywall.</p>
       </div>
+    );
+  }
+
+  const ONBOARDING_COLORS = ['#3B82F6', '#6366F1', '#8B5CF6', '#A855F7', '#D946EF', '#EC4899', '#10B981'];
+  const PAYWALL_COLORS = ['#F59E0B', '#EF4444', '#10B981'];
+
+  return (
+    <div className="space-y-6">
+      {/* Onboarding Funnel */}
+      {data.onboarding.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h3 className="font-semibold text-gray-700 mb-4">Funnel de Onboarding (Mixpanel)</h3>
+          <div className="flex flex-col items-center gap-1">
+            {data.onboarding.map((step, i) => {
+              const color = ONBOARDING_COLORS[i % ONBOARDING_COLORS.length];
+              const widthPct = Math.max(step.pct * 0.82 + 18, 18);
+              return (
+                <div key={i} className="w-full flex flex-col items-center">
+                  <div
+                    className="relative flex items-center justify-between px-5 transition-all duration-500"
+                    style={{
+                      width: `${widthPct}%`,
+                      minHeight: '40px',
+                      backgroundColor: color,
+                      borderRadius: i === 0 ? '10px 10px 3px 3px' : i === data.onboarding.length - 1 ? '3px 3px 10px 10px' : '3px',
+                    }}
+                  >
+                    <span className="text-sm font-medium text-white drop-shadow-sm">{step.name}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg font-bold text-white drop-shadow-sm">{fmtNum(step.count)}</span>
+                      <span className="text-xs text-white/75 font-medium">{fmtPct(step.pct)}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Paywall Funnel */}
+      {data.paywall.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h3 className="font-semibold text-gray-700 mb-4">Funnel Paywall (Mixpanel)</h3>
+          <div className="flex flex-col items-center gap-1">
+            {data.paywall.map((step, i) => {
+              const color = PAYWALL_COLORS[i % PAYWALL_COLORS.length];
+              const widthPct = Math.max(step.pct * 0.82 + 18, 18);
+              return (
+                <div key={i} className="w-full flex flex-col items-center">
+                  <div
+                    className="relative flex items-center justify-between px-5 transition-all duration-500"
+                    style={{
+                      width: `${widthPct}%`,
+                      minHeight: '40px',
+                      backgroundColor: color,
+                      borderRadius: i === 0 ? '10px 10px 3px 3px' : i === data.paywall.length - 1 ? '3px 3px 10px 10px' : '3px',
+                    }}
+                  >
+                    <span className="text-sm font-medium text-white drop-shadow-sm">{step.name}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg font-bold text-white drop-shadow-sm">{fmtNum(step.count)}</span>
+                      <span className="text-xs text-white/75 font-medium">{fmtPct(step.pct)}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

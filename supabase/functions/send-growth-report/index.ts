@@ -588,7 +588,7 @@ function renderConversionFunnel(funnel: RpcResult<any>): string {
     labels,
     series: [
       { name: 'Registrados', data: registered, color: CHART_COLORS.blue },
-      { name: 'Activados (4+ ev)', data: activated, color: CHART_COLORS.purple },
+      { name: 'Activados (5+ ev)', data: activated, color: CHART_COLORS.purple },
       { name: 'Pagaron', data: paid, color: CHART_COLORS.green },
     ],
     yAxisLabel: 'Usuarios',
