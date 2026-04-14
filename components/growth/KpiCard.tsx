@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowTrendingUpIcon } from '@heroicons/react/24/outline';
+import { ArrowTrendingUpIcon, InformationCircleIcon } from '@heroicons/react/24/outline';
 
 interface KpiCardProps {
   title: string;
@@ -13,13 +13,25 @@ interface KpiCardProps {
     isPositive: boolean;
   };
   loading?: boolean;
+  tooltip?: string;
 }
 
-export default function KpiCard({ title, value, subtext, icon: Icon, colorClass, growth, loading }: KpiCardProps) {
+export default function KpiCard({ title, value, subtext, icon: Icon, colorClass, growth, loading, tooltip }: KpiCardProps) {
   return (
     <div className="bg-white rounded-xl p-6 border border-gray-100 shadow-sm flex items-start justify-between">
       <div>
-        <p className="text-sm font-medium text-gray-500 mb-1">{title}</p>
+        <div className="flex items-center gap-1.5 mb-1">
+          <p className="text-sm font-medium text-gray-500">{title}</p>
+          {tooltip && (
+            <div className="relative group">
+              <InformationCircleIcon className="w-3.5 h-3.5 text-gray-300 hover:text-gray-500 cursor-help transition-colors" />
+              <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-56 px-3 py-2 bg-gray-800 text-white text-[11px] leading-relaxed rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50 pointer-events-none">
+                {tooltip}
+                <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-[5px] border-x-transparent border-t-[5px] border-t-gray-800" />
+              </div>
+            </div>
+          )}
+        </div>
         <h3 className="text-3xl font-bold text-gray-900 tracking-tight">
           {loading ? '...' : value}
         </h3>

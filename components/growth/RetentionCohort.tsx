@@ -68,7 +68,9 @@ export default function RetentionCohort() {
   const { supabase } = useAuth();
   const [data, setData] = useState<BehaviorData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [daysRange, setDaysRange] = useState(30);
+  const [activeMetric, setActiveMetric] = useState<'dau' | 'wau' | 'mau'>('dau');
+  const [metricDays, setMetricDays] = useState<Record<string, number>>({ dau: 30, wau: 30, mau: 90 });
+  const daysRange = metricDays[activeMetric];
 
   useEffect(() => {
     if (!supabase) return;
@@ -178,88 +180,131 @@ export default function RetentionCohort() {
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <h2 className="text-lg font-semibold text-gray-800">Comportamiento y Retencion</h2>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-500">Periodo:</span>
-          <select
-            value={daysRange}
-            onChange={(e) => setDaysRange(Number(e.target.value))}
-            className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white text-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-          >
-            <option value={14}>14 dias</option>
-            <option value={30}>30 dias</option>
-            <option value={60}>60 dias</option>
-            <option value={90}>90 dias</option>
-          </select>
-        </div>
       </div>
 
       {/* ===== KPI Cards ===== */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className={`grid grid-cols-2 md:grid-cols-3 ${summary.d1_retention_avg > 0 ? 'lg:grid-cols-6' : 'lg:grid-cols-3'} gap-3`}>
         <KpiMiniCard label="DAU Promedio" value={fmtNum(summary.avg_dau)} icon={UsersIcon} color="blue" />
         <KpiMiniCard label="WAU Promedio" value={fmtNum(summary.avg_wau)} icon={ChartBarIcon} color="indigo" />
         <KpiMiniCard label="MAU Promedio" value={fmtNum(summary.avg_mau)} icon={ArrowTrendingUpIcon} color="purple" />
-        <KpiMiniCard label="Ret. Day 1" value={fmtPct(summary.d1_retention_avg)} icon={ArrowTrendingUpIcon} color="emerald" />
-        <KpiMiniCard label="Ret. Day 7" value={fmtPct(summary.d7_retention_avg)} icon={ArrowTrendingUpIcon} color="amber" />
-        <KpiMiniCard label="Ret. Day 30" value={fmtPct(summary.d30_retention_avg)} icon={ArrowTrendingUpIcon} color="rose" />
+        {summary.d1_retention_avg > 0 && <KpiMiniCard label="Ret. Day 1" value={fmtPct(summary.d1_retention_avg)} icon={ArrowTrendingUpIcon} color="emerald" />}
+        {summary.d7_retention_avg > 0 && <KpiMiniCard label="Ret. Day 7" value={fmtPct(summary.d7_retention_avg)} icon={ArrowTrendingUpIcon} color="amber" />}
+        {summary.d30_retention_avg > 0 && <KpiMiniCard label="Ret. Day 30" value={fmtPct(summary.d30_retention_avg)} icon={ArrowTrendingUpIcon} color="rose" />}
       </div>
 
-      {/* ===== DAU/WAU/MAU Chart ===== */}
-      {data.has_metrics && dailyMetrics.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="font-semibold text-gray-700 mb-4">Usuarios Activos (DAU / WAU / MAU)</h3>
-          <div className="h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={dailyMetrics} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                <XAxis dataKey="date" stroke="#9CA3AF" fontSize={11} tickFormatter={formatShortDate} />
-                <YAxis stroke="#9CA3AF" fontSize={12} tickFormatter={(v: number) => fmtNum(v)} />
-                <Tooltip
-                  content={({ active, payload, label }) => {
-                    if (!active || !payload?.length) return null;
-                    const row = payload[0].payload as DailyMetric;
-                    return (
-                      <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-xs">
-                        <div className="font-semibold text-gray-800 mb-2">{label}</div>
-                        <div className="space-y-1">
-                          <div className="flex justify-between gap-4"><span className="text-blue-600">DAU</span><span className="font-medium">{fmtNum(row.dau)}</span></div>
-                          <div className="flex justify-between gap-4 text-gray-400 text-[10px]"><span>Pagados</span><span>{fmtNum(row.dau_paid)}</span></div>
-                          <div className="flex justify-between gap-4 text-gray-400 text-[10px]"><span>Gratuitos</span><span>{fmtNum(row.dau_free)}</span></div>
-                          <div className="flex justify-between gap-4"><span className="text-indigo-600">WAU</span><span className="font-medium">{fmtNum(row.wau)}</span></div>
-                          <div className="flex justify-between gap-4"><span className="text-purple-600">MAU</span><span className="font-medium">{fmtNum(row.mau)}</span></div>
-                        </div>
-                      </div>
-                    );
-                  }}
-                />
-                <Legend verticalAlign="top" height={36} formatter={(value: string) => <span className="text-xs text-gray-600">{value}</span>} />
-                <Bar dataKey="dau" fill="#3B82F6" name="DAU" barSize={8} radius={[2, 2, 0, 0]} />
-                <Line type="monotone" dataKey="wau" stroke="#6366F1" strokeWidth={2} dot={false} name="WAU" />
-                <Line type="monotone" dataKey="mau" stroke="#9333EA" strokeWidth={2} strokeDasharray="4 4" dot={false} name="MAU" />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-      )}
+      {/* ===== Usuarios Activos — metric toggle ===== */}
+      {data.has_metrics && dailyMetrics.length > 0 && (() => {
+        const metricConfig = {
+          dau: { label: 'Usuarios Activos Diarios (DAU)', color: '#3B82F6', colorLight: '#DBEAFE', key: 'dau' as const },
+          wau: { label: 'Usuarios Activos Semanales (WAU)', color: '#6366F1', colorLight: '#E0E7FF', key: 'wau' as const },
+          mau: { label: 'Usuarios Activos Mensuales (MAU)', color: '#9333EA', colorLight: '#F3E8FF', key: 'mau' as const },
+        };
+        const cfg = metricConfig[activeMetric];
+        const latestValue = dailyMetrics[dailyMetrics.length - 1]?.[cfg.key] || 0;
+        const prevValue = dailyMetrics.length > 1 ? dailyMetrics[dailyMetrics.length - 2]?.[cfg.key] || 0 : 0;
+        const change = prevValue > 0 ? ((latestValue - prevValue) / prevValue) * 100 : 0;
 
-      {/* ===== DAU Pagados vs Gratuitos ===== */}
-      {data.has_metrics && dailyMetrics.length > 0 && dailyMetrics.some(d => d.dau_paid > 0 || d.dau_free > 0) && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="font-semibold text-gray-700 mb-4">DAU: Pagados vs Gratuitos</h3>
-          <div className="h-56 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={dailyMetrics} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                <XAxis dataKey="date" stroke="#9CA3AF" fontSize={11} tickFormatter={formatShortDate} />
-                <YAxis stroke="#9CA3AF" fontSize={12} />
-                <Tooltip />
-                <Area type="monotone" dataKey="dau_paid" stackId="1" fill="#10B981" stroke="#10B981" name="Pagados" fillOpacity={0.6} />
-                <Area type="monotone" dataKey="dau_free" stackId="1" fill="#93C5FD" stroke="#3B82F6" name="Gratuitos" fillOpacity={0.4} />
-                <Legend verticalAlign="top" height={36} formatter={(value: string) => <span className="text-xs text-gray-600">{value}</span>} />
-              </AreaChart>
-            </ResponsiveContainer>
+        const dateOptions: Record<string, { value: number; label: string }[]> = {
+          dau: [{ value: 7, label: '7D' }, { value: 14, label: '14D' }, { value: 30, label: '30D' }, { value: 90, label: '90D' }],
+          wau: [{ value: 30, label: '1M' }, { value: 90, label: '3M' }, { value: 180, label: '6M' }],
+          mau: [{ value: 90, label: '3M' }, { value: 180, label: '6M' }, { value: 365, label: '12M' }],
+        };
+
+        return (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            {/* Metric toggle pills */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+                {(['dau', 'wau', 'mau'] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setActiveMetric(m)}
+                    className={`px-4 py-1.5 text-xs font-semibold rounded-md transition-all ${
+                      activeMetric === m
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    {m.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-2xl font-bold text-gray-800">{fmtNum(latestValue)}</span>
+                {change !== 0 && (
+                  <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${change > 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                    {change > 0 ? '+' : ''}{fmtPct(change)}
+                  </span>
+                )}
+              </div>
+            </div>
+            {/* Date range pills per metric */}
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs text-gray-400">{cfg.label}</p>
+              <div className="flex items-center bg-gray-100 rounded-md p-0.5">
+                {dateOptions[activeMetric].map(opt => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setMetricDays(prev => ({ ...prev, [activeMetric]: opt.value }))}
+                    className={`px-2.5 py-1 text-[10px] font-medium rounded transition-all ${
+                      metricDays[activeMetric] === opt.value
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-400 hover:text-gray-600'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="h-64 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={dailyMetrics} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                  <XAxis dataKey="date" stroke="#9CA3AF" fontSize={11} tickFormatter={formatShortDate} />
+                  <YAxis stroke="#9CA3AF" fontSize={12} tickFormatter={(v: number) => fmtNum(v)} />
+                  <Tooltip
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null;
+                      const row = payload[0].payload as DailyMetric;
+                      return (
+                        <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-xs">
+                          <div className="font-semibold text-gray-800 mb-1">{label}</div>
+                          <div className="flex justify-between gap-4">
+                            <span style={{ color: cfg.color }}>{cfg.key.toUpperCase()}</span>
+                            <span className="font-bold">{fmtNum(row[cfg.key])}</span>
+                          </div>
+                          {activeMetric === 'dau' && (row.dau_paid > 0 || row.dau_free > 0) && (
+                            <div className="border-t border-gray-100 mt-1 pt-1 space-y-0.5">
+                              <div className="flex justify-between gap-4 text-gray-400"><span>Pagados</span><span>{fmtNum(row.dau_paid)}</span></div>
+                              <div className="flex justify-between gap-4 text-gray-400"><span>Gratuitos</span><span>{fmtNum(row.dau_free)}</span></div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }}
+                  />
+                  <defs>
+                    <linearGradient id={`gradient-${cfg.key}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={cfg.color} stopOpacity={0.3} />
+                      <stop offset="100%" stopColor={cfg.color} stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <Area
+                    type="monotone"
+                    dataKey={cfg.key}
+                    stroke={cfg.color}
+                    strokeWidth={2}
+                    fill={`url(#gradient-${cfg.key})`}
+                    dot={false}
+                    activeDot={{ r: 4, fill: cfg.color }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ===== Weekly Retention Cohort Table (triangular) ===== */}
       {data.has_retention && retentionMatrix.length > 0 && (

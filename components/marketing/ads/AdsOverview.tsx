@@ -3,12 +3,13 @@
 import { DateRange } from '../shared/useDateRange';
 import { useAdsData, useAdsTrend } from '../shared/useMarketingData';
 import { AdsSpendChart, AdsCpaChart, CampaignCpaBar } from './AdsCharts';
-import { fmtNum, fmtUSD, fmtPct } from '@/components/growth/formatters';
+import { fmtNum, fmtPct } from '@/components/growth/formatters';
 import KpiCard from '@/components/growth/KpiCard';
 import PlatformCard from './PlatformCard';
 import CampaignTable from './CampaignTable';
 import SyncStatus from '../shared/SyncStatus';
 import EmptyState from '../shared/EmptyState';
+import { CurrencyToggle } from '../shared/useCurrencyToggle';
 import {
   CurrencyDollarIcon,
   ArrowTrendingUpIcon,
@@ -20,9 +21,10 @@ import {
 
 interface AdsOverviewProps {
   range: DateRange;
+  currency: CurrencyToggle;
 }
 
-export default function AdsOverview({ range }: AdsOverviewProps) {
+export default function AdsOverview({ range, currency }: AdsOverviewProps) {
   const { platformKpis, campaigns, loading, hasData } = useAdsData(range);
   const { data: trendData } = useAdsTrend(range);
 
@@ -60,21 +62,21 @@ export default function AdsOverview({ range }: AdsOverviewProps) {
 
       {/* Consolidated KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-        <KpiCard title="Gasto total" value={fmtUSD(totalSpend)} icon={CurrencyDollarIcon} colorClass="bg-red-500" />
-        <KpiCard title="CPA" value={fmtUSD(avgCpa)} icon={ShoppingCartIcon} colorClass="bg-purple-500" subtext="Costo por registro" />
-        <KpiCard title="Registros (conv.)" value={fmtNum(totalConversions)} icon={UserGroupIcon} colorClass="bg-blue-500" />
-        <KpiCard title="CTR" value={fmtPct(avgCtr)} icon={CursorArrowRaysIcon} colorClass="bg-amber-500" />
-        <KpiCard title="Alcance" value={fmtNum(totalReach)} icon={EyeIcon} colorClass="bg-indigo-500" />
+        <KpiCard title="Gasto total" value={currency.fmtMoney(totalSpend)} icon={CurrencyDollarIcon} colorClass="bg-red-500" tooltip="Inversión total en ads pagados en todas las plataformas durante el período seleccionado." />
+        <KpiCard title="CPA" value={currency.fmtMoney(avgCpa)} icon={ShoppingCartIcon} colorClass="bg-purple-500" tooltip="Costo Por Adquisición. Cuánto cuesta en promedio conseguir un registro. Se calcula: Gasto total ÷ Conversiones." />
+        <KpiCard title="Registros (conv.)" value={fmtNum(totalConversions)} icon={UserGroupIcon} colorClass="bg-blue-500" tooltip="Cantidad de registros (conversiones) atribuidas a los ads pagados por las plataformas." />
+        <KpiCard title="CTR" value={fmtPct(avgCtr)} icon={CursorArrowRaysIcon} colorClass="bg-amber-500" tooltip="Click-Through Rate. % de personas que vieron el anuncio e hicieron clic. Se calcula: Clicks ÷ Impresiones × 100." />
+        <KpiCard title="Alcance" value={fmtNum(totalReach)} icon={EyeIcon} colorClass="bg-indigo-500" tooltip="Número de personas únicas que vieron al menos uno de los anuncios." />
       </div>
 
       {/* Trend charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <AdsSpendChart data={trendData} />
-        <AdsCpaChart data={trendData} />
+        <AdsSpendChart data={trendData} fmtMoney={currency.fmtMoney} />
+        <AdsCpaChart data={trendData} fmtMoney={currency.fmtMoney} />
       </div>
 
       {/* CPA by Campaign */}
-      <CampaignCpaBar campaigns={campaigns} />
+      <CampaignCpaBar campaigns={campaigns} fmtMoney={currency.fmtMoney} />
 
       {/* Platform comparison */}
       <div>
@@ -87,7 +89,7 @@ export default function AdsOverview({ range }: AdsOverviewProps) {
                 <EmptyState platform={p === 'meta' ? 'Meta Ads' : p === 'google' ? 'Google Ads' : 'TikTok Ads'} />
               </div>
             );
-            return <PlatformCard key={p} data={data} />;
+            return <PlatformCard key={p} data={data} fmtMoney={currency.fmtMoney} />;
           })}
         </div>
       </div>
@@ -97,7 +99,7 @@ export default function AdsOverview({ range }: AdsOverviewProps) {
         <div className="px-6 py-4 border-b border-gray-100 bg-gray-50">
           <h3 className="font-semibold text-gray-700">Campañas activas</h3>
         </div>
-        <CampaignTable campaigns={campaigns} />
+        <CampaignTable campaigns={campaigns} fmtMoney={currency.fmtMoney} />
       </div>
     </div>
   );

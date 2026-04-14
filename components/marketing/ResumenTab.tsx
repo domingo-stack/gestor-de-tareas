@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { DateRange } from './shared/useDateRange';
 import { useAdsData, useOrganicData, useWebData, useConversionsData, useAdsTrend, useOrganicTrend } from './shared/useMarketingData';
 import { fmtNum, fmtUSD, fmtPct } from '@/components/growth/formatters';
+import { CurrencyToggle } from './shared/useCurrencyToggle';
 import KpiCard from '@/components/growth/KpiCard';
 import { AdsSpendChart } from './ads/AdsCharts';
 import { FollowersGrowthChart } from './organic/OrganicCharts';
@@ -20,6 +21,7 @@ import {
 
 interface ResumenTabProps {
   range: DateRange;
+  currency: CurrencyToggle;
 }
 
 // Compute previous period range (same duration, shifted back)
@@ -41,7 +43,7 @@ function growthCalc(current: number, previous: number): { percent: number; isPos
   return { percent: Math.abs(pct), isPositive: pct >= 0 };
 }
 
-export default function ResumenTab({ range }: ResumenTabProps) {
+export default function ResumenTab({ range, currency }: ResumenTabProps) {
   const prevRange = useMemo(() => getPreviousRange(range), [range.from, range.to]);
 
   // Current period
@@ -93,11 +95,11 @@ export default function ResumenTab({ range }: ResumenTabProps) {
         {hasAds ? (
           <>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-              <KpiCard title="Gasto total" value={fmtUSD(totalSpend)} icon={CurrencyDollarIcon} colorClass="bg-red-500" growth={growthCalc(totalSpend, prevSpend)} />
-              <KpiCard title="Registros" value={fmtNum(totalAdsConversions)} icon={ShoppingCartIcon} colorClass="bg-blue-500" growth={growthCalc(totalAdsConversions, prevAdsConversions)} />
-              <KpiCard title="CPA" value={fmtUSD(avgCpa)} icon={ArrowTrendingUpIcon} colorClass="bg-purple-500" growth={prevCpa > 0 ? { percent: Math.abs(((avgCpa - prevCpa) / prevCpa) * 100), isPositive: avgCpa <= prevCpa } : undefined} />
+              <KpiCard title="Gasto total" value={currency.fmtMoney(totalSpend)} icon={CurrencyDollarIcon} colorClass="bg-red-500" growth={growthCalc(totalSpend, prevSpend)} tooltip="Inversión total en ads pagados en el período." />
+              <KpiCard title="Registros" value={fmtNum(totalAdsConversions)} icon={ShoppingCartIcon} colorClass="bg-blue-500" growth={growthCalc(totalAdsConversions, prevAdsConversions)} tooltip="Registros atribuidos a campañas de ads pagados." />
+              <KpiCard title="CPA" value={currency.fmtMoney(avgCpa)} icon={ArrowTrendingUpIcon} colorClass="bg-purple-500" growth={prevCpa > 0 ? { percent: Math.abs(((avgCpa - prevCpa) / prevCpa) * 100), isPositive: avgCpa <= prevCpa } : undefined} tooltip="Costo Por Adquisición. Gasto total ÷ Registros." />
             </div>
-            <AdsSpendChart data={adsTrend} />
+            <AdsSpendChart data={adsTrend} fmtMoney={currency.fmtMoney} />
           </>
         ) : (
           <p className="text-sm text-gray-400">Sin datos de ads en este período</p>
@@ -110,9 +112,9 @@ export default function ResumenTab({ range }: ResumenTabProps) {
         {hasOrganic ? (
           <>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-              <KpiCard title="Seguidores" value={fmtNum(totalFollowers)} icon={UserGroupIcon} colorClass="bg-pink-500" />
-              <KpiCard title="Nuevos seguidores" value={(totalFollowersDelta >= 0 ? '+' : '') + fmtNum(totalFollowersDelta)} icon={HeartIcon} colorClass="bg-rose-500" growth={growthCalc(totalFollowersDelta, prevFollowersDelta)} />
-              <KpiCard title="Engagement" value={fmtNum(totalEngagement)} icon={EyeIcon} colorClass="bg-amber-500" growth={growthCalc(totalEngagement, prevEngagement)} />
+              <KpiCard title="Seguidores" value={fmtNum(totalFollowers)} icon={UserGroupIcon} colorClass="bg-pink-500" tooltip="Total de seguidores acumulados en todas las plataformas orgánicas." />
+              <KpiCard title="Nuevos seguidores" value={(totalFollowersDelta >= 0 ? '+' : '') + fmtNum(totalFollowersDelta)} icon={HeartIcon} colorClass="bg-rose-500" growth={growthCalc(totalFollowersDelta, prevFollowersDelta)} tooltip="Seguidores nuevos ganados (o perdidos) en el período." />
+              <KpiCard title="Engagement" value={fmtNum(totalEngagement)} icon={EyeIcon} colorClass="bg-amber-500" growth={growthCalc(totalEngagement, prevEngagement)} tooltip="Suma de likes, comentarios y shares en todas las plataformas." />
             </div>
             <FollowersGrowthChart data={organicTrend} />
           </>
@@ -126,9 +128,9 @@ export default function ResumenTab({ range }: ResumenTabProps) {
         <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Web y Blog</h3>
         {hasWeb && webKpis ? (
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            <KpiCard title="Sesiones" value={fmtNum(webKpis.sessions)} icon={GlobeAltIcon} colorClass="bg-green-500" growth={growthCalc(webKpis.sessions, prevWebKpis?.sessions || 0)} />
-            <KpiCard title="Usuarios nuevos" value={fmtNum(webKpis.newUsers)} icon={UserPlusIcon} colorClass="bg-teal-500" growth={growthCalc(webKpis.newUsers, prevWebKpis?.newUsers || 0)} />
-            <KpiCard title="Conversiones GA4" value={fmtNum(webKpis.conversionsGa4)} icon={ShoppingCartIcon} colorClass="bg-indigo-500" growth={growthCalc(webKpis.conversionsGa4, prevWebKpis?.conversionsGa4 || 0)} />
+            <KpiCard title="Sesiones" value={fmtNum(webKpis.sessions)} icon={GlobeAltIcon} colorClass="bg-green-500" growth={growthCalc(webKpis.sessions, prevWebKpis?.sessions || 0)} tooltip="Visitas al sitio web. Una sesión es un grupo de interacciones dentro de un periodo de tiempo." />
+            <KpiCard title="Usuarios nuevos" value={fmtNum(webKpis.newUsers)} icon={UserPlusIcon} colorClass="bg-teal-500" growth={growthCalc(webKpis.newUsers, prevWebKpis?.newUsers || 0)} tooltip="Personas que visitaron el sitio por primera vez en el período." />
+            <KpiCard title="Conversiones GA4" value={fmtNum(webKpis.conversionsGa4)} icon={ShoppingCartIcon} colorClass="bg-indigo-500" growth={growthCalc(webKpis.conversionsGa4, prevWebKpis?.conversionsGa4 || 0)} tooltip="Eventos de conversión registrados en Google Analytics 4 (registros, clics en CTA, etc.)." />
           </div>
         ) : (
           <p className="text-sm text-gray-400">Sin datos web en este período</p>
@@ -140,10 +142,10 @@ export default function ResumenTab({ range }: ResumenTabProps) {
         <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">Conversiones</h3>
         {convData ? (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <KpiCard title="Registros" value={fmtNum(convData.totalRegistrations)} icon={UserPlusIcon} colorClass="bg-blue-500" growth={growthCalc(convData.totalRegistrations, prevConvData?.totalRegistrations || 0)} />
-            <KpiCard title="Compras" value={fmtNum(convData.totalPurchases)} icon={ShoppingCartIcon} colorClass="bg-green-500" growth={growthCalc(convData.totalPurchases, prevConvData?.totalPurchases || 0)} />
-            <KpiCard title="Revenue" value={fmtUSD(convData.totalRevenue)} icon={CurrencyDollarIcon} colorClass="bg-emerald-500" growth={growthCalc(convData.totalRevenue, prevConvData?.totalRevenue || 0)} />
-            <KpiCard title="Tasa conversión" value={fmtPct(convData.conversionRate)} icon={ArrowTrendingUpIcon} colorClass="bg-violet-500" />
+            <KpiCard title="Registros" value={fmtNum(convData.totalRegistrations)} icon={UserPlusIcon} colorClass="bg-blue-500" growth={growthCalc(convData.totalRegistrations, prevConvData?.totalRegistrations || 0)} tooltip="Usuarios que se registraron en la plataforma." />
+            <KpiCard title="Compras" value={fmtNum(convData.totalPurchases)} icon={ShoppingCartIcon} colorClass="bg-green-500" growth={growthCalc(convData.totalPurchases, prevConvData?.totalPurchases || 0)} tooltip="Transacciones de pago completadas." />
+            <KpiCard title="Revenue" value={fmtUSD(convData.totalRevenue)} icon={CurrencyDollarIcon} colorClass="bg-emerald-500" growth={growthCalc(convData.totalRevenue, prevConvData?.totalRevenue || 0)} tooltip="Ingresos totales en USD de las compras realizadas." />
+            <KpiCard title="Tasa conversión" value={fmtPct(convData.conversionRate)} icon={ArrowTrendingUpIcon} colorClass="bg-violet-500" tooltip="% de registros que se convirtieron en compra. Compras ÷ Registros × 100." />
           </div>
         ) : (
           <p className="text-sm text-gray-400">Sin datos de conversiones en este período</p>

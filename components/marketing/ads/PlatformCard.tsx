@@ -1,7 +1,7 @@
 'use client';
 
 import { PlatformAdsKpis } from '../shared/useMarketingData';
-import { fmtNum, fmtUSD, fmtPct } from '@/components/growth/formatters';
+import { fmtNum, fmtPct } from '@/components/growth/formatters';
 
 const PLATFORM_CONFIG: Record<string, { label: string; color: string; bg: string }> = {
   meta: { label: 'Meta Ads', color: 'text-blue-700', bg: 'bg-blue-50' },
@@ -11,15 +11,16 @@ const PLATFORM_CONFIG: Record<string, { label: string; color: string; bg: string
 
 interface PlatformCardProps {
   data: PlatformAdsKpis;
+  fmtMoney: (v: number) => string;
 }
 
-export default function PlatformCard({ data }: PlatformCardProps) {
+export default function PlatformCard({ data, fmtMoney }: PlatformCardProps) {
   const config = PLATFORM_CONFIG[data.platform] || { label: data.platform, color: 'text-gray-700', bg: 'bg-gray-50' };
 
   const metrics = [
-    { label: 'Gasto', value: fmtUSD(data.spend) },
+    { label: 'Gasto', value: fmtMoney(data.spend) },
     { label: 'ROAS', value: data.roas.toFixed(2) + 'x' },
-    { label: 'CPA', value: fmtUSD(data.cpa) },
+    { label: 'CPA', value: fmtMoney(data.cpa) },
     { label: 'Conversiones', value: fmtNum(data.conversions) },
     { label: 'CTR', value: fmtPct(data.ctr) },
     { label: 'Alcance', value: fmtNum(data.reach) },

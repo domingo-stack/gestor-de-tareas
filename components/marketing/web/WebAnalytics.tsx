@@ -95,11 +95,11 @@ export default function WebAnalytics({ range }: WebAnalyticsProps) {
 
       {/* Consolidated KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-        <KpiCard title="Sesiones" value={fmtNum(kpis.sessions)} icon={GlobeAltIcon} colorClass="bg-blue-500" />
-        <KpiCard title="Usuarios activos" value={fmtNum(kpis.activeUsers)} icon={UserGroupIcon} colorClass="bg-indigo-500" />
-        <KpiCard title="Usuarios nuevos" value={fmtNum(kpis.newUsers)} icon={UserPlusIcon} colorClass="bg-green-500" />
-        <KpiCard title="Vistas de página" value={fmtNum(kpis.pageViews)} icon={DocumentTextIcon} colorClass="bg-purple-500" />
-        <KpiCard title="Duración prom." value={kpis.avgSessionMinutes.toFixed(1) + ' min'} icon={ClockIcon} colorClass="bg-amber-500" />
+        <KpiCard title="Sesiones" value={fmtNum(kpis.sessions)} icon={GlobeAltIcon} colorClass="bg-blue-500" tooltip="Visitas al sitio. Una sesión agrupa las interacciones de un usuario en un periodo continuo." />
+        <KpiCard title="Usuarios activos" value={fmtNum(kpis.activeUsers)} icon={UserGroupIcon} colorClass="bg-indigo-500" tooltip="Usuarios únicos que interactuaron con el sitio en el período." />
+        <KpiCard title="Usuarios nuevos" value={fmtNum(kpis.newUsers)} icon={UserPlusIcon} colorClass="bg-green-500" tooltip="Personas que visitaron el sitio por primera vez." />
+        <KpiCard title="Vistas de página" value={fmtNum(kpis.pageViews)} icon={DocumentTextIcon} colorClass="bg-purple-500" tooltip="Número total de páginas vistas, incluyendo vistas repetidas." />
+        <KpiCard title="Duración prom." value={kpis.avgSessionMinutes.toFixed(1) + ' min'} icon={ClockIcon} colorClass="bg-amber-500" tooltip="Tiempo promedio que un usuario pasa en el sitio por sesión." />
         <KpiCard
           title="Conversiones GA4"
           value={fmtNum(kpis.conversionsGa4)}

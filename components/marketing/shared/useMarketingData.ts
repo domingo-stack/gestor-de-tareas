@@ -23,6 +23,12 @@ interface AdMetricRow {
   cpm: number;
   cpa: number;
   roas: number;
+  video_3s_views: number | null;
+  video_thruplay: number | null;
+  landing_page_views: number | null;
+  hook_rate: number | null;
+  retention_rate: number | null;
+  click_quality_rate: number | null;
 }
 
 export interface PlatformAdsKpis {
@@ -51,6 +57,13 @@ export interface CampaignSummary {
   roas: number;
   cpa: number;
   ctr: number;
+  video3sViews: number;
+  videoThruplay: number;
+  landingPageViews: number;
+  hookRate: number | null;
+  retentionRate: number | null;
+  clickQualityRate: number | null;
+  hasVideo: boolean;
 }
 
 export function useAdsData(range: DateRange) {
@@ -67,7 +80,7 @@ export function useAdsData(range: DateRange) {
     // Fetch ad metrics — uses platform + platform_campaign_id (not campaign_id)
     const { data: metrics } = await supabase
       .from('mkt_ad_metrics')
-      .select('platform, platform_campaign_id, date, spend, impressions, clicks, reach, conversions, conversion_value, ctr, cpc, cpm, cpa, roas')
+      .select('platform, platform_campaign_id, date, spend, impressions, clicks, reach, conversions, conversion_value, ctr, cpc, cpm, cpa, roas, video_3s_views, video_thruplay, landing_page_views, hook_rate, retention_rate, click_quality_rate')
       .gte('date', range.from)
       .lte('date', range.to);
 
@@ -130,6 +143,11 @@ export function useAdsData(range: DateRange) {
         const clicks = cRows.reduce((s, r) => s + Number(r.clicks), 0);
         const conversions = cRows.reduce((s, r) => s + Number(r.conversions), 0);
         const conversionValue = cRows.reduce((s, r) => s + Number(r.conversion_value), 0);
+        const video3sViews = cRows.reduce((s, r) => s + Number(r.video_3s_views || 0), 0);
+        const videoThruplay = cRows.reduce((s, r) => s + Number(r.video_thruplay || 0), 0);
+        const landingPageViews = cRows.reduce((s, r) => s + Number(r.landing_page_views || 0), 0);
+        const reach = cRows.reduce((s, r) => s + Number(r.reach), 0);
+        const hasVideo = video3sViews > 0;
 
         summaries.push({
           id: key,
@@ -141,6 +159,13 @@ export function useAdsData(range: DateRange) {
           roas: spend > 0 ? conversionValue / spend : 0,
           cpa: conversions > 0 ? spend / conversions : 0,
           ctr: impressions > 0 ? (clicks / impressions) * 100 : 0,
+          video3sViews,
+          videoThruplay,
+          landingPageViews,
+          hookRate: hasVideo && reach > 0 ? (video3sViews / reach) * 100 : null,
+          retentionRate: hasVideo && video3sViews > 0 ? (videoThruplay / video3sViews) * 100 : null,
+          clickQualityRate: clicks > 0 ? (landingPageViews / clicks) * 100 : null,
+          hasVideo,
         });
       }
       setCampaigns(summaries.sort((a, b) => b.spend - a.spend));
@@ -175,6 +200,10 @@ interface OrganicMetricRow {
   comments: number;
   shares: number;
   posts_published: number;
+  total_likes: number;
+  total_comments: number;
+  total_shares: number;
+  posts_count_period: number;
 }
 
 export interface OrganicPlatformData {
@@ -189,6 +218,10 @@ export interface OrganicPlatformData {
   comments: number;
   shares: number;
   postsPublished: number;
+  totalLikes: number;
+  totalComments: number;
+  totalShares: number;
+  postsCountPeriod: number;
 }
 
 export function useOrganicData(range: DateRange) {
@@ -204,8 +237,8 @@ export function useOrganicData(range: DateRange) {
       setLoading(true);
 
       const { data } = await supabase
-        .from('mkt_organic_metrics')
-        .select('platform_name, date, followers, followers_delta, impressions, reach, engagement, views, likes, comments, shares, posts_published')
+        .from('mkt_organic_metrics_enriched')
+        .select('platform_name, date, followers, followers_delta, impressions, reach, engagement, views, likes, comments, shares, posts_published, total_likes, total_comments, total_shares, posts_count_period')
         .gte('date', range.from)
         .lte('date', range.to)
         .order('date', { ascending: false });
@@ -223,11 +256,15 @@ export function useOrganicData(range: DateRange) {
 
         const results: OrganicPlatformData[] = [];
         for (const [platform, rows] of byPlatform) {
-          const latestRow = rows[0];
+          const latestRow = rows[0]; // most recent (sorted desc)
+          const oldestRow = rows[rows.length - 1]; // oldest in range
+          // Delta from followers_delta sum, fallback to difference between newest and oldest followers
+          const deltaSum = rows.reduce((s, r) => s + Number(r.followers_delta || 0), 0);
+          const deltaCalc = (Number(latestRow.followers) || 0) - (Number(oldestRow.followers) || 0);
           results.push({
             platform,
             currentFollowers: Number(latestRow.followers) || 0,
-            followersDelta: rows.reduce((s, r) => s + Number(r.followers_delta), 0),
+            followersDelta: deltaSum !== 0 ? deltaSum : deltaCalc,
             impressions: rows.reduce((s, r) => s + Number(r.impressions), 0),
             reach: rows.reduce((s, r) => s + Number(r.reach), 0),
             engagement: rows.reduce((s, r) => s + Number(r.engagement), 0),
@@ -236,6 +273,10 @@ export function useOrganicData(range: DateRange) {
             comments: rows.reduce((s, r) => s + Number(r.comments), 0),
             shares: rows.reduce((s, r) => s + Number(r.shares), 0),
             postsPublished: rows.reduce((s, r) => s + Number(r.posts_published), 0),
+            totalLikes: rows.reduce((s, r) => s + Number(r.total_likes || 0), 0),
+            totalComments: rows.reduce((s, r) => s + Number(r.total_comments || 0), 0),
+            totalShares: rows.reduce((s, r) => s + Number(r.total_shares || 0), 0),
+            postsCountPeriod: rows.reduce((s, r) => s + Number(r.posts_count_period || 0), 0),
           });
         }
         setPlatforms(results);
@@ -839,8 +880,8 @@ export function useOrganicTrend(range: DateRange) {
     const fetchData = async () => {
       setLoading(true);
       const { data: rows } = await supabase
-        .from('mkt_organic_metrics')
-        .select('platform_name, date, followers, followers_delta, engagement, likes, comments, shares')
+        .from('mkt_organic_metrics_enriched')
+        .select('platform_name, date, followers, followers_delta, engagement, total_likes, total_comments, total_shares')
         .gte('date', range.from)
         .lte('date', range.to)
         .order('date', { ascending: true });
@@ -856,7 +897,7 @@ export function useOrganicTrend(range: DateRange) {
           };
           const platform = (r.platform_name || '').toLowerCase();
           const followers = Number(r.followers) || 0;
-          const engagement = Number(r.engagement) || (Number(r.likes) || 0) + (Number(r.comments) || 0) + (Number(r.shares) || 0);
+          const engagement = Number(r.engagement) || (Number(r.total_likes) || 0) + (Number(r.total_comments) || 0) + (Number(r.total_shares) || 0);
           const delta = Number(r.followers_delta) || 0;
 
           if (platform === 'facebook') { existing.facebook_followers = followers; existing.facebook_engagement += engagement; }
@@ -866,7 +907,16 @@ export function useOrganicTrend(range: DateRange) {
           existing.total_followers_delta += delta;
           byDate.set(r.date, existing);
         }
-        setData(Array.from(byDate.values()));
+
+        // Forward-fill: if a platform has 0 followers on a day, carry forward from previous day
+        const sorted = Array.from(byDate.entries()).sort(([a], [b]) => a.localeCompare(b));
+        let prevFb = 0, prevIg = 0, prevYt = 0;
+        for (const [, point] of sorted) {
+          if (point.facebook_followers > 0) prevFb = point.facebook_followers; else point.facebook_followers = prevFb;
+          if (point.instagram_followers > 0) prevIg = point.instagram_followers; else point.instagram_followers = prevIg;
+          if (point.youtube_followers > 0) prevYt = point.youtube_followers; else point.youtube_followers = prevYt;
+        }
+        setData(sorted.map(([, v]) => v));
       } else {
         setData([]);
       }

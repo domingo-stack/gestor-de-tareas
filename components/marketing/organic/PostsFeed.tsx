@@ -109,7 +109,16 @@ export default function PostsFeed({ range }: PostsFeedProps) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h4 className="text-sm font-semibold text-gray-700">Posts — Facebook e Instagram</h4>
+        <div className="flex items-center gap-2">
+          <h4 className="text-sm font-semibold text-gray-700">Posts — Facebook e Instagram</h4>
+          <div className="relative group">
+            <span className="text-[10px] text-gray-300 border border-gray-200 rounded px-1 cursor-help">ℹ</span>
+            <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-52 px-3 py-2 bg-gray-800 text-white text-[11px] leading-relaxed rounded-lg shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 z-50 pointer-events-none">
+              Métricas actualizadas al último sync. Los likes, comentarios y shares reflejan el estado actual del post, no el del día de publicación.
+              <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-[5px] border-x-transparent border-t-[5px] border-t-gray-800" />
+            </div>
+          </div>
+        </div>
         <div className="flex gap-2">
           {(['all', 'facebook', 'instagram'] as const).map((p) => {
             const count = platformCounts[p];

@@ -33,14 +33,15 @@ export default function ConversionsSection({ range }: ConversionsSectionProps) {
     <div className="space-y-6">
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <KpiCard title="Registros" value={fmtNum(data.totalRegistrations)} icon={UserPlusIcon} colorClass="bg-blue-500" />
-        <KpiCard title="Compras" value={fmtNum(data.totalPurchases)} icon={ShoppingCartIcon} colorClass="bg-green-500" />
-        <KpiCard title="Revenue" value={fmtUSD(data.totalRevenue)} icon={CurrencyDollarIcon} colorClass="bg-purple-500" />
+        <KpiCard title="Registros" value={fmtNum(data.totalRegistrations)} icon={UserPlusIcon} colorClass="bg-blue-500" tooltip="Usuarios que se registraron en el período seleccionado." />
+        <KpiCard title="Compras" value={fmtNum(data.totalPurchases)} icon={ShoppingCartIcon} colorClass="bg-green-500" tooltip="Transacciones de pago completadas en el período." />
+        <KpiCard title="Revenue" value={fmtUSD(data.totalRevenue)} icon={CurrencyDollarIcon} colorClass="bg-purple-500" tooltip="Ingresos totales en USD de las compras realizadas." />
         <KpiCard
           title="Tasa registro→compra"
           value={fmtPct(data.conversionRate)}
           icon={ArrowTrendingUpIcon}
           colorClass="bg-amber-500"
+          tooltip="% de registros que terminaron comprando. Compras ÷ Registros × 100."
           subtext="Indicativa, no exacta"
         />
       </div>

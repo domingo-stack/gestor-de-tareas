@@ -14,22 +14,25 @@ const PLATFORM_CONFIG: Record<string, { label: string; color: string; bg: string
   tiktok: { label: 'TikTok', color: 'text-gray-800', bg: 'bg-gray-100' },
 };
 
-// Métricas por plataforma — según datos reales disponibles de cada API
+// Métricas por plataforma — usa datos enriched de posts cuando están disponibles
 const PLATFORM_METRICS: Record<string, { key: keyof OrganicPlatformData; label: string }[]> = {
   facebook: [
     { key: 'views', label: 'Visualizaciones' },
-    { key: 'likes', label: 'Likes (posts)' },
-    { key: 'comments', label: 'Comentarios (posts)' },
+    { key: 'totalLikes', label: 'Likes' },
+    { key: 'totalComments', label: 'Comentarios' },
+    { key: 'totalShares', label: 'Compartidos' },
   ],
   instagram: [
     { key: 'reach', label: 'Alcance' },
     { key: 'engagement', label: 'Engagement' },
-    { key: 'postsPublished', label: 'Posts publicados' },
+    { key: 'totalLikes', label: 'Likes' },
+    { key: 'totalComments', label: 'Comentarios' },
   ],
   youtube: [
     { key: 'views', label: 'Vistas' },
+    { key: 'totalLikes', label: 'Likes' },
+    { key: 'totalComments', label: 'Comentarios' },
     { key: 'postsPublished', label: 'Videos publicados' },
-    { key: 'engagement', label: 'Likes + comentarios' },
   ],
   tiktok: [
     { key: 'views', label: 'Vistas de perfil' },

@@ -7,11 +7,12 @@ import {
   LineChart,
 } from 'recharts';
 import { AdsTrendPoint, CampaignSummary } from '../shared/useMarketingData';
-import { fmtUSD, fmtNum } from '@/components/growth/formatters';
+import { fmtNum } from '@/components/growth/formatters';
 
 // ─── Tooltip ───
-function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string }) {
+function ChartTooltip({ active, payload, label, fmtMoney }: { active?: boolean; payload?: Array<{ name: string; value: number; color: string }>; label?: string; fmtMoney?: (v: number) => string }) {
   if (!active || !payload) return null;
+  const fmt = fmtMoney || ((v: number) => `$${v.toFixed(2)}`);
   return (
     <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-4 py-3 text-xs">
       <p className="font-semibold text-gray-700 mb-1">{label}</p>
@@ -20,7 +21,7 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
           <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
           <span className="text-gray-500">{p.name}:</span>
           <span className="font-bold text-gray-800">
-            {p.name.includes('Gasto') || p.name.includes('CPA') ? fmtUSD(p.value) : fmtNum(p.value)}
+            {p.name.includes('Gasto') || p.name.includes('CPA') ? fmt(p.value) : fmtNum(p.value)}
           </span>
         </div>
       ))}
@@ -29,7 +30,7 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
 }
 
 // ─── 1. Spend vs Registros (diario) ───
-export function AdsSpendChart({ data }: { data: AdsTrendPoint[] }) {
+export function AdsSpendChart({ data, fmtMoney }: { data: AdsTrendPoint[]; fmtMoney: (v: number) => string }) {
   if (data.length === 0) return null;
 
   const formatDate = (d: string) => {
@@ -45,11 +46,11 @@ export function AdsSpendChart({ data }: { data: AdsTrendPoint[] }) {
           <ComposedChart data={data}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-            <YAxis yAxisId="left" tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
+            <YAxis yAxisId="left" tick={{ fontSize: 11 }} tickFormatter={(v) => fmtMoney(v)} />
             <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} />
-            <Tooltip content={<ChartTooltip />} />
+            <Tooltip content={<ChartTooltip fmtMoney={fmtMoney} />} />
             <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Bar yAxisId="left" dataKey="spend" fill="#3B82F6" name="Gasto (USD)" barSize={20} radius={[3, 3, 0, 0]} />
+            <Bar yAxisId="left" dataKey="spend" fill="#3B82F6" name="Gasto" barSize={20} radius={[3, 3, 0, 0]} />
             <Line yAxisId="right" type="monotone" dataKey="conversions" stroke="#10B981" strokeWidth={2.5} dot={{ r: 3 }} name="Registros" />
           </ComposedChart>
         </ResponsiveContainer>
@@ -59,7 +60,7 @@ export function AdsSpendChart({ data }: { data: AdsTrendPoint[] }) {
 }
 
 // ─── 2. CPA Evolution ───
-export function AdsCpaChart({ data }: { data: AdsTrendPoint[] }) {
+export function AdsCpaChart({ data, fmtMoney }: { data: AdsTrendPoint[]; fmtMoney: (v: number) => string }) {
   const cpaData = useMemo(() => data.filter(d => d.conversions > 0), [data]);
   const avgCpa = useMemo(() => {
     const totalSpend = data.reduce((s, d) => s + d.spend, 0);
@@ -78,16 +79,16 @@ export function AdsCpaChart({ data }: { data: AdsTrendPoint[] }) {
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
       <div className="flex items-center justify-between mb-4">
         <h4 className="text-sm font-semibold text-gray-700">Evolución del CPA</h4>
-        <span className="text-xs text-gray-400">Promedio: {fmtUSD(avgCpa)}</span>
+        <span className="text-xs text-gray-400">Promedio: {fmtMoney(avgCpa)}</span>
       </div>
       <div className="h-56">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={cpaData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-            <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
-            <Tooltip content={<ChartTooltip />} />
-            <ReferenceLine y={avgCpa} stroke="#94a3b8" strokeDasharray="4 4" label={{ value: `Prom. ${fmtUSD(avgCpa)}`, position: 'insideTopRight', fontSize: 10, fill: '#94a3b8' }} />
+            <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => fmtMoney(v)} />
+            <Tooltip content={<ChartTooltip fmtMoney={fmtMoney} />} />
+            <ReferenceLine y={avgCpa} stroke="#94a3b8" strokeDasharray="4 4" label={{ value: `Prom. ${fmtMoney(avgCpa)}`, position: 'insideTopRight', fontSize: 10, fill: '#94a3b8' }} />
             <Line type="monotone" dataKey="cpa" stroke="#8B5CF6" strokeWidth={2} dot={{ r: 3 }} name="CPA" />
           </LineChart>
         </ResponsiveContainer>
@@ -97,7 +98,8 @@ export function AdsCpaChart({ data }: { data: AdsTrendPoint[] }) {
 }
 
 // ─── 3. Campaign CPA Bar (horizontal) ───
-export function CampaignCpaBar({ campaigns }: { campaigns: CampaignSummary[] }) {
+export function CampaignCpaBar({ campaigns, fmtMoney }: { campaigns: CampaignSummary[]; fmtMoney?: (v: number) => string }) {
+  const fmt = fmtMoney || ((v: number) => `$${v.toFixed(2)}`);
   const sorted = useMemo(() => {
     return [...campaigns]
       .filter(c => c.conversions > 0)
@@ -116,13 +118,13 @@ export function CampaignCpaBar({ campaigns }: { campaigns: CampaignSummary[] }) 
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
       <div className="flex items-center justify-between mb-4">
         <h4 className="text-sm font-semibold text-gray-700">CPA por Campaña</h4>
-        <span className="text-xs text-gray-400">Promedio: {fmtUSD(avgCpa)}</span>
+        <span className="text-xs text-gray-400">Promedio: {fmt(avgCpa)}</span>
       </div>
       <div style={{ height: Math.max(sorted.length * 48, 120) }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={sorted} layout="vertical" margin={{ left: 10, right: 20 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" horizontal={false} />
-            <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => `$${v}`} />
+            <XAxis type="number" tick={{ fontSize: 11 }} tickFormatter={(v) => fmt(v)} />
             <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={160} />
             <Tooltip content={({ active, payload }) => {
               if (!active || !payload?.[0]) return null;
@@ -130,8 +132,8 @@ export function CampaignCpaBar({ campaigns }: { campaigns: CampaignSummary[] }) 
               return (
                 <div className="bg-white border border-gray-200 rounded-lg shadow-lg px-4 py-3 text-xs">
                   <p className="font-semibold text-gray-700 mb-1">{d.name}</p>
-                  <p className="text-gray-500">CPA: <span className="font-bold">{fmtUSD(d.cpa)}</span></p>
-                  <p className="text-gray-500">Gasto: {fmtUSD(d.spend)} · Registros: {fmtNum(d.conversions)}</p>
+                  <p className="text-gray-500">CPA: <span className="font-bold">{fmt(d.cpa)}</span></p>
+                  <p className="text-gray-500">Gasto: {fmt(d.spend)} · Registros: {fmtNum(d.conversions)}</p>
                 </div>
               );
             }} />

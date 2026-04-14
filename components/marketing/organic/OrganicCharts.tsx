@@ -59,13 +59,13 @@ export function FollowersGrowthChart({ data }: { data: OrganicTrendPoint[] }) {
             <Tooltip content={<ChartTooltip />} />
             <Legend wrapperStyle={{ fontSize: 12 }} />
             {hasFb && (
-              <Area type="monotone" dataKey="facebook_followers" stackId="1" stroke={COLORS.facebook} fill={COLORS.facebook} fillOpacity={0.3} name="Facebook" />
+              <Area type="monotone" dataKey="facebook_followers" stroke={COLORS.facebook} fill={COLORS.facebook} fillOpacity={0.15} name="Facebook" />
             )}
             {hasIg && (
-              <Area type="monotone" dataKey="instagram_followers" stackId="1" stroke={COLORS.instagram} fill={COLORS.instagram} fillOpacity={0.3} name="Instagram" />
+              <Area type="monotone" dataKey="instagram_followers" stroke={COLORS.instagram} fill={COLORS.instagram} fillOpacity={0.15} name="Instagram" />
             )}
             {hasYt && (
-              <Area type="monotone" dataKey="youtube_followers" stackId="1" stroke={COLORS.youtube} fill={COLORS.youtube} fillOpacity={0.3} name="YouTube" />
+              <Area type="monotone" dataKey="youtube_followers" stroke={COLORS.youtube} fill={COLORS.youtube} fillOpacity={0.15} name="YouTube" />
             )}
           </AreaChart>
         </ResponsiveContainer>

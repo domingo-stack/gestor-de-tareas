@@ -575,74 +575,95 @@ function OnboardingFunnelSection({ supabase }: { supabase: ReturnType<typeof use
     );
   }
 
-  const ONBOARDING_COLORS = ['#3B82F6', '#6366F1', '#8B5CF6', '#A855F7', '#D946EF', '#EC4899', '#10B981'];
-  const PAYWALL_COLORS = ['#F59E0B', '#EF4444', '#10B981'];
+  const FUNNEL_COLOR = '#7C3AED';
+  const FUNNEL_COLOR_LIGHT = '#EDE9FE';
+  const BAR_HEIGHT = 180; // px max height for bars
 
   return (
     <div className="space-y-6">
-      {/* Onboarding Funnel */}
+      {/* Onboarding Funnel — vertical bars (Mixpanel style) */}
       {data.onboarding.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="font-semibold text-gray-700 mb-4">Funnel de Onboarding (Mixpanel)</h3>
-          <div className="flex flex-col items-center gap-1">
-            {data.onboarding.map((step, i) => {
-              const color = ONBOARDING_COLORS[i % ONBOARDING_COLORS.length];
-              const widthPct = Math.max(step.pct * 0.82 + 18, 18);
-              return (
-                <div key={i} className="w-full flex flex-col items-center">
-                  <div
-                    className="relative flex items-center justify-between px-5 transition-all duration-500"
-                    style={{
-                      width: `${widthPct}%`,
-                      minHeight: '40px',
-                      backgroundColor: color,
-                      borderRadius: i === 0 ? '10px 10px 3px 3px' : i === data.onboarding.length - 1 ? '3px 3px 10px 10px' : '3px',
-                    }}
-                  >
-                    <span className="text-sm font-medium text-white drop-shadow-sm">{step.name}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg font-bold text-white drop-shadow-sm">{fmtNum(step.count)}</span>
-                      <span className="text-xs text-white/75 font-medium">{fmtPct(step.pct)}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-gray-700">Funnel de Onboarding (Mixpanel)</h3>
+            <span className="text-xs text-gray-400">Overall: {fmtPct(data.onboarding[data.onboarding.length - 1]?.pct || 0)}</span>
           </div>
+          <MixpanelFunnelChart steps={data.onboarding} color={FUNNEL_COLOR} colorLight={FUNNEL_COLOR_LIGHT} barHeight={BAR_HEIGHT} />
         </div>
       )}
 
-      {/* Paywall Funnel */}
+      {/* Paywall Funnel — vertical bars (Mixpanel style) */}
       {data.paywall.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <h3 className="font-semibold text-gray-700 mb-4">Funnel Paywall (Mixpanel)</h3>
-          <div className="flex flex-col items-center gap-1">
-            {data.paywall.map((step, i) => {
-              const color = PAYWALL_COLORS[i % PAYWALL_COLORS.length];
-              const widthPct = Math.max(step.pct * 0.82 + 18, 18);
-              return (
-                <div key={i} className="w-full flex flex-col items-center">
-                  <div
-                    className="relative flex items-center justify-between px-5 transition-all duration-500"
-                    style={{
-                      width: `${widthPct}%`,
-                      minHeight: '40px',
-                      backgroundColor: color,
-                      borderRadius: i === 0 ? '10px 10px 3px 3px' : i === data.paywall.length - 1 ? '3px 3px 10px 10px' : '3px',
-                    }}
-                  >
-                    <span className="text-sm font-medium text-white drop-shadow-sm">{step.name}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg font-bold text-white drop-shadow-sm">{fmtNum(step.count)}</span>
-                      <span className="text-xs text-white/75 font-medium">{fmtPct(step.pct)}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-gray-700">Funnel Paywall (Mixpanel)</h3>
+            <span className="text-xs text-gray-400">Overall: {fmtPct(data.paywall[data.paywall.length - 1]?.pct || 0)}</span>
           </div>
+          <MixpanelFunnelChart steps={data.paywall} color="#7C3AED" colorLight="#EDE9FE" barHeight={BAR_HEIGHT} />
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Mixpanel-style Funnel Chart (vertical bars) ────────────
+
+function MixpanelFunnelChart({ steps, color, colorLight, barHeight }: {
+  steps: OnboardingStep[];
+  color: string;
+  colorLight: string;
+  barHeight: number;
+}) {
+  const maxCount = steps[0]?.count || 1;
+
+  return (
+    <div className="flex items-end gap-1 pt-4" style={{ height: barHeight + 60 }}>
+      {steps.map((step, i) => {
+        const heightPct = maxCount > 0 ? (step.count / maxCount) * 100 : 0;
+        const barH = Math.max((heightPct / 100) * barHeight, 4);
+        const stepConvPct = i > 0 && steps[i - 1].count > 0
+          ? Math.round((step.count / steps[i - 1].count) * 10000) / 100
+          : 100;
+
+        return (
+          <div key={i} className="flex items-end flex-1 gap-0.5">
+            {/* Bar column */}
+            <div className="flex-1 flex flex-col items-center">
+              {/* Percentage on top */}
+              <span className="text-xs font-bold text-gray-700 mb-1">{fmtPct(step.pct)}</span>
+              {/* Count */}
+              <span className="text-[10px] text-gray-500 mb-1">{fmtNum(step.count)}</span>
+              {/* Bar */}
+              <div className="w-full relative" style={{ height: barHeight }}>
+                {/* Background (full height, light) */}
+                <div
+                  className="absolute bottom-0 w-full rounded-t-md transition-all duration-500"
+                  style={{ height: barHeight, backgroundColor: colorLight }}
+                />
+                {/* Filled bar */}
+                <div
+                  className="absolute bottom-0 w-full rounded-t-md transition-all duration-700"
+                  style={{ height: barH, backgroundColor: color }}
+                />
+              </div>
+              {/* Step label */}
+              <div className="mt-2 text-center px-0.5">
+                <span className="text-[10px] text-gray-500 leading-tight block">{i + 1}. {step.name}</span>
+              </div>
+            </div>
+
+            {/* Drop-off arrow between bars */}
+            {i < steps.length - 1 && (
+              <div className="flex flex-col items-center justify-end pb-8 w-10 flex-shrink-0">
+                <span className="text-[9px] text-gray-400 font-medium">{fmtPct(stepConvPct)}</span>
+                <svg width="16" height="10" viewBox="0 0 16 10" className="text-gray-300 mt-0.5">
+                  <path d="M1 5h14m-4-4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
