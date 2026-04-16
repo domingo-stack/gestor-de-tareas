@@ -1,0 +1,386 @@
+{
+  "name": "GRW_Sync_Mixpanel_Events_v3",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24,
+              "triggerAtHour": 6,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [-1600, 200],
+      "id": "sched-trigger-events-v3",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f1",
+              "name": "dateYesterday",
+              "value": "={{ $now.minus(1, 'days').format('yyyy-MM-dd') }}",
+              "type": "string"
+            },
+            {
+              "id": "f2",
+              "name": "date30dAgo",
+              "value": "={{ $now.minus(30, 'days').format('yyyy-MM-dd') }}",
+              "type": "string"
+            },
+            {
+              "id": "f3",
+              "name": "projectId",
+              "value": "3101660",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-1400, 200],
+      "id": "edit-fields-events-v3",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://mixpanel.com/api/2.0/segmentation",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "project_id", "value": "={{ $json.projectId }}" },
+            { "name": "event", "value": "IA > Generar Material" },
+            { "name": "from_date", "value": "={{ $json.date30dAgo }}" },
+            { "name": "to_date", "value": "={{ $json.dateYesterday }}" },
+            { "name": "type", "value": "general" },
+            { "name": "unit", "value": "day" },
+            { "name": "on", "value": "properties[\"mp_country_code\"]" },
+            { "name": "limit", "value": "100" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-1150, -300],
+      "id": "mp-ia-by-country",
+      "name": "MP: IA Generar - Por país",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "SCzQQv6E5V4sB4Yz",
+          "name": "Mixpanel - SA"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://mixpanel.com/api/2.0/segmentation",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "project_id", "value": "={{ $json.projectId }}" },
+            { "name": "event", "value": "IA > Generar Material" },
+            { "name": "from_date", "value": "={{ $json.date30dAgo }}" },
+            { "name": "to_date", "value": "={{ $json.dateYesterday }}" },
+            { "name": "type", "value": "general" },
+            { "name": "unit", "value": "day" },
+            { "name": "on", "value": "properties[\"mp_country_code\"]" },
+            { "name": "where", "value": "properties[\"tipo_material\"]==\"Kalichat\"" },
+            { "name": "limit", "value": "100" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-1150, -100],
+      "id": "mp-kalichat-by-country",
+      "name": "MP: Kalichat - Por país",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "SCzQQv6E5V4sB4Yz",
+          "name": "Mixpanel - SA"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://mixpanel.com/api/2.0/segmentation",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "project_id", "value": "={{ $json.projectId }}" },
+            { "name": "event", "value": "Doc > Descargar" },
+            { "name": "from_date", "value": "={{ $json.date30dAgo }}" },
+            { "name": "to_date", "value": "={{ $json.dateYesterday }}" },
+            { "name": "type", "value": "general" },
+            { "name": "unit", "value": "day" },
+            { "name": "on", "value": "properties[\"mp_country_code\"]" },
+            { "name": "limit", "value": "100" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-1150, 100],
+      "id": "mp-doc-descargar",
+      "name": "MP: Doc Descargar",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "SCzQQv6E5V4sB4Yz",
+          "name": "Mixpanel - SA"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://mixpanel.com/api/2.0/segmentation",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "project_id", "value": "={{ $json.projectId }}" },
+            { "name": "event", "value": "Pago > Paywall visto" },
+            { "name": "from_date", "value": "={{ $json.date30dAgo }}" },
+            { "name": "to_date", "value": "={{ $json.dateYesterday }}" },
+            { "name": "type", "value": "general" },
+            { "name": "unit", "value": "day" },
+            { "name": "on", "value": "properties[\"mp_country_code\"]" },
+            { "name": "limit", "value": "100" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-1150, 300],
+      "id": "mp-paywall",
+      "name": "MP: Paywall Visto",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "SCzQQv6E5V4sB4Yz",
+          "name": "Mixpanel - SA"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://mixpanel.com/api/2.0/segmentation",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "project_id", "value": "={{ $json.projectId }}" },
+            { "name": "event", "value": "Pago > Intento" },
+            { "name": "from_date", "value": "={{ $json.date30dAgo }}" },
+            { "name": "to_date", "value": "={{ $json.dateYesterday }}" },
+            { "name": "type", "value": "general" },
+            { "name": "unit", "value": "day" },
+            { "name": "on", "value": "properties[\"mp_country_code\"]" },
+            { "name": "limit", "value": "100" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-1150, 500],
+      "id": "mp-pago-intento",
+      "name": "MP: Pago Intento",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "SCzQQv6E5V4sB4Yz",
+          "name": "Mixpanel - SA"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://mixpanel.com/api/2.0/segmentation",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "project_id", "value": "={{ $json.projectId }}" },
+            { "name": "event", "value": "Pago > Exito" },
+            { "name": "from_date", "value": "={{ $json.date30dAgo }}" },
+            { "name": "to_date", "value": "={{ $json.dateYesterday }}" },
+            { "name": "type", "value": "general" },
+            { "name": "unit", "value": "day" },
+            { "name": "on", "value": "properties[\"mp_country_code\"]" },
+            { "name": "limit", "value": "100" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [-1150, 700],
+      "id": "mp-pago-exito",
+      "name": "MP: Pago Exito",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "SCzQQv6E5V4sB4Yz",
+          "name": "Mixpanel - SA"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 6
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [-700, 200],
+      "id": "merge-events-v3",
+      "name": "Merge Responses"
+    },
+    {
+      "parameters": {
+        "jsCode": "// COUNTRY_MAP: ISO code → nombre que usa growth_users.country (con tildes).\nconst COUNTRY_MAP = {\n  PE: 'Perú',\n  MX: 'México',\n  CL: 'Chile',\n  CO: 'Colombia',\n  AR: 'Argentina',\n  EC: 'Ecuador',\n  BO: 'Bolivia',\n  VE: 'Venezuela',\n  UY: 'Uruguay',\n  PY: 'Paraguay',\n  DO: 'República Dominicana',\n  CR: 'Costa Rica',\n  GT: 'Guatemala',\n  PA: 'Panamá',\n  HN: 'Honduras',\n  SV: 'El Salvador',\n  NI: 'Nicaragua',\n  CU: 'Cuba',\n  PR: 'Puerto Rico',\n  US: 'Estados Unidos',\n  ES: 'España',\n  BR: 'Brasil',\n  CA: 'Canadá'\n};\n\nfunction mapCountry(code) {\n  if (!code || code === '$overall' || code === 'null' || code === 'undefined') return 'Otros';\n  return COUNTRY_MAP[code] || code; // Si no está mapeado, guarda código ISO\n}\n\nconst iaByCountry      = $('MP: IA Generar - Por país').first().json;\nconst kaliByCountry    = $('MP: Kalichat - Por país').first().json;\nconst docDescargar     = $('MP: Doc Descargar').first().json;\nconst paywall          = $('MP: Paywall Visto').first().json;\nconst pagoIntento      = $('MP: Pago Intento').first().json;\nconst pagoExito        = $('MP: Pago Exito').first().json;\n\nconst rows = [];\n\nfunction pushByCountry(response, eventName) {\n  const values = response?.data?.values || {};\n  for (const [code, dateMap] of Object.entries(values)) {\n    const country = mapCountry(code);\n    for (const [date, count] of Object.entries(dateMap)) {\n      if (!count) continue;\n      rows.push({\n        event_date: date,\n        event_name: eventName,\n        country: country,\n        total_count: count,\n        unique_users: null,\n        properties: { mp_country_code: code }\n      });\n    }\n  }\n}\n\n// Las 6 llamadas, todas por país\npushByCountry(iaByCountry,   'IA > Generar Material');\npushByCountry(kaliByCountry, 'IA > Generar Material :: Kalichat');\npushByCountry(docDescargar,  'Doc > Descargar');\npushByCountry(paywall,       'Pago > Paywall visto');\npushByCountry(pagoIntento,   'Pago > Intento');\npushByCountry(pagoExito,     'Pago > Exito');\n\nreturn rows.map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-500, 200],
+      "id": "transform-events-v3",
+      "name": "Transform to Rows"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://wowvnevmmeqaxcxmmemo.supabase.co/rest/v1/growth_events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "on_conflict",
+              "value": "event_date,event_name,country"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "resolution=merge-duplicates,return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($input.all().map(item => item.json)) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 100,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-250, 200],
+      "id": "upsert-events-v3",
+      "name": "Upsert to Supabase",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "rUyx9H0OxW0A22Qg",
+          "name": "Gestor-tareas-Supabase"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { records_processed: $input.all().length } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 200],
+      "id": "count-events-v3",
+      "name": "Count Records"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://wowvnevmmeqaxcxmmemo.supabase.co/rest/v1/mkt_sync_logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Prefer", "value": "return=minimal" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=[{\n  \"source\": \"mixpanel_events\",\n  \"status\": \"success\",\n  \"records_processed\": {{ $input.all()[0].json.records_processed }},\n  \"started_at\": \"{{ $now.toISO() }}\",\n  \"finished_at\": \"{{ $now.toISO() }}\"\n}]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [250, 200],
+      "id": "log-success-events-v3",
+      "name": "Log Success",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "rUyx9H0OxW0A22Qg",
+          "name": "Gestor-tareas-Supabase"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": { "main": [[{ "node": "Edit Fields", "type": "main", "index": 0 }]] },
+    "Edit Fields": {
+      "main": [[
+        { "node": "MP: IA Generar - Por país", "type": "main", "index": 0 },
+        { "node": "MP: Kalichat - Por país",   "type": "main", "index": 0 },
+        { "node": "MP: Doc Descargar",         "type": "main", "index": 0 },
+        { "node": "MP: Paywall Visto",         "type": "main", "index": 0 },
+        { "node": "MP: Pago Intento",          "type": "main", "index": 0 },
+        { "node": "MP: Pago Exito",            "type": "main", "index": 0 }
+      ]]
+    },
+    "MP: IA Generar - Por país": { "main": [[{ "node": "Merge Responses", "type": "main", "index": 0 }]] },
+    "MP: Kalichat - Por país":   { "main": [[{ "node": "Merge Responses", "type": "main", "index": 1 }]] },
+    "MP: Doc Descargar":         { "main": [[{ "node": "Merge Responses", "type": "main", "index": 2 }]] },
+    "MP: Paywall Visto":         { "main": [[{ "node": "Merge Responses", "type": "main", "index": 3 }]] },
+    "MP: Pago Intento":          { "main": [[{ "node": "Merge Responses", "type": "main", "index": 4 }]] },
+    "MP: Pago Exito":            { "main": [[{ "node": "Merge Responses", "type": "main", "index": 5 }]] },
+    "Merge Responses":   { "main": [[{ "node": "Transform to Rows", "type": "main", "index": 0 }]] },
+    "Transform to Rows": { "main": [[{ "node": "Upsert to Supabase", "type": "main", "index": 0 }]] },
+    "Upsert to Supabase":{ "main": [[{ "node": "Count Records", "type": "main", "index": 0 }]] },
+    "Count Records":     { "main": [[{ "node": "Log Success", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}

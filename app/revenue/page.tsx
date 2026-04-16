@@ -13,9 +13,11 @@ import {
   MegaphoneIcon,
   ChartBarSquareIcon,
   DocumentTextIcon,
+  TableCellsIcon,
 } from '@heroicons/react/24/outline';
 
 import ExecutiveSummary from '@/components/growth/ExecutiveSummary';
+import OperacionalTab from '@/components/growth/OperacionalTab';
 import RevenueTab from '@/components/growth/RevenueTab';
 import RevenueByCountry from '@/components/growth/RevenueByCountry';
 import ChurnRenewal from '@/components/growth/ChurnRenewal';
@@ -26,6 +28,7 @@ import ReportConfig from '@/components/growth/ReportConfig';
 
 const TABS = [
   { id: 'resumen', label: 'Resumen', icon: PresentationChartBarIcon },
+  { id: 'operacional', label: 'Operacional', icon: TableCellsIcon },
   { id: 'revenue', label: 'Revenue', icon: BanknotesIcon },
   { id: 'pais', label: 'Por Pais', icon: GlobeAltIcon },
   { id: 'churn', label: 'Churn & Renovacion', icon: ArrowPathIcon },
@@ -46,6 +49,7 @@ export default function GrowthDashboardPage() {
   const renderTab = () => {
     switch (activeTab) {
       case 'resumen': return <ExecutiveSummary />;
+      case 'operacional': return <OperacionalTab />;
       case 'revenue': return <RevenueTab />;
       case 'pais': return <RevenueByCountry />;
       case 'churn': return <ChurnRenewal />;
