@@ -158,7 +158,7 @@ export default function RevenueTab() {
   // Sync status
   useEffect(() => {
     if (!supabase) return;
-    supabase.from('sync_logs').select('*').eq('source', 'n8n').order('created_at', { ascending: false }).limit(1).single()
+    supabase.from('sync_logs').select('*').eq('source', 'payments_platform').order('created_at', { ascending: false }).limit(1).single()
       .then(({ data }) => {
         if (data) setSyncStatus({ date: data.created_at, count: data.records_processed });
       });

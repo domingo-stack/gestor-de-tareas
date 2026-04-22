@@ -92,6 +92,19 @@ export default function ExecutiveSummary() {
   const [weekStart, setWeekStart] = useState(getCurrentWeekStart);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<SummaryData | null>(null);
+  const [syncStatus, setSyncStatus] = useState<{ users: { date: string; count: number } | null; payments: { date: string; count: number } | null }>({ users: null, payments: null });
+
+  useEffect(() => {
+    if (!supabase) return;
+    supabase.from('sync_logs').select('*').eq('source', 'users_platform').order('created_at', { ascending: false }).limit(1).single()
+      .then(({ data }) => {
+        if (data) setSyncStatus(prev => ({ ...prev, users: { date: data.created_at, count: data.records_processed } }));
+      });
+    supabase.from('sync_logs').select('*').eq('source', 'payments_platform').order('created_at', { ascending: false }).limit(1).single()
+      .then(({ data }) => {
+        if (data) setSyncStatus(prev => ({ ...prev, payments: { date: data.created_at, count: data.records_processed } }));
+      });
+  }, [supabase]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -126,7 +139,25 @@ export default function ExecutiveSummary() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <h2 className="text-lg font-semibold text-gray-800">Resumen Semanal</h2>
+        <div className="flex items-center gap-3 flex-wrap">
+          <h2 className="text-lg font-semibold text-gray-800">Resumen Semanal</h2>
+          {syncStatus.users && (
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 border border-blue-100 rounded-full text-[11px] text-blue-700">
+              <ArrowPathIcon className="w-3 h-3 text-blue-500" />
+              <span className="font-medium">Usuarios: {new Date(syncStatus.users.date).toLocaleDateString()} {new Date(syncStatus.users.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              <span className="w-1 h-1 rounded-full bg-blue-300"></span>
+              <span>+{fmtNum(syncStatus.users.count)}</span>
+            </div>
+          )}
+          {syncStatus.payments && (
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 border border-emerald-100 rounded-full text-[11px] text-emerald-700">
+              <ArrowPathIcon className="w-3 h-3 text-emerald-500" />
+              <span className="font-medium">Pagos: {new Date(syncStatus.payments.date).toLocaleDateString()} {new Date(syncStatus.payments.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+              <span className="w-1 h-1 rounded-full bg-emerald-300"></span>
+              <span>+{fmtNum(syncStatus.payments.count)}</span>
+            </div>
+          )}
+        </div>
         <WeekSelector weekStart={weekStart} onWeekChange={setWeekStart} />
       </div>
 
