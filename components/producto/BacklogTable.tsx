@@ -179,11 +179,6 @@ export default function BacklogTable({ initiatives, onSelect, onUpdate, onCreate
         </div>
       )}
 
-      <button onClick={() => setShowCreate(true)}
-        className="fixed bottom-8 right-8 w-14 h-14 bg-blue-600 text-white rounded-2xl shadow-lg hover:bg-blue-700 hover:shadow-xl hover:scale-105 transition-all flex items-center justify-center z-40"
-        title="Nueva tarea">
-        <PlusIcon className="w-7 h-7" />
-      </button>
     </div>
   )
 }

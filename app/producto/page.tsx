@@ -130,11 +130,11 @@ export default function ProductoPage() {
   }, [supabase, user, backlogItems])
 
   const handleComplete = useCallback(async (id: number) => {
-    await handleUpdate(id, { phase: 'finalized', status: 'completed' } as any)
+    await handleUpdate(id, { phase: 'finalized', status: 'completed', completed_at: new Date().toISOString() } as any)
   }, [handleUpdate])
 
   const handleReopen = useCallback(async (id: number) => {
-    await handleUpdate(id, { phase: 'backlog', status: 'pending' } as any)
+    await handleUpdate(id, { phase: 'backlog', status: 'pending', completed_at: null } as any)
     setActiveTab('backlog')
   }, [handleUpdate])
 
