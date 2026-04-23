@@ -1,173 +1,66 @@
 'use client'
 
-import { useCallback, useState } from 'react'
-import { DndContext, DragEndEvent, DragOverlay, DragStartEvent, rectIntersection, useSensor, useSensors, PointerSensor } from '@dnd-kit/core'
-import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { useDroppable } from '@dnd-kit/core'
+import { ArchiveBoxIcon, ArrowUturnLeftIcon, CheckIcon } from '@heroicons/react/24/outline'
 import { ProductInitiative } from '@/lib/types'
-import InitiativeCard from './InitiativeCard'
 
-const COLUMNS = [
-  { id: 'design', label: 'En diseño' },
-  { id: 'running', label: 'En progreso' },
-  { id: 'completed', label: 'Terminado' },
-]
-
-interface RoadmapKanbanProps {
+interface Props {
   initiatives: ProductInitiative[]
-  onSelect: (initiative: ProductInitiative) => void
-  onUpdate: (id: number, updates: Partial<ProductInitiative>) => Promise<void>
-  onFinalize?: (initiative: ProductInitiative) => void
-  onCreate?: (title: string) => Promise<void>
-  members: { user_id: string; email: string; first_name?: string }[]
+  onSelect: (i: ProductInitiative) => void
+  onReopen: (id: number) => void
 }
 
-export default function RoadmapKanban({ initiatives, onSelect, onUpdate, onFinalize, onCreate, members }: RoadmapKanbanProps) {
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
-  const [activeInitiative, setActiveInitiative] = useState<ProductInitiative | null>(null)
-  const [quickCreateTitle, setQuickCreateTitle] = useState('')
-  const [showQuickCreate, setShowQuickCreate] = useState(false)
+export default function RoadmapKanban({ initiatives, onSelect, onReopen }: Props) {
+  const sorted = [...initiatives].sort((a, b) =>
+    new Date(b.updated_at || b.created_at).getTime() - new Date(a.updated_at || a.created_at).getTime()
+  )
 
-  const handleDragStart = (event: DragStartEvent) => {
-    const item = initiatives.find(i => i.id === Number(event.active.id))
-    if (item) setActiveInitiative(item)
-  }
-
-  const handleDragEnd = useCallback(async (event: DragEndEvent) => {
-    setActiveInitiative(null)
-    const { active, over } = event
-    if (!over) return
-
-    const initiativeId = Number(active.id)
-    const newStatus = String(over.id)
-
-    if (!COLUMNS.find(c => c.id === newStatus)) return
-
-    const item = initiatives.find(i => i.id === initiativeId)
-    if (!item || item.status === newStatus) return
-
-    await onUpdate(initiativeId, { status: newStatus as ProductInitiative['status'] })
-
-    // Auto-trigger finalize when dragged to completed
-    if (newStatus === 'completed' && onFinalize) {
-      const updated = { ...item, status: 'completed' as const }
-      onFinalize(updated)
-    }
-  }, [initiatives, onUpdate, onFinalize])
-
-  const handleQuickCreate = async () => {
-    if (!quickCreateTitle.trim() || !onCreate) return
-    await onCreate(quickCreateTitle.trim())
-    setQuickCreateTitle('')
-    setShowQuickCreate(false)
+  if (sorted.length === 0) {
+    return (
+      <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200">
+        <ArchiveBoxIcon className="w-14 h-14 text-gray-200 mx-auto mb-4" />
+        <p className="text-gray-500 font-medium">No hay tareas finalizadas</p>
+        <p className="text-gray-300 text-sm mt-1">Las tareas completadas aparecerán aquí</p>
+      </div>
+    )
   }
 
   return (
     <div>
-      {/* Quick create bar */}
-      {onCreate && (
-        <div className="mb-4">
-          {showQuickCreate ? (
-            <div className="flex gap-2 items-center">
-              <input
-                type="text"
-                value={quickCreateTitle}
-                onChange={e => setQuickCreateTitle(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleQuickCreate()}
-                placeholder="Nombre de la tarea..."
-                className="flex-1 border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                autoFocus
-              />
-              <button
-                onClick={handleQuickCreate}
-                disabled={!quickCreateTitle.trim()}
-                className="px-4 py-2 rounded-md text-white text-sm font-medium transition hover:opacity-90 disabled:opacity-50"
-                style={{ backgroundColor: '#3c527a' }}
-              >
-                Crear
-              </button>
-              <button
-                onClick={() => { setShowQuickCreate(false); setQuickCreateTitle('') }}
-                className="px-3 py-2 rounded-md text-sm text-gray-500 hover:bg-gray-100"
-              >
-                Cancelar
-              </button>
+      <p className="text-sm text-gray-400 mb-4">
+        {sorted.length} {sorted.length === 1 ? 'tarea finalizada' : 'tareas finalizadas'}
+      </p>
+      <div className="space-y-2">
+        {sorted.map(item => (
+          <div key={item.id}
+            className="group flex items-center gap-4 px-5 py-4 bg-white rounded-2xl border border-gray-100 hover:border-gray-200 hover:shadow-md transition-all duration-200">
+
+            {/* Check icon */}
+            <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+              <CheckIcon className="w-4 h-4 text-green-600 stroke-[3]" />
             </div>
-          ) : (
-            <button
-              onClick={() => setShowQuickCreate(true)}
-              className="flex items-center gap-1.5 text-sm font-medium transition hover:opacity-80"
-              style={{ color: '#3c527a' }}
-            >
-              <span className="text-lg leading-none">+</span> Nueva tarea
+
+            {/* Content */}
+            <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onSelect(item)}>
+              <p className="text-[15px] font-medium text-gray-500 line-through decoration-gray-300">{item.title}</p>
+              {item.problem_statement && (
+                <p className="text-[13px] text-gray-300 mt-0.5 truncate">{item.problem_statement}</p>
+              )}
+            </div>
+
+            {/* Date */}
+            <span className="text-xs text-gray-300 flex-shrink-0 tabular-nums">
+              {new Date(item.updated_at || item.created_at).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })}
+            </span>
+
+            {/* Reopen */}
+            <button onClick={() => onReopen(item.id)}
+              className="p-2 rounded-xl text-gray-200 hover:text-blue-500 hover:bg-blue-50 opacity-0 group-hover:opacity-100 transition-all duration-200"
+              title="Reabrir tarea">
+              <ArrowUturnLeftIcon className="w-4 h-4" />
             </button>
-          )}
-        </div>
-      )}
-
-    <DndContext sensors={sensors} collisionDetection={rectIntersection} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {COLUMNS.map(col => {
-          const items = initiatives.filter(i => i.status === col.id)
-          return (
-            <KanbanColumn key={col.id} id={col.id} label={col.label} count={items.length}>
-              <SortableContext items={items.map(i => i.id)} strategy={verticalListSortingStrategy}>
-                <div className="space-y-2 min-h-[100px] max-h-[65vh] overflow-y-auto p-1 pr-2">
-                  {items.length > 0 ? (
-                    items.map(item => (
-                      <InitiativeCard
-                        key={item.id}
-                        initiative={item}
-                        onClick={() => onSelect(item)}
-                        mode="roadmap"
-                        members={members}
-                        onFinalize={
-                          item.status === 'completed' && item.phase !== 'finalized' && onFinalize
-                            ? () => onFinalize(item)
-                            : undefined
-                        }
-                      />
-                    ))
-                  ) : (
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center h-full flex items-center justify-center min-h-[100px]">
-                      <p className="text-sm text-gray-500">Arrastra una tarjeta aquí</p>
-                    </div>
-                  )}
-                </div>
-              </SortableContext>
-            </KanbanColumn>
-          )
-        })}
+          </div>
+        ))}
       </div>
-
-      <DragOverlay>
-        {activeInitiative ? (
-          <InitiativeCard
-            initiative={activeInitiative}
-            onClick={() => {}}
-            mode="roadmap"
-            members={members}
-          />
-        ) : null}
-      </DragOverlay>
-    </DndContext>
-    </div>
-  )
-}
-
-function KanbanColumn({ id, label, count, children }: { id: string; label: string; count: number; children: React.ReactNode }) {
-  const { setNodeRef, isOver } = useDroppable({ id })
-
-  return (
-    <div
-      ref={setNodeRef}
-      className="rounded-lg p-4 flex flex-col transition-colors"
-      style={{ backgroundColor: isOver ? '#EBF0F7' : '#F9FAFB' }}
-    >
-      <h3 className="font-bold text-lg mb-4" style={{ color: '#383838' }}>
-        {label} ({count})
-      </h3>
-      {children}
     </div>
   )
 }

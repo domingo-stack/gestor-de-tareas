@@ -1,210 +1,189 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+import { PlusIcon, Bars2Icon, ClipboardDocumentListIcon } from '@heroicons/react/24/outline'
+import { CheckCircleIcon } from '@heroicons/react/24/solid'
+import {
+  DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors,
+} from '@dnd-kit/core'
+import {
+  arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { toast } from 'sonner'
 import { ProductInitiative } from '@/lib/types'
-import QuickCreateRow from './QuickCreateRow'
-import { ArrowUpCircleIcon } from '@heroicons/react/24/outline'
+import { useAuth } from '@/context/AuthContext'
 
-const TYPE_BADGES: Record<string, { label: string; color: string; bg: string }> = {
-  experiment: { label: 'Experimento', color: '#7c3aed', bg: '#f5f3ff' },
-  feature: { label: 'Feature', color: '#2563eb', bg: '#eff6ff' },
-  tech_debt: { label: 'Tech Debt', color: '#d97706', bg: '#fffbeb' },
-  bug: { label: 'Bug', color: '#dc2626', bg: '#fef2f2' },
-}
+const TITLE_MAX = 80
 
-const RICE_TOOLTIPS: Record<string, string> = {
-  rice_reach: 'Reach (Alcance): ¿A cuántas personas impactará esta iniciativa? 1 = muy pocas, 10 = toda la base.',
-  rice_impact: 'Impact (Impacto): ¿Cuánto contribuye al objetivo? 1 = mínimo, 10 = transformacional.',
-  rice_confidence: 'Confidence (Confianza): ¿Qué tan seguros estamos? 1 = pura intuición, 10 = datos sólidos.',
-  rice_effort: 'Effort (Esfuerzo): ¿Cuánto trabajo requiere? 1 = muy poco, 10 = trimestre completo.',
-}
-
-type SortField = 'rice_score' | 'rice_reach' | 'rice_impact' | 'rice_confidence' | 'rice_effort' | 'title'
-type SortDir = 'asc' | 'desc'
-
-interface BacklogTableProps {
+interface Props {
   initiatives: ProductInitiative[]
-  onSelect: (initiative: ProductInitiative) => void
-  onUpdate: (id: number, updates: Partial<ProductInitiative>) => Promise<void>
-  onCreate: (title: string, problemStatement: string) => Promise<void>
-  onPromote: (initiative: ProductInitiative) => void
+  onSelect: (i: ProductInitiative) => void
+  onUpdate: (id: number, updates: Partial<ProductInitiative>) => void
+  onCreate: (title: string, description: string) => void
+  onComplete: (id: number) => void
 }
 
-export default function BacklogTable({ initiatives, onSelect, onUpdate, onCreate, onPromote }: BacklogTableProps) {
-  const [sortField, setSortField] = useState<SortField>('rice_score')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
-
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')
-    } else {
-      setSortField(field)
-      setSortDir('desc')
-    }
-  }
-
-  const computeRice = (item: ProductInitiative) => {
-    const effort = item.rice_effort > 0 ? item.rice_effort : 1
-    return (item.rice_reach * item.rice_impact * item.rice_confidence) / effort
-  }
-
-  const sorted = [...initiatives].sort((a, b) => {
-    if (sortField === 'rice_score') {
-      const diff = computeRice(a) - computeRice(b)
-      return sortDir === 'asc' ? diff : -diff
-    }
-    const aVal = a[sortField] ?? 0
-    const bVal = b[sortField] ?? 0
-    if (typeof aVal === 'string' && typeof bVal === 'string') {
-      return sortDir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal)
-    }
-    return sortDir === 'asc' ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal)
-  })
-
-  const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortField !== field) return <span className="text-gray-300 ml-1">↕</span>
-    return <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>
-  }
+function SortableItem({ item, onSelect, onComplete, index }: {
+  item: ProductInitiative; onSelect: (i: ProductInitiative) => void; onComplete: (id: number) => void; index: number
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
 
   return (
-    <div className="bg-white rounded-lg shadow-md">
-      <div className="overflow-x-auto" style={{ overflow: 'visible' }}>
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b">
-            <tr>
-              <th
-                className="text-left p-4 font-semibold text-gray-600 cursor-pointer hover:text-gray-900 select-none"
-                onClick={() => handleSort('title')}
-              >
-                Título <SortIcon field="title" />
-              </th>
-              <th className="text-center p-4 font-semibold text-gray-600">Tipo</th>
-              {(['rice_reach', 'rice_impact', 'rice_confidence', 'rice_effort'] as const).map(field => (
-                <th
-                  key={field}
-                  className="text-center p-4 font-semibold text-gray-600 cursor-pointer hover:text-gray-900 select-none"
-                  onClick={() => handleSort(field)}
-                >
-                  <div className="relative inline-block group">
-                    {field.replace('rice_', '').charAt(0).toUpperCase() + field.replace('rice_', '').slice(1)}
-                    <SortIcon field={field} />
-                    {/* Tooltip */}
-                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-60 p-2.5 bg-gray-800 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all pointer-events-none z-50 font-normal text-left leading-relaxed shadow-lg">
-                      {RICE_TOOLTIPS[field]}
-                      <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-gray-800" />
-                    </div>
-                  </div>
-                </th>
-              ))}
-              <th
-                className="text-center p-4 font-semibold text-gray-600 cursor-pointer hover:text-gray-900 select-none"
-                onClick={() => handleSort('rice_score')}
-              >
-                RICE <SortIcon field="rice_score" />
-              </th>
-              <th className="text-center p-4 font-semibold text-gray-600 w-10"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map(item => {
-              const badge = TYPE_BADGES[item.item_type] || TYPE_BADGES.feature
-              const score = computeRice(item)
-              return (
-                <tr key={item.id} className="border-b hover:bg-gray-50">
-                  <td className="p-4">
-                    <button
-                      onClick={() => onSelect(item)}
-                      className="text-left font-medium hover:underline"
-                      style={{ color: '#3c527a' }}
-                    >
-                      {item.title}
-                    </button>
-                  </td>
-                  <td className="p-4 text-center">
-                    <span
-                      className="text-xs px-2 py-1 rounded-full font-medium whitespace-nowrap"
-                      style={{ color: badge.color, backgroundColor: badge.bg }}
-                    >
-                      {badge.label}
-                    </span>
-                  </td>
-                  <EditableCell value={item.rice_reach} onSave={v => onUpdate(item.id, { rice_reach: v })} />
-                  <EditableCell value={item.rice_impact} onSave={v => onUpdate(item.id, { rice_impact: v })} />
-                  <EditableCell value={item.rice_confidence} onSave={v => onUpdate(item.id, { rice_confidence: v })} />
-                  <EditableCell value={item.rice_effort} onSave={v => onUpdate(item.id, { rice_effort: v })} />
-                  <td className="p-4 text-center">
-                    <span className="font-bold text-lg" style={{ color: '#ff8080' }}>
-                      {score.toFixed(1)}
-                    </span>
-                  </td>
-                  <td className="p-4 text-center">
-                    <button
-                      onClick={() => onPromote(item)}
-                      className="p-1.5 rounded-md text-gray-400 hover:text-[#3c527a] hover:bg-blue-50 transition"
-                      title={item.item_type === 'experiment' ? 'Promover a Experimentos' : 'Promover a Roadmap'}
-                    >
-                      <ArrowUpCircleIcon className="h-5 w-5" />
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-            {sorted.length === 0 && (
-              <tr>
-                <td colSpan={8} className="p-8 text-center text-gray-400">
-                  No hay ideas en el backlog. Crea la primera abajo.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+    <div ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
+      className={`group flex items-center gap-4 px-5 py-3.5 bg-white rounded-2xl border transition-all duration-200 ${
+        isDragging ? 'shadow-xl border-blue-200 z-10' : 'border-gray-100 hover:border-gray-200 hover:shadow-md'
+      }`}>
+      <div className="flex flex-col items-center gap-0.5 flex-shrink-0" {...attributes} {...listeners}>
+        <span className="text-[10px] font-bold text-gray-300 tabular-nums">{index + 1}</span>
+        <Bars2Icon className="w-4 h-4 text-gray-300 group-hover:text-gray-400 cursor-grab active:cursor-grabbing touch-none" />
       </div>
-
-      <QuickCreateRow onCreate={onCreate} />
+      <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onSelect(item)}>
+        <p className="text-sm font-medium text-gray-800 leading-snug truncate">{item.title}</p>
+        {item.problem_statement && (
+          <p className="text-xs text-gray-400 truncate mt-0.5">{item.problem_statement}</p>
+        )}
+      </div>
+      <button onClick={() => onComplete(item.id)}
+        className="p-1.5 rounded-full text-gray-200 hover:text-green-500 hover:bg-green-50 transition-all duration-200 flex-shrink-0"
+        title="Completar tarea">
+        <CheckCircleIcon className="w-6 h-6" />
+      </button>
     </div>
   )
 }
 
-function EditableCell({ value, onSave }: { value: number; onSave: (v: number) => void }) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(String(value))
+export default function BacklogTable({ initiatives, onSelect, onUpdate, onCreate, onComplete }: Props) {
+  const { supabase } = useAuth()
+  const [showCreate, setShowCreate] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const [newDesc, setNewDesc] = useState('')
+  const [localItems, setLocalItems] = useState<ProductInitiative[]>([])
 
-  const handleBlur = () => {
-    setEditing(false)
-    const num = parseInt(draft)
-    if (!isNaN(num) && num >= 1 && num <= 10 && num !== value) {
-      onSave(num)
-    } else {
-      setDraft(String(value))
-    }
+  // Sync local state from props, sorted by manual_order
+  useEffect(() => {
+    const sorted = [...initiatives].sort((a, b) => ((a as any).manual_order || 0) - ((b as any).manual_order || 0))
+    setLocalItems(sorted)
+  }, [initiatives])
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  )
+
+  const handleDragEnd = useCallback(async (event: any) => {
+    const { active, over } = event
+    if (!active || !over || active.id === over.id) return
+
+    setLocalItems(prev => {
+      const oldIndex = prev.findIndex(i => i.id === active.id)
+      const newIndex = prev.findIndex(i => i.id === over.id)
+      const reordered = arrayMove(prev, oldIndex, newIndex)
+
+      // Persist to DB in background
+      if (supabase) {
+        reordered.forEach((item, idx) => {
+          supabase.from('product_initiatives').update({ manual_order: idx }).eq('id', item.id)
+        })
+      }
+
+      return reordered
+    })
+  }, [supabase])
+
+  const handleCreate = () => {
+    if (!newTitle.trim()) return
+    onCreate(newTitle.trim().slice(0, TITLE_MAX), newDesc.trim())
+    setNewTitle('')
+    setNewDesc('')
+    setShowCreate(false)
+    toast.success('Tarea creada')
   }
 
-  if (editing) {
-    return (
-      <td className="p-4 text-center">
-        <select
-          value={draft}
-          onChange={e => { setDraft(e.target.value) }}
-          onBlur={handleBlur}
-          className="w-16 text-center border rounded px-1 py-0.5 text-sm"
-          autoFocus
-        >
-          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
-            <option key={n} value={n}>{n}</option>
-          ))}
-        </select>
-      </td>
-    )
+  const handleComplete = (id: number) => {
+    setLocalItems(prev => prev.filter(i => i.id !== id))
+    onComplete(id)
+    toast.success('Tarea completada')
   }
 
   return (
-    <td className="p-4 text-center">
-      <button
-        onClick={() => { setDraft(String(value || 1)); setEditing(true) }}
-        className="hover:bg-gray-100 px-2 py-0.5 rounded cursor-pointer text-gray-700 min-w-[28px]"
-      >
-        {value || '-'}
+    <div className="relative">
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm text-gray-400">
+          {localItems.length} {localItems.length === 1 ? 'tarea pendiente' : 'tareas pendientes'}
+        </p>
+        <button onClick={() => setShowCreate(true)}
+          className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-xl hover:bg-blue-100 transition-colors">
+          <PlusIcon className="w-4 h-4" /> Nueva tarea
+        </button>
+      </div>
+
+      {localItems.length === 0 ? (
+        <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200">
+          <ClipboardDocumentListIcon className="w-14 h-14 text-gray-200 mx-auto mb-4" />
+          <p className="text-gray-500 font-medium">Sin tareas pendientes</p>
+          <p className="text-gray-300 text-sm mt-1">Crea una tarea para empezar</p>
+          <button onClick={() => setShowCreate(true)}
+            className="mt-5 inline-flex items-center gap-1.5 px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 transition-colors">
+            <PlusIcon className="w-4 h-4" /> Crear tarea
+          </button>
+        </div>
+      ) : (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={localItems.map(i => i.id)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-2">
+              {localItems.map((item, idx) => (
+                <SortableItem key={item.id} item={item} onSelect={onSelect} onComplete={handleComplete} index={idx} />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      )}
+
+      {showCreate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowCreate(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5 border border-gray-100" onClick={e => e.stopPropagation()}>
+            <div>
+              <h3 className="text-lg font-bold text-gray-900">Nueva tarea</h3>
+              <p className="text-sm text-gray-400 mt-0.5">Agrega una tarea al backlog</p>
+            </div>
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-gray-500">Nombre</label>
+                <span className={`text-[10px] tabular-nums ${newTitle.length > TITLE_MAX ? 'text-red-500' : 'text-gray-300'}`}>
+                  {newTitle.length}/{TITLE_MAX}
+                </span>
+              </div>
+              <input value={newTitle} onChange={e => setNewTitle(e.target.value.slice(0, TITLE_MAX + 10))}
+                onKeyDown={e => { if (e.key === 'Enter' && newTitle.trim()) handleCreate() }}
+                placeholder="¿Qué necesitas hacer?" autoFocus
+                className="w-full text-sm border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all" />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Descripción <span className="text-gray-300">(opcional)</span></label>
+              <textarea value={newDesc} onChange={e => setNewDesc(e.target.value)}
+                placeholder="Contexto, problema o detalles..." rows={3}
+                className="w-full text-sm border border-gray-200 rounded-xl px-4 py-3 resize-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all" />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => setShowCreate(false)}
+                className="px-5 py-2.5 text-sm text-gray-500 hover:text-gray-700 rounded-xl hover:bg-gray-50">Cancelar</button>
+              <button onClick={handleCreate} disabled={!newTitle.trim() || newTitle.length > TITLE_MAX}
+                className="px-6 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 disabled:opacity-40 transition-colors shadow-sm">
+                Crear tarea
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <button onClick={() => setShowCreate(true)}
+        className="fixed bottom-8 right-8 w-14 h-14 bg-blue-600 text-white rounded-2xl shadow-lg hover:bg-blue-700 hover:shadow-xl hover:scale-105 transition-all flex items-center justify-center z-40"
+        title="Nueva tarea">
+        <PlusIcon className="w-7 h-7" />
       </button>
-    </td>
+    </div>
   )
 }
