@@ -14,9 +14,11 @@ import {
   ChartBarSquareIcon,
   DocumentTextIcon,
   TableCellsIcon,
+  StarIcon,
 } from '@heroicons/react/24/outline';
 
 import ExecutiveSummary from '@/components/growth/ExecutiveSummary';
+import NsmAnalysis from '@/components/growth/NsmAnalysis';
 import OperacionalTab from '@/components/growth/OperacionalTab';
 import RevenueTab from '@/components/growth/RevenueTab';
 import RevenueByCountry from '@/components/growth/RevenueByCountry';
@@ -28,6 +30,7 @@ import ReportConfig from '@/components/growth/ReportConfig';
 
 const TABS = [
   { id: 'resumen', label: 'Resumen', icon: PresentationChartBarIcon },
+  { id: 'nsm', label: 'NSM (7+)', icon: StarIcon },
   { id: 'operacional', label: 'Operacional', icon: TableCellsIcon },
   { id: 'revenue', label: 'Revenue', icon: BanknotesIcon },
   { id: 'pais', label: 'Por Pais', icon: GlobeAltIcon },
@@ -49,6 +52,7 @@ export default function GrowthDashboardPage() {
   const renderTab = () => {
     switch (activeTab) {
       case 'resumen': return <ExecutiveSummary />;
+      case 'nsm': return <NsmAnalysis />;
       case 'operacional': return <OperacionalTab />;
       case 'revenue': return <RevenueTab />;
       case 'pais': return <RevenueByCountry />;

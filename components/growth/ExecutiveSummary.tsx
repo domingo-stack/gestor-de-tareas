@@ -11,6 +11,7 @@ import {
   CurrencyDollarIcon,
   ArrowPathIcon,
   GlobeAltIcon,
+  StarIcon,
 } from '@heroicons/react/24/outline';
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -52,6 +53,9 @@ interface SummaryData {
   activation_pct: number;
   conversion_pct: number;
   has_growth_users: boolean;
+  nsm_activated_week: number;
+  nsm_total: number;
+  nsm_prev_total: number;
   weekly_trend: WeeklyTrend[];
   country_registrations: CountryRegistration[];
 }
@@ -92,6 +96,7 @@ export default function ExecutiveSummary() {
   const [weekStart, setWeekStart] = useState(getCurrentWeekStart);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<SummaryData | null>(null);
+  const [nsmDirect, setNsmDirect] = useState<{ total: number; weekNew: number; prevWeekNew: number }>({ total: 0, weekNew: 0, prevWeekNew: 0 });
   const [syncStatus, setSyncStatus] = useState<{ users: { date: string; count: number } | null; payments: { date: string; count: number } | null }>({ users: null, payments: null });
 
   useEffect(() => {
@@ -128,11 +133,42 @@ export default function ExecutiveSummary() {
     fetchData();
   }, [supabase, weekStart]);
 
+  // NSM: traer dato directo de growth_users (no depende del RPC)
+  useEffect(() => {
+    if (!supabase) return;
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const prevWeekStart = new Date(weekStart);
+    prevWeekStart.setDate(prevWeekStart.getDate() - 7);
+    const prevWeekEnd = new Date(prevWeekStart);
+    prevWeekEnd.setDate(prevWeekEnd.getDate() + 6);
+
+    Promise.all([
+      supabase.from('growth_users').select('id', { count: 'exact', head: true })
+        .gte('eventos_valor', 7),
+      supabase.from('growth_users').select('id', { count: 'exact', head: true })
+        .gte('eventos_valor', 7)
+        .gte('created_date', toDateStr(weekStart))
+        .lte('created_date', toDateStr(weekEnd)),
+      supabase.from('growth_users').select('id', { count: 'exact', head: true })
+        .gte('eventos_valor', 7)
+        .gte('created_date', toDateStr(prevWeekStart))
+        .lte('created_date', toDateStr(prevWeekEnd)),
+    ]).then(([totalRes, weekRes, prevWeekRes]) => {
+      setNsmDirect({
+        total: totalRes.count || 0,
+        weekNew: weekRes.count || 0,
+        prevWeekNew: prevWeekRes.count || 0,
+      });
+    });
+  }, [supabase, weekStart]);
+
   const d = data || {
     revenue: 0, prev_revenue: 0, rev_growth_pct: 0, rev_growth_positive: true,
     revenue_new: 0, revenue_recurring: 0, transactions: 0, arpu: 0,
     total_users: 0, new_users: 0, paid_users: 0, activated_users: 0,
     activation_pct: 0, conversion_pct: 0, has_growth_users: false,
+    nsm_activated_week: 0, nsm_total: 0, nsm_prev_total: 0,
     weekly_trend: [], country_registrations: [],
   };
 
@@ -172,16 +208,55 @@ export default function ExecutiveSummary() {
         </div>
       </div>
 
-      {/* Users KPIs — 3 cards + total inline */}
+      {/* Users KPIs + NSM Highlight */}
       {d.has_growth_users ? (
-        <div>
-          <div className="flex items-baseline gap-3 mb-3">
+        <div className="space-y-4">
+          <div className="flex items-baseline gap-3">
             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Usuarios</h3>
             <span className="text-sm text-gray-400">{fmtNum(d.total_users)} registrados</span>
           </div>
+
+          {/* NSM Hero Card */}
+          <div className="relative overflow-hidden bg-gradient-to-r from-green-600 to-emerald-600 rounded-2xl p-5 text-white shadow-lg shadow-green-600/20">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -translate-y-8 translate-x-8" />
+            <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/5 rounded-full translate-y-6 -translate-x-6" />
+            <div className="relative flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-xl bg-white/20 flex items-center justify-center backdrop-blur-sm">
+                  <StarIcon className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-white/80">North Star Metric — Activados 7+ esta semana</p>
+                  <div className="flex items-baseline gap-3 mt-0.5">
+                    <p className="text-4xl font-bold">+{fmtNum(nsmDirect.weekNew)}</p>
+                    {nsmDirect.prevWeekNew > 0 && (() => {
+                      const pct = Math.round(((nsmDirect.weekNew - nsmDirect.prevWeekNew) / nsmDirect.prevWeekNew) * 100 * 10) / 10;
+                      return (
+                        <span className={`text-sm font-semibold px-2 py-0.5 rounded-full ${pct >= 0 ? 'bg-green-400/30 text-green-100' : 'bg-red-400/30 text-red-200'}`}>
+                          {pct >= 0 ? '+' : ''}{pct}% vs sem. ant.
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-6">
+                <div className="text-right">
+                  <p className="text-xs text-white/70">Total acumulado</p>
+                  <p className="text-lg font-semibold">{fmtNum(nsmDirect.total)}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-white/70">% de la base</p>
+                  <p className="text-lg font-semibold">{nsmDirect.total > 0 ? fmtPct((nsmDirect.total / (d.total_users || 1)) * 100) : '—'}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Regular KPI cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <KpiCard title="Nuevos Registros" value={fmtNum(d.new_users)} subtext="Esta semana" icon={UserPlusIcon} colorClass="bg-blue-500" loading={loading} />
-            <KpiCard title="% Activacion" value={fmtPct(d.activation_pct)} subtext="5+ eventos de valor" icon={ArrowTrendingUpIcon} colorClass="bg-amber-500" loading={loading} />
+            <KpiCard title="% Activacion (7+)" value={fmtPct(d.activation_pct)} subtext="7+ eventos de valor (NSM)" icon={ArrowTrendingUpIcon} colorClass="bg-amber-500" loading={loading} />
             <KpiCard title="% Conversion" value={fmtPct(d.conversion_pct)} subtext="Registrados que pagaron" icon={ChartBarIcon} colorClass="bg-red-500" loading={loading} />
           </div>
         </div>

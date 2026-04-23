@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { ExclamationTriangleIcon, EyeIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
+import { ExclamationTriangleIcon, EyeIcon, ChevronDownIcon, StarIcon } from '@heroicons/react/24/outline';
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
@@ -31,7 +31,7 @@ interface WeeklyRow {
   ev2: number;
   ev3: number;
   ev4: number;
-  activated: number; // 5+ eventos de valor
+  activated: number; // 7+ eventos de valor (NSM)
   ev6: number;
   ev7: number;
   ev8: number;
@@ -74,9 +74,9 @@ const FUNNEL_COLORS = [
   { bg: '#7C3AED', light: '#F5F3FF' }, // violet — 2+
   { bg: '#8B5CF6', light: '#F5F3FF' }, // violet-500 — 3+
   { bg: '#9333EA', light: '#FAF5FF' }, // purple — 4+
-  { bg: '#A855F7', light: '#FAF5FF' }, // purple-light — 5+ (activados)
+  { bg: '#A855F7', light: '#FAF5FF' }, // purple-light — 5+
   { bg: '#C026D3', light: '#FDF4FF' }, // fuchsia-600 — 6+
-  { bg: '#D946EF', light: '#FDF4FF' }, // fuchsia — 7+
+  { bg: '#16A34A', light: '#F0FDF4' }, // green-600 — 7+ (NSM / Activados)
   { bg: '#E879F9', light: '#FDF4FF' }, // fuchsia-300 — 8+
   { bg: '#EC4899', light: '#FDF2F8' }, // pink — 9+
   { bg: '#F43F5E', light: '#FFF1F2' }, // rose — 10+
@@ -90,9 +90,9 @@ const EVENTOS_OPTIONS: { value: string; label: string }[] = [
   { value: '2', label: '2 eventos' },
   { value: '3', label: '3 eventos' },
   { value: '4', label: '4 eventos' },
-  { value: '5+', label: '5+ eventos' },
+  { value: '5', label: '5 eventos' },
   { value: '6', label: '6 eventos' },
-  { value: '7', label: '7 eventos' },
+  { value: '7+', label: '7+ eventos (NSM)' },
   { value: '8', label: '8 eventos' },
   { value: '9', label: '9 eventos' },
   { value: '10+', label: '10+ eventos' },
@@ -210,9 +210,9 @@ export default function ConversionFunnel() {
   const planOptions = data.plan_options || [];
 
   // Calculate key conversion metrics for summary cards
-  // Funnel: [Registrados, 1+, 2+, 3+, 4+, 5+(activ), 6+, 7+, 8+, 9+, 10+, Pagaron]
+  // Funnel: [Registrados, 1+, 2+, 3+, 4+, 5+, 6+, 7+(NSM activ), 8+, 9+, 10+, Pagaron]
   const totalReg = funnelWeek[0]?.count || 0;
-  const activatedCount = funnelWeek[5]?.count || 0; // 5+ = index 5
+  const activatedCount = funnelWeek[7]?.count || 0; // 7+ = index 7 (NSM)
   const paidCount = funnelWeek[funnelWeek.length - 1]?.count || 0;
   const activationRate = totalReg > 0 ? (activatedCount / totalReg) * 100 : 0;
   const conversionRate = totalReg > 0 ? (paidCount / totalReg) * 100 : 0;
@@ -258,9 +258,9 @@ export default function ConversionFunnel() {
           {funnelWeek.map((step, i) => {
             const color = FUNNEL_COLORS[i] || FUNNEL_COLORS[0];
             const widthPct = Math.max(step.pctOfTotal * 0.82 + 18, 18);
-            const isActivated = i === 5; // 5+ eventos = index 5
+            const isActivated = i === 7; // 7+ eventos = index 7 (NSM)
             const isPaid = i === funnelWeek.length - 1;
-            const showConvToPaid = i >= 5 && i <= 7 && !isPaid; // Solo 5+, 6+, 7+ (después supera 100%)
+            const showConvToPaid = i >= 7 && i <= 9 && !isPaid; // Solo 7+, 8+, 9+ (después supera 100%)
             const convToPaidPct = showConvToPaid && step.count > 0
               ? (paidCount / step.count) * 100
               : 0;
@@ -282,38 +282,41 @@ export default function ConversionFunnel() {
                 {i > 0 && dropOff === 0 && <div className="h-1" />}
 
                 <div
-                  className="relative flex items-center justify-between px-5 transition-all duration-500"
+                  className="relative flex items-center justify-between px-5 transition-all duration-500 group"
                   style={{
                     width: `${widthPct}%`,
-                    minHeight: '44px',
+                    minHeight: isActivated || isPaid ? '50px' : '42px',
                     backgroundColor: color.bg,
-                    borderRadius: i === 0 ? '12px 12px 4px 4px' : isPaid ? '4px 4px 12px 12px' : '4px',
-                    border: isActivated ? '2px solid rgba(255,255,255,0.5)' : undefined,
+                    borderRadius: i === 0 ? '14px 14px 6px 6px' : isPaid ? '6px 6px 14px 14px' : '6px',
+                    border: isActivated ? '2px solid rgba(255,255,255,0.6)' : isPaid ? '2px solid rgba(255,255,255,0.4)' : '1px solid rgba(255,255,255,0.1)',
                     boxShadow: isActivated
-                      ? `0 0 0 2px ${color.bg}, inset 0 1px 0 rgba(255,255,255,0.2)`
+                      ? `0 0 0 3px ${color.bg}40, 0 2px 8px ${color.bg}50`
                       : isPaid
-                        ? `0 4px 12px ${color.bg}40`
-                        : undefined,
+                        ? `0 4px 16px ${color.bg}50`
+                        : `0 1px 3px ${color.bg}20`,
                   }}
                 >
-                  <div className="absolute inset-0 bg-gradient-to-b from-white/15 to-transparent rounded-[inherit]" />
+                  <div className="absolute inset-0 bg-gradient-to-b from-white/20 to-transparent rounded-[inherit]" />
                   <div className="relative flex items-center gap-2">
                     {isActivated && (
-                      <span className="text-[9px] uppercase tracking-wider font-bold text-white/70 bg-white/20 px-1.5 py-0.5 rounded">activ.</span>
+                      <span className="text-[9px] uppercase tracking-widest font-bold text-white bg-white/25 px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <StarIcon className="w-3 h-3" />
+                        NSM
+                      </span>
                     )}
                     {isPaid && (
-                      <span className="text-[9px] uppercase tracking-wider font-bold text-white/70 bg-white/20 px-1.5 py-0.5 rounded">$</span>
+                      <span className="text-[9px] uppercase tracking-wider font-bold text-white/80 bg-white/20 px-2 py-0.5 rounded-full">Pagaron</span>
                     )}
-                    <span className="text-sm font-medium text-white drop-shadow-sm">{step.label}</span>
+                    <span className={`font-semibold text-white drop-shadow-sm ${isActivated || isPaid ? 'text-[15px]' : 'text-sm'}`}>{step.label}</span>
                   </div>
                   <div className="relative flex items-center gap-3">
                     {showConvToPaid && (
-                      <span className="text-[10px] text-white/80 bg-white/15 px-1.5 py-0.5 rounded font-medium">
+                      <span className="text-[10px] text-white/90 bg-white/20 px-2 py-0.5 rounded-full font-semibold">
                         →$ {fmtPct(convToPaidPct)}
                       </span>
                     )}
-                    <span className="text-lg font-bold text-white drop-shadow-sm">{fmtNum(step.count)}</span>
-                    <span className="text-xs text-white/75 font-medium min-w-[45px] text-right">{fmtPct(step.pctOfTotal)}</span>
+                    <span className={`font-bold text-white drop-shadow-sm ${isActivated || isPaid ? 'text-xl' : 'text-lg'}`}>{fmtNum(step.count)}</span>
+                    <span className="text-xs text-white/80 font-semibold min-w-[45px] text-right">{fmtPct(step.pctOfTotal)}</span>
                   </div>
                 </div>
               </div>
@@ -324,8 +327,8 @@ export default function ConversionFunnel() {
         {/* Inline conversion summary — bottom left */}
         <div className="flex items-center gap-4 mt-5 pt-4 border-t border-gray-100">
           <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#A855F7' }} />
-            <span className="text-[11px] text-gray-500">Reg→Activ</span>
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#16A34A' }} />
+            <span className="text-[11px] text-gray-500">Reg→Activ (7+)</span>
             <span className="text-[11px] font-bold text-gray-700">{fmtPct(activationRate)}</span>
           </div>
           <div className="flex items-center gap-1.5">
@@ -356,7 +359,7 @@ export default function ConversionFunnel() {
                 <th className="px-3 py-3 text-right whitespace-nowrap">2 ev</th>
                 <th className="px-3 py-3 text-right whitespace-nowrap">3 ev</th>
                 <th className="px-3 py-3 text-right whitespace-nowrap">4 ev</th>
-                <th className="px-3 py-3 text-right whitespace-nowrap font-semibold text-purple-700">Activ. (5+)</th>
+                <th className="px-3 py-3 text-right whitespace-nowrap font-semibold text-green-700">Activ. (7+)</th>
                 <th className="px-3 py-3 text-right whitespace-nowrap">6 ev</th>
                 <th className="px-3 py-3 text-right whitespace-nowrap">7 ev</th>
                 <th className="px-3 py-3 text-right whitespace-nowrap">8 ev</th>
@@ -453,7 +456,7 @@ export default function ConversionFunnel() {
                             <span className="font-medium text-gray-800">{fmtNum(row.registered)}</span>
                           </div>
                           <div className="flex items-center justify-between gap-4">
-                            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-[#A855F7]" />Activados (5+ ev)</span>
+                            <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-sm bg-[#16A34A]" />Activados (7+ ev, NSM)</span>
                             <span className="font-medium text-gray-800">{fmtNum(row.activated)}</span>
                           </div>
                           <div className="flex items-center justify-between gap-4">
