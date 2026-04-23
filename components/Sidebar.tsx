@@ -18,6 +18,7 @@ import {
   BriefcaseIcon,
   SparklesIcon,
   Cog6ToothIcon,
+  CodeBracketIcon,
   ArrowRightStartOnRectangleIcon,
   Bars3Icon,
   XMarkIcon,
@@ -143,7 +144,7 @@ export default function Sidebar() {
       {/* Footer */}
       <div className="border-t border-gray-200 py-3 px-2 shrink-0">
         {/* Admin link */}
-        {role === 'superadmin' && (
+        {role === 'superadmin' && (<>
           <Link
             href="/admin/users"
             className={`flex items-center gap-3 px-3 py-2.5 rounded-lg mb-1 transition-colors ${
@@ -157,7 +158,20 @@ export default function Sidebar() {
             <Cog6ToothIcon className={`h-5 w-5 shrink-0 ${isActive('/admin') ? 'text-white' : 'text-gray-500'}`} />
             {isExpanded && <span className="text-sm font-medium">Admin</span>}
           </Link>
-        )}
+          <Link
+            href="/admin/api"
+            className={`flex items-center gap-3 px-3 py-2 rounded-lg mb-1 transition-colors ${
+              isActive('/admin/api')
+                ? 'text-white'
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+            style={isActive('/admin/api') ? { backgroundColor: '#3c527a' } : undefined}
+            title={!isExpanded ? 'API' : undefined}
+          >
+            <CodeBracketIcon className={`h-5 w-5 shrink-0 ${isActive('/admin/api') ? 'text-white' : 'text-gray-500'}`} />
+            {isExpanded && <span className="text-sm font-medium">API</span>}
+          </Link>
+        </>)}
 
         {/* User email */}
         {isExpanded && (
