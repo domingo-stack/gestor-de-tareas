@@ -36,6 +36,7 @@ const MODULES: { key: keyof AdminUser; label: string }[] = [
   { key: 'mod_comunicaciones', label: 'Comunicaciones' },
   { key: 'mod_marketing', label: 'Marketing' },
   { key: 'mod_crm', label: 'CRM' },
+  { key: 'mod_contenido_social', label: 'Contenido Social' },
 ];
 
 function countActiveModules(user: AdminUser): number {
