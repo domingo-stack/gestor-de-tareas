@@ -44,7 +44,7 @@ export default function ProductoPage() {
     const { data, error } = await supabase
       .from('product_initiatives')
       .select('*, projects(name)')
-      .order('created_at', { ascending: false })
+      .order('manual_order', { ascending: true })
 
     if (error) {
       console.error('Error fetching initiatives:', error)

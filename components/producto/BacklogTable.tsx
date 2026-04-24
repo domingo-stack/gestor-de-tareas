@@ -77,21 +77,20 @@ export default function BacklogTable({ initiatives, onSelect, onUpdate, onCreate
     const { active, over } = event
     if (!active || !over || active.id === over.id) return
 
-    setLocalItems(prev => {
-      const oldIndex = prev.findIndex(i => i.id === active.id)
-      const newIndex = prev.findIndex(i => i.id === over.id)
-      const reordered = arrayMove(prev, oldIndex, newIndex)
+    const oldIndex = localItems.findIndex(i => i.id === active.id)
+    const newIndex = localItems.findIndex(i => i.id === over.id)
+    const reordered = arrayMove(localItems, oldIndex, newIndex)
 
-      // Persist to DB in background
-      if (supabase) {
-        reordered.forEach((item, idx) => {
-          supabase.from('product_initiatives').update({ manual_order: idx }).eq('id', item.id)
-        })
+    // Update visual immediately
+    setLocalItems(reordered)
+
+    // Persist to DB sequentially
+    if (supabase) {
+      for (let idx = 0; idx < reordered.length; idx++) {
+        await supabase.from('product_initiatives').update({ manual_order: idx }).eq('id', reordered[idx].id)
       }
-
-      return reordered
-    })
-  }, [supabase])
+    }
+  }, [localItems, supabase])
 
   const handleCreate = () => {
     if (!newTitle.trim()) return
