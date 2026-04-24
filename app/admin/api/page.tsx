@@ -8,7 +8,7 @@ import AuthGuard from '@/components/AuthGuard'
 import {
   KeyIcon, DocumentTextIcon, PlusIcon, TrashIcon,
   ClipboardDocumentIcon, EyeIcon, EyeSlashIcon,
-  ArrowLeftIcon, ShieldCheckIcon,
+  ArrowLeftIcon, ShieldCheckIcon, MagnifyingGlassIcon,
 } from '@heroicons/react/24/outline'
 import { toast } from 'sonner'
 
@@ -31,8 +31,28 @@ const PERMISSION_OPTIONS = [
   { value: 'tasks:write', label: 'Tareas Backlog (crear/completar)' },
 ]
 
-const API_DOCS = [
+interface ApiDoc {
+  category: string;
+  title: string;
+  method: string;
+  path: string;
+  description: string;
+  auth: string;
+  body?: string | null;
+  params?: string;
+  responses: { code: number; desc: string; example?: string }[];
+}
+
+const API_CATEGORIES = [
+  { id: 'all', label: 'Todos', icon: '📋' },
+  { id: 'calendar', label: 'Calendario', icon: '📅' },
+  { id: 'tasks', label: 'Producto', icon: '✅' },
+  { id: 'content', label: 'Contenido', icon: '✨' },
+]
+
+const API_DOCS: ApiDoc[] = [
   {
+    category: 'calendar',
     title: 'Calendar Events',
     method: 'POST',
     path: '/api/calendar/events',
@@ -56,6 +76,7 @@ const API_DOCS = [
     ],
   },
   {
+    category: 'calendar',
     title: 'Calendar Events (List)',
     method: 'GET',
     path: '/api/calendar/events',
@@ -68,6 +89,7 @@ const API_DOCS = [
     ],
   },
   {
+    category: 'content',
     title: 'Content Social — Blog List',
     method: 'GET',
     path: '/api/content-social/blogs',
@@ -79,6 +101,7 @@ const API_DOCS = [
     ],
   },
   {
+    category: 'content',
     title: 'Content Social — Generate',
     method: 'POST',
     path: '/api/content-social/generate',
@@ -99,6 +122,7 @@ const API_DOCS = [
     ],
   },
   {
+    category: 'tasks',
     title: 'Tasks — Listar tareas',
     method: 'GET',
     path: '/api/tasks',
@@ -113,6 +137,7 @@ const API_DOCS = [
     ],
   },
   {
+    category: 'tasks',
     title: 'Tasks — Crear tarea',
     method: 'POST',
     path: '/api/tasks',
@@ -130,6 +155,7 @@ const API_DOCS = [
     ],
   },
   {
+    category: 'tasks',
     title: 'Tasks — Actualizar / Completar',
     method: 'PATCH',
     path: '/api/tasks',
@@ -169,6 +195,8 @@ export default function AdminApiPage() {
   const { role } = usePermissions()
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<'keys' | 'docs'>('keys')
+  const [docCategory, setDocCategory] = useState('all')
+  const [docSearch, setDocSearch] = useState('')
   const [keys, setKeys] = useState<ApiKey[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
@@ -270,6 +298,15 @@ export default function AdminApiPage() {
 
     return md
   }
+
+  const filteredDocs = API_DOCS.filter(doc => {
+    if (docCategory !== 'all' && doc.category !== docCategory) return false
+    if (docSearch) {
+      const q = docSearch.toLowerCase()
+      return doc.title.toLowerCase().includes(q) || doc.path.toLowerCase().includes(q) || doc.description.toLowerCase().includes(q)
+    }
+    return true
+  })
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -442,8 +479,14 @@ export default function AdminApiPage() {
         {/* ═══ DOCUMENTACIÓN TAB ═══ */}
         {activeTab === 'docs' && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-gray-500">Endpoints disponibles para integración con plataformas del ecosistema Califica.</p>
+            {/* Header: search + export buttons */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="relative flex-1 max-w-xs">
+                <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input value={docSearch} onChange={e => setDocSearch(e.target.value)}
+                  placeholder="Buscar endpoint..."
+                  className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-200" />
+              </div>
               <div className="flex gap-2">
                 <button onClick={() => {
                   const md = generateFullMarkdown()
@@ -452,7 +495,7 @@ export default function AdminApiPage() {
                 }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100">
                   <ClipboardDocumentIcon className="w-3.5 h-3.5" />
-                  Copiar todo (Markdown)
+                  Copiar todo
                 </button>
                 <button onClick={() => {
                   const md = generateFullMarkdown()
@@ -465,17 +508,62 @@ export default function AdminApiPage() {
                 }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200">
                   <DocumentTextIcon className="w-3.5 h-3.5" />
-                  Descargar .md
+                  .md
                 </button>
               </div>
             </div>
 
-            {API_DOCS.map((doc, idx) => (
+            {/* Category nav + endpoint list */}
+            <div className="flex gap-6">
+              {/* Sidebar */}
+              <div className="w-48 flex-shrink-0 hidden md:block">
+                <nav className="sticky top-24 space-y-1">
+                  {API_CATEGORIES.map(cat => {
+                    const count = cat.id === 'all' ? API_DOCS.length : API_DOCS.filter(d => d.category === cat.id).length
+                    return (
+                      <button key={cat.id} onClick={() => setDocCategory(cat.id)}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-colors ${
+                          docCategory === cat.id
+                            ? 'bg-blue-50 text-blue-700 font-medium'
+                            : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                        }`}>
+                        <span className="flex items-center gap-2">
+                          <span>{cat.icon}</span>
+                          <span>{cat.label}</span>
+                        </span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                          docCategory === cat.id ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-400'
+                        }`}>{count}</span>
+                      </button>
+                    )
+                  })}
+                </nav>
+              </div>
+
+              {/* Mobile category pills */}
+              <div className="flex gap-1 md:hidden mb-3 overflow-x-auto">
+                {API_CATEGORIES.map(cat => (
+                  <button key={cat.id} onClick={() => setDocCategory(cat.id)}
+                    className={`flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                      docCategory === cat.id ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
+                    }`}>
+                    {cat.icon} {cat.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Endpoint cards */}
+              <div className="flex-1 space-y-4">
+                {filteredDocs.length === 0 ? (
+                  <div className="text-center py-12 text-gray-400 text-sm">
+                    No se encontraron endpoints{docSearch ? ` para "${docSearch}"` : ''}
+                  </div>
+                ) : filteredDocs.map((doc, idx) => (
               <div key={idx} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                 <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <span className={`text-xs font-bold px-2 py-1 rounded ${
-                      doc.method === 'POST' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                      doc.method === 'POST' ? 'bg-green-100 text-green-700' : doc.method === 'PATCH' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
                     }`}>{doc.method}</span>
                     <code className="text-sm font-mono text-gray-800">{doc.path}</code>
                   </div>
@@ -524,6 +612,8 @@ export default function AdminApiPage() {
                 </div>
               </div>
             ))}
+              </div>
+            </div>
           </div>
         )}
       </div>
