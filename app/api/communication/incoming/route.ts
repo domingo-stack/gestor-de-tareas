@@ -116,26 +116,61 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, ignored: true, reason: 'auto-reply disabled' });
   }
 
-  // Check cooldown: don't send auto-reply if we already replied to this number in last 24h
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { count } = await supabase
-    .from('comm_message_logs')
-    .select('id', { count: 'exact', head: true })
-    .eq('phone', senderPhone)
-    .eq('evento_tipo', 'auto_reply')
-    .gte('created_at', since);
+  // ── Step 1: Check for campaign-specific auto-reply (within 12h window, no cooldown) ──
+  let replyText = '';
+  let isCampaignReply = false;
+  const senderDigits = senderPhone.replace(/[^0-9]/g, '');
+  const campaignWindow = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
 
-  if ((count ?? 0) > 0) {
-    return NextResponse.json({ ok: true, ignored: true, reason: 'cooldown 24h' });
+  const { data: recentLogs } = await supabase
+    .from('comm_message_logs')
+    .select('broadcast_id, created_at')
+    .eq('phone', senderDigits)
+    .not('broadcast_id', 'is', null)
+    .neq('evento_tipo', 'auto_reply')
+    .gte('created_at', campaignWindow)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  const recentLog = recentLogs?.[0] ?? null;
+
+  if (recentLog?.broadcast_id) {
+    const { data: broadcast } = await supabase
+      .from('comm_broadcasts')
+      .select('auto_reply_message')
+      .eq('id', recentLog.broadcast_id)
+      .single();
+
+    if (broadcast?.auto_reply_message) {
+      replyText = broadcast.auto_reply_message;
+      isCampaignReply = true;
+      // No cooldown for campaign replies — always respond within the 12h window
+    }
   }
 
-  // Build the auto-reply message
-  let replyText = config.auto_reply_message || DEFAULT_AUTO_REPLY;
-  // Append support URL if configured
-  if (config.auto_reply_support_url) {
-    replyText += `\n\n👉 ${config.auto_reply_support_url}`;
-  } else if (config.auto_reply_support_number) {
-    replyText += `\n\n📞 ${config.auto_reply_support_number}`;
+  // ── Step 2: If no campaign reply, use global (with 24h cooldown) ──
+  if (!isCampaignReply) {
+    // Cooldown: skip if already replied globally in last 24h
+    // Only count replies WITHOUT broadcast_id (campaign replies don't count)
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { count } = await supabase
+      .from('comm_message_logs')
+      .select('id', { count: 'exact', head: true })
+      .eq('phone', senderDigits)
+      .eq('evento_tipo', 'auto_reply')
+      .is('broadcast_id', null)
+      .gte('created_at', since);
+
+    if ((count ?? 0) > 0) {
+      return NextResponse.json({ ok: true, ignored: true, reason: 'cooldown 24h' });
+    }
+
+    replyText = config.auto_reply_message || DEFAULT_AUTO_REPLY;
+    if (config.auto_reply_support_url) {
+      replyText += `\n\n👉 ${config.auto_reply_support_url}`;
+    } else if (config.auto_reply_support_number) {
+      replyText += `\n\n📞 ${config.auto_reply_support_number}`;
+    }
   }
 
   // Send auto-reply
@@ -146,12 +181,13 @@ export async function POST(req: NextRequest) {
       text: replyText,
     });
 
-    // Log the auto-reply
+    // Log the auto-reply (include broadcast_id if campaign reply)
     await supabase.from('comm_message_logs').insert({
-      phone: senderPhone,
+      phone: senderDigits,
       kapso_message_id: result.messages?.[0]?.id ?? null,
       evento_tipo: 'auto_reply',
       estado: 'sent',
+      broadcast_id: isCampaignReply ? recentLog?.broadcast_id : null,
       created_at: new Date().toISOString(),
     });
 

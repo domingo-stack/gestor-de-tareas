@@ -461,6 +461,25 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, 
   setSequenceSteps: (steps: SequenceStep[]) => void;
 }) {
   const [previewId, setPreviewId] = useState<number | null>(null);
+  const [templateSearch, setTemplateSearch] = useState('');
+  const [templateFilter, setTemplateFilter] = useState<'all' | 'marketing' | 'utility'>('all');
+  const [templateSort, setTemplateSort] = useState<'recent' | 'alpha'>('recent');
+
+  const filteredTemplates = templates
+    .filter(t => !((t as any).archived_at))
+    .filter(t => {
+      if (templateFilter !== 'all' && t.categoria !== templateFilter) return false;
+      if (templateSearch) {
+        const q = templateSearch.toLowerCase();
+        return t.nombre.toLowerCase().includes(q) || t.body.toLowerCase().includes(q);
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (templateSort === 'alpha') return a.nombre.localeCompare(b.nombre);
+      return new Date((b as any).created_at || 0).getTime() - new Date((a as any).created_at || 0).getTime();
+    });
+
   const preview = templates.find(t => t.id === (previewId ?? selectedId));
   const selectedTemplate = templates.find(t => t.id === selectedId);
   const rateUtility = getRate(pais, 'utility', rates);
@@ -681,121 +700,108 @@ function Step2({ templates, selectedId, onSelect, onNext, onBack, contactCount, 
         </div>
       )}
 
-      {/* ── Single message mode ── */}
-      {!isSequence && (templates.length === 0 ? (
+      {/* Template search & filters */}
+      {!isSequence && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <div className="relative flex-1 min-w-[200px]">
+            <input value={templateSearch} onChange={e => setTemplateSearch(e.target.value)}
+              placeholder="Buscar template..."
+              className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-200" />
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
+          </div>
+          <div className="flex gap-1 bg-gray-100 p-0.5 rounded-lg">
+            {(['all', 'marketing', 'utility'] as const).map(f => (
+              <button key={f} onClick={() => setTemplateFilter(f)}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                  templateFilter === f ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'
+                }`}>
+                {f === 'all' ? 'Todos' : f === 'marketing' ? 'Marketing' : 'Utility'}
+              </button>
+            ))}
+          </div>
+          <select value={templateSort} onChange={e => setTemplateSort(e.target.value as 'recent' | 'alpha')}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white">
+            <option value="recent">Más recientes</option>
+            <option value="alpha">A-Z</option>
+          </select>
+          <span className="text-xs text-gray-400">{filteredTemplates.length} templates</span>
+        </div>
+      )}
+
+      {/* ── Single message mode — split layout ── */}
+      {!isSequence && (filteredTemplates.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-gray-400">
-          <p className="text-sm">No hay templates aprobados.</p>
-          <p className="text-xs mt-1">Ve a la pestaña Templates y aprueba uno primero.</p>
+          <p className="text-sm">{templateSearch ? 'No se encontraron templates' : 'No hay templates aprobados.'}</p>
+          <p className="text-xs mt-1">{templateSearch ? 'Prueba con otro término' : 'Ve a la pestaña Templates y aprueba uno primero.'}</p>
         </div>
       ) : (
-        <>
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          {templates.map(t => {
-            const isMarketing = t.categoria === 'marketing';
-            const selected = selectedId === t.id;
-            return (
-              <div
-                key={t.id}
-                onClick={() => { onSelect(t.id); setPreviewId(t.id); }}
-                className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
-                  selected
-                    ? 'border-[#ff8080] bg-red-50'
-                    : 'border-gray-200 hover:border-gray-300 bg-white'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <p className="text-sm font-semibold text-[#383838] leading-tight">{t.nombre}</p>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0 ${
-                    isMarketing ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+        <div className="flex gap-5 mb-6">
+          {/* Left: scrollable template list */}
+          <div className="flex-1 max-h-[60vh] overflow-y-auto pr-1 space-y-2">
+            {filteredTemplates.map(t => {
+              const isMarketing = t.categoria === 'marketing';
+              const selected = selectedId === t.id;
+              return (
+                <div key={t.id}
+                  onClick={() => { onSelect(t.id); setPreviewId(t.id); }}
+                  className={`border-2 rounded-xl p-3 cursor-pointer transition-all ${
+                    selected ? 'border-[#ff8080] bg-red-50' : 'border-gray-200 hover:border-gray-300 bg-white'
                   }`}>
-                    {isMarketing ? 'Marketing' : 'Utility'}
-                  </span>
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-sm font-semibold text-[#383838] leading-tight">{t.nombre}</p>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0 ${
+                      isMarketing ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                    }`}>{isMarketing ? 'MKT' : 'UTL'}</span>
+                  </div>
+                  <p className="text-xs text-gray-400 line-clamp-1 mt-1">{t.body}</p>
                 </div>
-                <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{t.body}</p>
-                {t.variables.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {t.variables.slice(0, 3).map(v => (
-                      <span key={v} className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-mono">{v}</span>
-                    ))}
+              );
+            })}
+          </div>
+
+          {/* Right: sticky preview + cost */}
+          <div className="w-72 flex-shrink-0 sticky top-0 self-start space-y-4">
+            {preview ? (
+              <>
+                <div className="bg-[#ECE5DD] rounded-xl p-3">
+                  <p className="text-[11px] font-bold text-gray-500 mb-2">Preview — {preview.nombre}</p>
+                  <div className="bg-white rounded-xl rounded-tl-none px-3 py-2 max-w-xs shadow-sm">
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+                      {preview.body.replace(/\{\{(\w+)\}\}/g, (_: string, v: string) => `[${v}]`)}
+                    </p>
+                    <p className="text-right text-[10px] text-gray-400 mt-1">12:00 ✓✓</p>
+                  </div>
+                  {(preview.buttons ?? []).filter(b => b.text.trim()).length > 0 && (
+                    <div className="flex flex-col gap-1 mt-1 max-w-xs">
+                      {preview.buttons.filter(b => b.text.trim()).map((btn, i) => (
+                        <div key={i} className="bg-white rounded-lg px-3 py-1.5 text-center text-xs font-medium text-[#00a5f4] shadow-sm">
+                          {btn.type === 'URL' && '🔗 '}{btn.type === 'PHONE_NUMBER' && '📞 '}{btn.text}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {contactCount > 0 && selectedTemplate && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                    <p className="text-[11px] font-bold text-gray-500 uppercase mb-2">Costo estimado</p>
+                    <p className="text-lg font-black text-[#3c527a]">
+                      ${(contactCount * getRate(pais, selectedTemplate.categoria ?? 'utility', rates)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
+                    </p>
+                    <p className="text-[10px] text-gray-400 mt-1">
+                      {contactCount.toLocaleString()} contactos · {selectedTemplate.categoria} · ${getRate(pais, selectedTemplate.categoria ?? 'utility', rates).toFixed(4)}/msg
+                    </p>
                   </div>
                 )}
-                {isMarketing && selected && (
-                  <p className="text-xs text-yellow-600 font-medium mt-2">
-                    ⚠ Template Marketing — costo más elevado que Utility
-                  </p>
-                )}
+              </>
+            ) : (
+              <div className="bg-gray-50 border border-dashed border-gray-200 rounded-xl p-6 text-center">
+                <p className="text-sm text-gray-400">Selecciona un template</p>
+                <p className="text-xs text-gray-300 mt-1">El preview aparecerá aquí</p>
               </div>
-            );
-          })}
-        </div>
-
-      {/* Preview panel */}
-      {preview && (
-        <div className="bg-[#ECE5DD] rounded-xl p-4 mb-6">
-          <p className="text-xs font-bold text-gray-500 mb-2">Preview — {preview.nombre}</p>
-          <div className="bg-white rounded-xl rounded-tl-none px-3 py-2.5 max-w-xs shadow-sm">
-            <p className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
-              {preview.body.replace(/\{\{(\w+)\}\}/g, (_: string, v: string) => `[${v}]`)}
-            </p>
-            <p className="text-right text-xs text-gray-400 mt-1">12:00 ✓✓</p>
+            )}
           </div>
-          {/* Buttons preview */}
-          {(preview.buttons ?? []).filter(b => b.text.trim()).length > 0 && (
-            <div className="flex flex-col gap-1 mt-1 max-w-xs">
-              {preview.buttons.filter(b => b.text.trim()).map((btn, i) => (
-                <div key={i} className="bg-white rounded-lg px-3 py-2 text-center text-sm font-medium text-[#00a5f4] shadow-sm">
-                  {btn.type === 'URL' && '🔗 '}
-                  {btn.type === 'PHONE_NUMBER' && '📞 '}
-                  {btn.text}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
-      )}
-
-      {/* Cost simulation */}
-      {contactCount > 0 && (
-        <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-6">
-          <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">
-            Simulación de costo — {contactCount.toLocaleString()} contactos
-          </p>
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div className={`rounded-xl p-3 border-2 transition-all ${selectedTemplate?.categoria === 'utility' ? 'border-blue-400 bg-blue-50' : 'border-blue-100 bg-blue-50/50'}`}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-bold text-blue-700">Utility</span>
-                {selectedTemplate?.categoria === 'utility' && (
-                  <span className="text-xs text-blue-600 font-semibold">← Este template</span>
-                )}
-              </div>
-              <p className="text-xl font-black text-blue-700">${(contactCount * rateUtility).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-              <p className="text-xs text-blue-400 mt-0.5">@ ${rateUtility.toFixed(4)}/msg</p>
-            </div>
-            <div className={`rounded-xl p-3 border-2 transition-all ${selectedTemplate?.categoria === 'marketing' ? 'border-purple-400 bg-purple-50' : 'border-purple-100 bg-purple-50/50'}`}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-bold text-purple-700">Marketing</span>
-                {selectedTemplate?.categoria === 'marketing' && (
-                  <span className="text-xs text-purple-600 font-semibold">← Este template</span>
-                )}
-              </div>
-              <p className="text-xl font-black text-purple-700">${(contactCount * rateMarketing).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-              <p className="text-xs text-purple-400 mt-0.5">@ ${rateMarketing.toFixed(4)}/msg</p>
-            </div>
-          </div>
-          {selectedTemplate ? (
-            <p className="text-xs text-gray-600">
-              Costo estimado con <strong>{selectedTemplate.nombre}</strong> ({selectedTemplate.categoria ?? '—'}):
-              <strong className="text-[#3c527a] ml-1">
-                ${(contactCount * getRate(pais, selectedTemplate.categoria ?? 'utility', rates)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD
-              </strong>
-              <span className="text-gray-400 ml-1">· tarifa {pais !== 'Todos' ? pais : 'Perú (80% audiencia)'}: ${getRate(pais, selectedTemplate.categoria ?? 'utility', rates).toFixed(4)}/msg</span>
-            </p>
-          ) : (
-            <p className="text-xs text-gray-400">Selecciona un template para ver el costo exacto.</p>
-          )}
-        </div>
-      )}
-        </>
       ))}
 
       <div className="flex justify-end">
@@ -837,6 +843,8 @@ function Step3({ filters, template, contactCount, onSend, onBack, sending, rates
   const [scheduleTime, setScheduleTime] = useState('09:00');
   const [autoReplyEnabled, setAutoReplyEnabled] = useState(false);
   const [autoReplyMessage, setAutoReplyMessage] = useState('');
+  const [testSending, setTestSending] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const costRate = getRate(filters.pais, template?.categoria ?? 'marketing', rates);
   const estimatedCost = isSequence
     ? (sequenceSteps ?? []).reduce((total, s) => {
@@ -1090,7 +1098,54 @@ function Step3({ filters, template, contactCount, onSend, onBack, sending, rates
         )}
       </div>
 
-      <div className="flex justify-end">
+      {/* Test result */}
+      {testResult && (
+        <div className={`rounded-xl p-3 text-sm font-medium ${
+          testResult.ok ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-700'
+        }`}>
+          {testResult.ok ? '✅' : '❌'} {testResult.message}
+          {testResult.ok && autoReplyEnabled && autoReplyMessage && (
+            <p className="text-xs font-normal mt-1 text-green-600">
+              💬 Responde al mensaje de prueba para verificar el auto-reply personalizado
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={async () => {
+            if (!template) return;
+            setTestSending(true);
+            setTestResult(null);
+            try {
+              const res = await fetch('/api/communication/send-test', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  templateId: template.id,
+                  autoReplyMessage: autoReplyEnabled ? autoReplyMessage : undefined,
+                }),
+              });
+              const data = await res.json();
+              if (res.ok) {
+                const sent = data.results?.filter((r: any) => r.ok).length || 0;
+                const total = data.results?.length || 0;
+                setTestResult({ ok: true, message: `Test enviado a ${sent}/${total} contactos de prueba` });
+              } else {
+                setTestResult({ ok: false, message: data.error || 'Error enviando test' });
+              }
+            } catch {
+              setTestResult({ ok: false, message: 'Error de conexión' });
+            } finally {
+              setTestSending(false);
+            }
+          }}
+          disabled={!template || testSending}
+          className="px-4 py-2.5 bg-white border-2 border-blue-200 text-blue-600 text-sm font-semibold rounded-lg hover:bg-blue-50 transition-colors disabled:opacity-50"
+        >
+          {testSending ? 'Enviando...' : '🧪 Enviar prueba'}
+        </button>
         <button
           onClick={() => { if (canSend) setConfirming(true); }}
           disabled={!canSend}
@@ -1520,7 +1575,7 @@ export default function Campanias() {
     setLoading(true);
     const [bRes, tRes, planRes, ratesRes] = await Promise.all([
       supabase.from('comm_broadcasts').select('*').order('created_at', { ascending: false }),
-      supabase.from('comm_templates').select('id, nombre, body, variables, categoria, estado, buttons, uso').order('nombre'),
+      supabase.from('comm_templates').select('id, nombre, body, variables, categoria, estado, buttons, uso, created_at, updated_at, archived_at').order('nombre'),
       supabase.from('growth_users').select('plan_id').not('plan_id', 'is', null).eq('plan_paid', true),
       supabase.from('comm_whatsapp_rates').select('country, marketing, utility'),
     ]);

@@ -818,11 +818,13 @@ function TemplateForm({ template, onClose, onSave }: TemplateFormProps) {
 // ──────────────────────────────────────────
 // Template Detail / View Modal
 // ──────────────────────────────────────────
-function TemplateDetail({ template, onClose, onEdit, onDelete }: {
+function TemplateDetail({ template, onClose, onEdit, onDelete, onArchive, onReactivate }: {
   template: CommTemplate;
   onClose: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onArchive?: () => void;
+  onReactivate?: () => void;
 }) {
   const preview = template.body.replace(/\{\{(\w+)\}\}/g, (_: string, v: string) => `[${v}]`);
   const canEdit = template.estado === 'borrador' || template.estado === 'rechazado';
@@ -945,12 +947,26 @@ function TemplateDetail({ template, onClose, onEdit, onDelete }: {
         </div>
 
         <div className="border-t border-gray-100 px-6 py-4 flex items-center justify-between flex-shrink-0 bg-gray-50">
-          <button
-            onClick={onDelete}
-            className="text-sm text-red-500 hover:text-red-700 font-medium px-3 py-2 rounded-lg hover:bg-red-50 transition-colors"
-          >
-            Eliminar
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onDelete}
+              className="text-sm text-red-500 hover:text-red-700 font-medium px-3 py-2 rounded-lg hover:bg-red-50 transition-colors"
+            >
+              Eliminar
+            </button>
+            {onArchive && (
+              <button onClick={onArchive}
+                className="text-sm text-amber-600 hover:text-amber-700 font-medium px-3 py-2 rounded-lg hover:bg-amber-50 transition-colors">
+                Archivar
+              </button>
+            )}
+            {onReactivate && (
+              <button onClick={onReactivate}
+                className="text-sm text-green-600 hover:text-green-700 font-medium px-3 py-2 rounded-lg hover:bg-green-50 transition-colors">
+                Reactivar
+              </button>
+            )}
+          </div>
           {canEdit && (
             <button
               onClick={onEdit}
@@ -1395,16 +1411,35 @@ export default function Templates() {
     }
   };
 
+  const handleArchive = async (id: number) => {
+    if (!supabase) return;
+    await supabase.from('comm_templates').update({ archived_at: new Date().toISOString() }).eq('id', id);
+    fetchTemplates();
+    toast.success('Template archivado');
+  };
+
+  const handleReactivate = async (id: number) => {
+    if (!supabase) return;
+    await supabase.from('comm_templates').update({ archived_at: null }).eq('id', id);
+    fetchTemplates();
+    toast.success('Template reactivado');
+  };
+
   const filtered = templates
-    .filter(t => filterEstado === 'todos' || t.estado === filterEstado)
+    .filter(t => {
+      if (filterEstado === 'archivados') return !!(t as any).archived_at;
+      if ((t as any).archived_at) return false; // hide archived unless viewing archived filter
+      return filterEstado === 'todos' || t.estado === filterEstado;
+    })
     .filter(t => filterUso === 'todos' || t.uso === filterUso);
 
   const counts = {
-    total: templates.length,
-    aprobado: templates.filter(t => t.estado === 'aprobado').length,
-    revision: templates.filter(t => t.estado === 'revision').length,
-    borrador: templates.filter(t => t.estado === 'borrador').length,
-    rechazado: templates.filter(t => t.estado === 'rechazado').length,
+    total: templates.filter(t => !(t as any).archived_at).length,
+    aprobado: templates.filter(t => t.estado === 'aprobado' && !(t as any).archived_at).length,
+    revision: templates.filter(t => t.estado === 'revision' && !(t as any).archived_at).length,
+    borrador: templates.filter(t => t.estado === 'borrador' && !(t as any).archived_at).length,
+    rechazado: templates.filter(t => t.estado === 'rechazado' && !(t as any).archived_at).length,
+    archivados: templates.filter(t => !!(t as any).archived_at).length,
   };
 
   return (
@@ -1419,17 +1454,30 @@ export default function Templates() {
         </div>
         <div className="flex items-center gap-2">
           {selectedIds.size > 0 && (
-            <button
-              onClick={handleBulkDelete}
-              disabled={bulkDeleting}
-              className="flex items-center gap-1.5 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold rounded-lg transition-colors border border-red-200 disabled:opacity-50"
-              title={`Eliminar ${selectedIds.size} template${selectedIds.size > 1 ? 's' : ''}`}
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-              </svg>
-              {bulkDeleting ? 'Eliminando...' : selectedIds.size}
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={async () => {
+                  if (!supabase) return;
+                  const ids = Array.from(selectedIds);
+                  await supabase.from('comm_templates').update({ archived_at: new Date().toISOString() }).in('id', ids);
+                  setSelectedIds(new Set());
+                  fetchTemplates();
+                  toast.success(`${ids.length} template${ids.length > 1 ? 's' : ''} archivado${ids.length > 1 ? 's' : ''}`);
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-600 text-sm font-semibold rounded-lg transition-colors border border-amber-200"
+                title={`Archivar ${selectedIds.size}`}
+              >
+                📦 {selectedIds.size}
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                className="flex items-center gap-1.5 px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-sm font-semibold rounded-lg transition-colors border border-red-200 disabled:opacity-50"
+                title={`Eliminar ${selectedIds.size}`}
+              >
+                🗑 {bulkDeleting ? '...' : selectedIds.size}
+              </button>
+            </div>
           )}
           <button
             onClick={() => setShowBulkUpload(true)}
@@ -1568,6 +1616,7 @@ export default function Templates() {
             { value: 'revision', label: 'En revisión' },
             { value: 'borrador', label: 'Borradores' },
             { value: 'rechazado', label: 'Rechazados' },
+            { value: 'archivados', label: `Archivados (${counts.archivados})` },
           ].map(f => (
             <button
               key={f.value}
@@ -1767,6 +1816,8 @@ export default function Templates() {
           onClose={() => setViewingTemplate(null)}
           onEdit={() => { setEditingTemplate(viewingTemplate); setViewingTemplate(null); setShowForm(true); }}
           onDelete={() => handleDelete(viewingTemplate.id)}
+          onArchive={(viewingTemplate as any).archived_at ? undefined : () => { handleArchive(viewingTemplate.id); setViewingTemplate(null); }}
+          onReactivate={(viewingTemplate as any).archived_at ? () => { handleReactivate(viewingTemplate.id); setViewingTemplate(null); } : undefined}
         />
       )}
 
