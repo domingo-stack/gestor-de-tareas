@@ -107,7 +107,7 @@ export default function ProductoPage() {
     }
   }, [supabase])
 
-  const handleCreate = useCallback(async (title: string, problemStatement: string) => {
+  const handleCreate = useCallback(async (title: string, problemStatement: string, category?: string) => {
     if (!supabase || !user) return
     const maxOrder = Math.max(0, ...backlogItems.map(i => (i as any).manual_order || 0))
     const { data, error } = await supabase
@@ -117,7 +117,7 @@ export default function ProductoPage() {
         problem_statement: problemStatement || null,
         phase: 'backlog',
         status: 'pending',
-        item_type: 'feature',
+        item_type: category || 'producto',
         owner_id: user.id,
         manual_order: maxOrder + 1,
       })
@@ -146,7 +146,7 @@ export default function ProductoPage() {
         title,
         phase,
         status: 'design',
-        item_type: phase === 'discovery' ? 'experiment' : 'feature',
+        item_type: phase === 'discovery' ? 'experiment' : 'producto',
         owner_id: user.id,
       })
       .select()

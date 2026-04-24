@@ -27,6 +27,8 @@ const PERMISSION_OPTIONS = [
   { value: 'calendar:write', label: 'Calendario (crear)' },
   { value: 'content:read', label: 'Contenido Social (leer)' },
   { value: 'content:write', label: 'Contenido Social (crear)' },
+  { value: 'tasks:read', label: 'Tareas Backlog (leer)' },
+  { value: 'tasks:write', label: 'Tareas Backlog (crear/completar)' },
 ]
 
 const API_DOCS = [
@@ -94,6 +96,56 @@ const API_DOCS = [
 }`,
     responses: [
       { code: 200, desc: 'Carruseles generados', example: '{ "blog": {...}, "carousels": [...], "metadata": {...} }' },
+    ],
+  },
+  {
+    title: 'Tasks — Listar tareas',
+    method: 'GET',
+    path: '/api/tasks',
+    description: 'Lista tareas del backlog (activas) o finalizadas.',
+    auth: 'Bearer <API_KEY> (tasks:read)',
+    body: null,
+    params: 'status=active|completed|all&category=producto|customer_success|marketing|otro&limit=100',
+    responses: [
+      { code: 200, desc: 'Lista de tareas', example: '{ "tasks": [{id, title, description, category, status, priority, ...}], "total": 10 }' },
+      { code: 401, desc: 'Key inválida' },
+      { code: 403, desc: 'Sin permiso tasks:read' },
+    ],
+  },
+  {
+    title: 'Tasks — Crear tarea',
+    method: 'POST',
+    path: '/api/tasks',
+    description: 'Crea una nueva tarea en el backlog.',
+    auth: 'Bearer <API_KEY> (tasks:write)',
+    body: `{
+  "title": "Implementar feature X",
+  "description": "Contexto del problema...",
+  "category": "producto | customer_success | marketing | otro"
+}`,
+    responses: [
+      { code: 201, desc: 'Tarea creada', example: '{ "task": {id, title, category, status, priority}, "api_key": "..." }' },
+      { code: 400, desc: 'Campo requerido faltante' },
+      { code: 422, desc: 'Categoría no válida' },
+    ],
+  },
+  {
+    title: 'Tasks — Actualizar / Completar',
+    method: 'PATCH',
+    path: '/api/tasks',
+    description: 'Actualiza campos o cambia el estado de una tarea (completar/reabrir).',
+    auth: 'Bearer <API_KEY> (tasks:write)',
+    body: `{
+  "id": 123,
+  "action": "complete | reopen",
+  "title": "Nuevo título (opcional)",
+  "description": "Nueva descripción (opcional)",
+  "category": "marketing (opcional)"
+}`,
+    responses: [
+      { code: 200, desc: 'Tarea actualizada', example: '{ "task": {id, title, status, completed_at}, "api_key": "..." }' },
+      { code: 404, desc: 'Tarea no encontrada' },
+      { code: 400, desc: 'Sin cambios enviados' },
     ],
   },
 ]
@@ -174,6 +226,13 @@ export default function AdminApiPage() {
     await supabase.from('api_keys').update({ is_active: false }).eq('id', id)
     fetchKeys()
     toast.success('API key revocada')
+  }
+
+  const handleReactivate = async (id: string) => {
+    if (!supabase) return
+    await supabase.from('api_keys').update({ is_active: true }).eq('id', id)
+    fetchKeys()
+    toast.success('API key reactivada')
   }
 
   const handleDelete = async (id: string) => {
@@ -317,10 +376,15 @@ export default function AdminApiPage() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex gap-1 justify-end">
-                          {k.is_active && (
+                          {k.is_active ? (
                             <button onClick={() => handleRevoke(k.id)} title="Revocar"
                               className="p-1.5 text-amber-500 hover:bg-amber-50 rounded-lg">
                               <EyeSlashIcon className="w-4 h-4" />
+                            </button>
+                          ) : (
+                            <button onClick={() => handleReactivate(k.id)} title="Reactivar"
+                              className="p-1.5 text-green-500 hover:bg-green-50 rounded-lg">
+                              <EyeIcon className="w-4 h-4" />
                             </button>
                           )}
                           <button onClick={() => handleDelete(k.id)} title="Eliminar"

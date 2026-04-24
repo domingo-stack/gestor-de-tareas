@@ -1,8 +1,22 @@
 'use client'
 
 import { useState } from 'react'
-import { ArchiveBoxIcon, ArrowUturnLeftIcon, CheckIcon, ClockIcon, FunnelIcon } from '@heroicons/react/24/outline'
+import { ArchiveBoxIcon, ArrowUturnLeftIcon, CheckIcon, ClockIcon } from '@heroicons/react/24/outline'
 import { ProductInitiative } from '@/lib/types'
+
+const CATEGORY_STYLES: Record<string, string> = {
+  producto: 'bg-blue-100 text-blue-700',
+  customer_success: 'bg-emerald-100 text-emerald-700',
+  marketing: 'bg-purple-100 text-purple-700',
+  otro: 'bg-gray-100 text-gray-600',
+}
+
+const CATEGORY_LABELS: Record<string, string> = {
+  producto: 'Producto',
+  customer_success: 'CS',
+  marketing: 'Marketing',
+  otro: 'Otro',
+}
 
 interface Props {
   initiatives: ProductInitiative[]
@@ -46,12 +60,23 @@ const RANGE_PRESETS = [
   { value: 'custom', label: 'Rango' },
 ]
 
+const CATEGORY_FILTERS = [
+  { value: 'all', label: 'Todas' },
+  { value: 'producto', label: 'Producto' },
+  { value: 'customer_success', label: 'CS' },
+  { value: 'marketing', label: 'Marketing' },
+  { value: 'otro', label: 'Otro' },
+]
+
 export default function RoadmapKanban({ initiatives, onSelect, onReopen }: Props) {
   const [rangePreset, setRangePreset] = useState('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [filterCategory, setFilterCategory] = useState('all')
 
   const filtered = initiatives.filter(item => {
+    // Category filter
+    if (filterCategory !== 'all' && (item as any).item_type !== filterCategory) return false;
     const completedAt = (item as any).completed_at || item.updated_at || item.created_at
     const d = new Date(completedAt)
     const now = new Date()
@@ -103,37 +128,54 @@ export default function RoadmapKanban({ initiatives, onSelect, onReopen }: Props
 
   return (
     <div>
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex gap-1 bg-gray-100 p-0.5 rounded-lg">
+      <div className="space-y-3 mb-5">
+        {/* Row 1: Category filter + count + today badge */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex gap-1 bg-gray-100 p-0.5 rounded-lg">
+              {CATEGORY_FILTERS.map(c => (
+                <button key={c.value} onClick={() => setFilterCategory(c.value)}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                    filterCategory === c.value ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}>
+                  {c.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-gray-400">
+              {sorted.length} tarea{sorted.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+          {todayCount > 0 && (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-green-50 border border-green-100 rounded-full text-xs font-medium text-green-700">
+              <CheckIcon className="w-3.5 h-3.5 stroke-[3]" />
+              {todayCount} hoy
+            </span>
+          )}
+        </div>
+        {/* Row 2: Date range */}
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-gray-400 font-medium">Período:</span>
+          <div className="flex gap-1">
             {RANGE_PRESETS.map(p => (
               <button key={p.value} onClick={() => setRangePreset(p.value)}
-                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                  rangePreset === p.value ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                className={`px-2 py-0.5 text-[11px] font-medium rounded-md transition-colors ${
+                  rangePreset === p.value ? 'bg-blue-100 text-blue-700' : 'text-gray-400 hover:text-gray-600'
                 }`}>
                 {p.label}
               </button>
             ))}
           </div>
           {rangePreset === 'custom' && (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 ml-1">
               <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white" />
-              <span className="text-xs text-gray-400">→</span>
+                className="text-[11px] border border-gray-200 rounded px-1.5 py-0.5 bg-white" />
+              <span className="text-[11px] text-gray-300">→</span>
               <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white" />
+                className="text-[11px] border border-gray-200 rounded px-1.5 py-0.5 bg-white" />
             </div>
           )}
-          <p className="text-xs text-gray-400">
-            {sorted.length} tarea{sorted.length !== 1 ? 's' : ''}
-          </p>
         </div>
-        {todayCount > 0 && (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-green-50 border border-green-100 rounded-full text-xs font-medium text-green-700">
-            <CheckIcon className="w-3.5 h-3.5 stroke-[3]" />
-            {todayCount} hoy
-          </span>
-        )}
       </div>
 
       <div className="space-y-1">
@@ -158,7 +200,12 @@ export default function RoadmapKanban({ initiatives, onSelect, onReopen }: Props
                 </div>
 
                 <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onSelect(item)}>
-                  <p className="text-sm font-medium text-gray-500 line-through decoration-gray-300 truncate">{item.title}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-gray-500 line-through decoration-gray-300 truncate">{item.title}</p>
+                    <span className={`flex-shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${CATEGORY_STYLES[(item as any).item_type] || CATEGORY_STYLES.otro}`}>
+                      {CATEGORY_LABELS[(item as any).item_type] || 'Otro'}
+                    </span>
+                  </div>
                   {item.problem_statement && (
                     <p className="text-xs text-gray-300 truncate mt-0.5">{item.problem_statement}</p>
                   )}

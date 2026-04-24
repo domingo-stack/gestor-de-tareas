@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
-import { PlusIcon, Bars2Icon, ClipboardDocumentListIcon } from '@heroicons/react/24/outline'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { PlusIcon, Bars2Icon, ClipboardDocumentListIcon, FunnelIcon } from '@heroicons/react/24/outline'
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors,
@@ -17,11 +17,26 @@ import { useAuth } from '@/context/AuthContext'
 
 const TITLE_MAX = 80
 
+const CATEGORIES = [
+  { value: 'producto', label: 'Producto', color: 'bg-blue-100 text-blue-700 border-blue-200' },
+  { value: 'customer_success', label: 'Customer Success', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  { value: 'marketing', label: 'Marketing', color: 'bg-purple-100 text-purple-700 border-purple-200' },
+  { value: 'otro', label: 'Otro', color: 'bg-gray-100 text-gray-600 border-gray-200' },
+]
+
+function getCategoryStyle(value: string) {
+  return CATEGORIES.find(c => c.value === value)?.color || 'bg-gray-100 text-gray-600 border-gray-200'
+}
+
+function getCategoryLabel(value: string) {
+  return CATEGORIES.find(c => c.value === value)?.label || value
+}
+
 interface Props {
   initiatives: ProductInitiative[]
   onSelect: (i: ProductInitiative) => void
   onUpdate: (id: number, updates: Partial<ProductInitiative>) => void
-  onCreate: (title: string, description: string) => void
+  onCreate: (title: string, description: string, category: string) => void
   onComplete: (id: number) => void
 }
 
@@ -29,6 +44,7 @@ function SortableItem({ item, onSelect, onComplete, index }: {
   item: ProductInitiative; onSelect: (i: ProductInitiative) => void; onComplete: (id: number) => void; index: number
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
+  const category = (item as any).item_type || 'otro'
 
   return (
     <div ref={setNodeRef}
@@ -41,7 +57,12 @@ function SortableItem({ item, onSelect, onComplete, index }: {
         <Bars2Icon className="w-4 h-4 text-gray-300 group-hover:text-gray-400 cursor-grab active:cursor-grabbing touch-none" />
       </div>
       <div className="flex-1 min-w-0 cursor-pointer" onClick={() => onSelect(item)}>
-        <p className="text-sm font-medium text-gray-800 leading-snug truncate">{item.title}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium text-gray-800 leading-snug truncate">{item.title}</p>
+          <span className={`flex-shrink-0 text-[10px] font-medium px-2 py-0.5 rounded-full border ${getCategoryStyle(category)}`}>
+            {getCategoryLabel(category)}
+          </span>
+        </div>
         {item.problem_statement && (
           <p className="text-xs text-gray-400 truncate mt-0.5">{item.problem_statement}</p>
         )}
@@ -60,10 +81,18 @@ export default function BacklogTable({ initiatives, onSelect, onUpdate, onCreate
   const [showCreate, setShowCreate] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [newDesc, setNewDesc] = useState('')
+  const [newCategory, setNewCategory] = useState('producto')
+  const [filterCategory, setFilterCategory] = useState('all')
   const [localItems, setLocalItems] = useState<ProductInitiative[]>([])
 
-  // Sync local state from props, sorted by manual_order
+  const hasDragged = useRef(false)
+
+  // Sync from props — skip if we just dragged (local state is more recent)
   useEffect(() => {
+    if (hasDragged.current) {
+      hasDragged.current = false
+      return
+    }
     const sorted = [...initiatives].sort((a, b) => ((a as any).manual_order || 0) - ((b as any).manual_order || 0))
     setLocalItems(sorted)
   }, [initiatives])
@@ -73,30 +102,42 @@ export default function BacklogTable({ initiatives, onSelect, onUpdate, onCreate
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 
+  const filtered = filterCategory === 'all'
+    ? localItems
+    : localItems.filter(i => (i as any).item_type === filterCategory)
+
   const handleDragEnd = useCallback(async (event: any) => {
     const { active, over } = event
     if (!active || !over || active.id === over.id) return
 
+    // Always reorder in the FULL list, not filtered
     const oldIndex = localItems.findIndex(i => i.id === active.id)
     const newIndex = localItems.findIndex(i => i.id === over.id)
+    if (oldIndex === -1 || newIndex === -1) return
+
     const reordered = arrayMove(localItems, oldIndex, newIndex)
-
-    // Update visual immediately
     setLocalItems(reordered)
+    hasDragged.current = true
 
-    // Persist to DB sequentially
+    // Persist ALL positions to DB + update parent state
     if (supabase) {
-      for (let idx = 0; idx < reordered.length; idx++) {
-        await supabase.from('product_initiatives').update({ manual_order: idx }).eq('id', reordered[idx].id)
-      }
+      const updates = reordered.map((item, idx) =>
+        supabase.from('product_initiatives').update({ manual_order: idx }).eq('id', item.id)
+      )
+      await Promise.all(updates)
+      // Sync parent so switching tabs preserves order
+      reordered.forEach((item, idx) => {
+        onUpdate(item.id, { manual_order: idx } as any)
+      })
     }
-  }, [localItems, supabase])
+  }, [localItems, supabase, onUpdate])
 
   const handleCreate = () => {
     if (!newTitle.trim()) return
-    onCreate(newTitle.trim().slice(0, TITLE_MAX), newDesc.trim())
+    onCreate(newTitle.trim().slice(0, TITLE_MAX), newDesc.trim(), newCategory)
     setNewTitle('')
     setNewDesc('')
+    setNewCategory('producto')
     setShowCreate(false)
     toast.success('Tarea creada')
   }
@@ -107,23 +148,43 @@ export default function BacklogTable({ initiatives, onSelect, onUpdate, onCreate
     toast.success('Tarea completada')
   }
 
+  // Count per category
+  const counts = { all: localItems.length, ...Object.fromEntries(CATEGORIES.map(c => [c.value, localItems.filter(i => (i as any).item_type === c.value).length])) }
+
   return (
     <div className="relative">
+      {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-gray-400">
-          {localItems.length} {localItems.length === 1 ? 'tarea pendiente' : 'tareas pendientes'}
-        </p>
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1 bg-gray-100 p-0.5 rounded-lg">
+            <button onClick={() => setFilterCategory('all')}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                filterCategory === 'all' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+              }`}>
+              Todas <span className="text-gray-400 ml-0.5">{counts.all}</span>
+            </button>
+            {CATEGORIES.map(c => (
+              <button key={c.value} onClick={() => setFilterCategory(c.value)}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                  filterCategory === c.value ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                }`}>
+                {c.label} <span className="text-gray-400 ml-0.5">{counts[c.value] || 0}</span>
+              </button>
+            ))}
+          </div>
+        </div>
         <button onClick={() => setShowCreate(true)}
           className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-xl hover:bg-blue-100 transition-colors">
           <PlusIcon className="w-4 h-4" /> Nueva tarea
         </button>
       </div>
 
-      {localItems.length === 0 ? (
+      {filtered.length === 0 ? (
         <div className="text-center py-20 bg-white rounded-2xl border border-dashed border-gray-200">
           <ClipboardDocumentListIcon className="w-14 h-14 text-gray-200 mx-auto mb-4" />
-          <p className="text-gray-500 font-medium">Sin tareas pendientes</p>
-          <p className="text-gray-300 text-sm mt-1">Crea una tarea para empezar</p>
+          <p className="text-gray-500 font-medium">
+            {filterCategory === 'all' ? 'Sin tareas pendientes' : `Sin tareas de ${getCategoryLabel(filterCategory)}`}
+          </p>
           <button onClick={() => setShowCreate(true)}
             className="mt-5 inline-flex items-center gap-1.5 px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-xl hover:bg-blue-700 transition-colors">
             <PlusIcon className="w-4 h-4" /> Crear tarea
@@ -131,9 +192,9 @@ export default function BacklogTable({ initiatives, onSelect, onUpdate, onCreate
         </div>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={localItems.map(i => i.id)} strategy={verticalListSortingStrategy}>
+          <SortableContext items={filtered.map(i => i.id)} strategy={verticalListSortingStrategy}>
             <div className="space-y-2">
-              {localItems.map((item, idx) => (
+              {filtered.map((item, idx) => (
                 <SortableItem key={item.id} item={item} onSelect={onSelect} onComplete={handleComplete} index={idx} />
               ))}
             </div>
@@ -141,6 +202,7 @@ export default function BacklogTable({ initiatives, onSelect, onUpdate, onCreate
         </DndContext>
       )}
 
+      {/* Create modal */}
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowCreate(false)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5 border border-gray-100" onClick={e => e.stopPropagation()}>
@@ -161,6 +223,21 @@ export default function BacklogTable({ initiatives, onSelect, onUpdate, onCreate
                 className="w-full text-sm border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-200 focus:border-blue-400 transition-all" />
             </div>
             <div>
+              <label className="text-xs font-medium text-gray-500 mb-1 block">Categoría</label>
+              <div className="flex gap-2">
+                {CATEGORIES.map(c => (
+                  <button key={c.value} onClick={() => setNewCategory(c.value)}
+                    className={`flex-1 py-2 text-xs font-medium rounded-xl border-2 transition-all ${
+                      newCategory === c.value
+                        ? `${c.color} border-current shadow-sm`
+                        : 'border-gray-200 text-gray-400 hover:border-gray-300'
+                    }`}>
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
               <label className="text-xs font-medium text-gray-500 mb-1 block">Descripción <span className="text-gray-300">(opcional)</span></label>
               <textarea value={newDesc} onChange={e => setNewDesc(e.target.value)}
                 placeholder="Contexto, problema o detalles..." rows={3}
@@ -177,7 +254,6 @@ export default function BacklogTable({ initiatives, onSelect, onUpdate, onCreate
           </div>
         </div>
       )}
-
     </div>
   )
 }
