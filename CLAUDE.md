@@ -31,11 +31,11 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 ### Authentication & Authorization
 
 - `context/AuthContext.tsx` provides a global `useAuth()` hook exposing `session`, `user`, `isLoading`, and the `supabase` client instance.
-- `context/PermissionsContext.tsx` provides `usePermissions()` hook exposing `role`, `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `mod_customer_success`, `mod_comunicaciones`, `mod_marketing`, `mod_crm`, `isLoading`, `refetch`.
+- `context/PermissionsContext.tsx` provides `usePermissions()` hook exposing `role`, `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `mod_customer_success`, `mod_comunicaciones`, `mod_marketing`, `mod_crm`, `mod_contenido_social`, `isLoading`, `refetch`.
 - `components/AuthGuard.tsx` wraps protected pages; redirects to `/login` if unauthenticated.
 - `components/ModuleGuard.tsx` wraps page content; checks module-level permissions. Shows "Acceso Denegado" if user lacks permission, or "Cuenta Pendiente" if user has no role (registered without invitation).
 - **Roles**: `superadmin` (full access), `member` (org employee), `invitado` (external collaborator).
-- **Permissions**: Per-module booleans in `user_permissions` table: `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `mod_producto`, `mod_customer_success`, `mod_comunicaciones`, `mod_marketing`, `mod_crm`. Superadmin always has all permissions.
+- **Permissions**: Per-module booleans in `user_permissions` table: `mod_tareas`, `mod_calendario`, `mod_revenue`, `mod_finanzas`, `mod_producto`, `mod_customer_success`, `mod_comunicaciones`, `mod_marketing`, `mod_crm`, `mod_contenido_social`. Superadmin always has all permissions.
 - **Registration**: Invitation-only via `/register?invite_token=TOKEN`. Without token, registration is blocked.
 - Role info + permissions fetched via `get_user_role_and_permissions` RPC.
 
@@ -48,12 +48,16 @@ Single-organization app (Califica). No multi-tenancy. All pages use the Next.js 
 | `/projects/[id]` | Project detail with Kanban board (drag-and-drop) |
 | `/calendar` | FullCalendar event management with team-colored events |
 | `/finance` | Finance Dashboard — 4-tab: Inbox, P&L, Métricas (growth integration), Config |
-| `/revenue` | Growth Dashboard — 8-tab growth analytics (Revenue, Country, Churn, Conversion, Acquisition, Behavior, Reports) |
-| `/producto` | Product module (Backlog, Roadmap, Experimentos) |
+| `/revenue` | Growth Dashboard — 10-tab growth analytics (Resumen, NSM, Operacional, Revenue, País, Churn, Conversión, Adquisición, Comportamiento, Reportes) |
+| `/producto` | Product module (Tareas Backlog, Finalizadas, Experimentos) |
+| `/contenido-social` | Contenido Social — generar carruseles con IA desde blogs (5 pantallas) |
+| `/contenido-social/[blogId]` | Generador de carruseles + comparación de modelos |
+| `/contenido-social/[blogId]/[generationId]` | Editor de slides con banco de imágenes y export PNG |
 | `/customer-success` | Customer Success dashboard (embedded Kali Analytics iframe) |
 | `/marketing` | Marketing module — Performance (superadmin) or Organic (member/invitado) dashboard |
 | `/crm` | CRM B2B — Pipeline Kanban + Lista + Reportes + Config (4 tabs) |
 | `/admin/users` | Superadmin user & permissions administration |
+| `/admin/api` | API keys management + endpoint documentation (superadmin) |
 | `/settings/team` | Organization member management |
 | `/settings/notifications` | Per-user notification preferences (email/in-app toggles) |
 
@@ -134,15 +138,16 @@ Calendar events support a content approval workflow:
 - **Auto-approve**: `auto-approve-reviews` edge function invoked by external cron every 5 min. Protected with `CRON_SECRET` env var.
 - **Components**: `CountdownTimer` (expiration countdown), review mode in `EventDetailModal` (request form, response panel, history).
 
-### Growth Module (9-tab dashboard at `/revenue`)
+### Growth Module (10-tab dashboard at `/revenue`)
 
-The `/revenue` route implements a Growth Dashboard with 9 tabs:
-- **Resumen Ejecutivo**: Weekly KPI grid — Revenue (total/new/recurring/ARPU) from `rev_orders`, Users (3 cards: nuevos registros/activacion/conversion + total inline) from `growth_users`. 8-week trend ComposedChart (stacked bars rev nuevo/renovacion + line registros). Country registrations table (top 15 with conversion %). WeekSelector for navigation.
+The `/revenue` route implements a Growth Dashboard with 10 tabs:
+- **Resumen Ejecutivo**: Weekly KPI grid — Revenue (total/new/recurring/ARPU) from `rev_orders`. Hero card verde NSM con total activados 7+, nuevos esta semana, variación % vs semana anterior (datos directo de growth_users, no RPC). Users section: 3 cards (registros, % activación 7+, % conversión). 8-week trend ComposedChart. Country registrations table (top 15). WeekSelector. Sync badges (users_platform + payments_platform) de `sync_logs`.
+- **NSM (7+)**: North Star Metric analysis — 4 KPIs (total 7+, nuevos semana, tiempo activación mediana, base total). Banner highlight verde. Distribución por bucket (histograma 0/1-2/3-4/5-6/7-9 NSM+/10-14/15+). Tiempo a activación (proxy last_login - created_date). Tendencia semanal 12 semanas con toggles por serie (barras nuevos + línea acumulado + área tasa). Tabla cohortes activación (8 semanas × 4 columnas sem1-4, color-coded). Filtros país + período registro. RPC `get_nsm_analysis(p_country_filter, p_registration_period)`.
 - **Operacional**: Grilla semanal (columnas = 4/8/12 semanas Dom-Sáb Lima, filas = métricas agrupadas en 3 secciones color-coded: Funnel Digital (sesiones califica.ai, CTR CTA registrarse, registros, tasa registro), Producto (DAU, Documentos creados/día, Documentos/usuario activo, Descargas/día, Mensajes Kalichat/día, Vistas Paywall), Ventas (Visitas checkout, Revenue diario, Tasa abandono checkout, Pagos fallidos, Ticket promedio). RPC `get_weekly_operational_metrics(p_week_start, p_weeks)` retorna `{meta, sections}` jsonb con `status: 'ok'|'stale'|'pending'` por celda. Banner amarillo cuando DAU (`growth_metrics_daily`) o `growth_events` están stale (>2 días atrás). Incluye chart de tendencia debajo con selector multi-métrica por sección (checkboxes con toggle de grupo) y LineChart Recharts. Todas las métricas de producto vienen de `growth_events` (sync via n8n workflow `GRW_Sync_Mixpanel_Events`, daily 6:30am). Re-usa `WeekSelector`.
 - **Revenue**: Improved revenue explorer — WeekSelector + Este Mes + Personalizado date modes, granularity toggle (daily/weekly/monthly), stacked bars (Nuevo vs Renovación), distribution blocks (table+pie side by side for country/plan/provider), paginated detail table with inline editing (superadmin/domingo@califica.ai only), column sorting (Fecha/País/Monto), dynamic plan filter (from `growth_users.plan_id` + `rev_orders.product_name`) and dynamic country filter from DB.
 - **Por País**: Matrix table — rows=countries, columns=periods (monthly/weekly/daily), year selector (2024-2026), optional YoY % growth overlay. Summary stats.
 - **Churn & Renovación** (Fase 2): Weekly churn table, renewal tracking, actionable renewal list. Requires `growth_users`.
-- **Conversión** (Fase 2+3): Funnel semanal (principal, 12 pasos: Registrados→1+→...→10+→Pagaron, activación=5+, tasa conv→pago en 5+/6+/7+) + acumulado inline + weekly cohort table con columnas ev1-ev9, 10+. Cross-filters: `eventos_valor` (0-9, 10+, 5+), `plan_status` (free/paid/cancelled), `plan_id` sub-dropdown (when paid). Onboarding + Paywall funnels from Mixpanel via `get_onboarding_funnel` RPC (requiere pipeline n8n `GRW_Sync_Mixpanel_Funnels`).
+- **Conversión** (Fase 2+3): Funnel semanal (principal, 12 pasos: Registrados→1+→...→10+→Pagaron, **activación=7+ (NSM)**, paso 7+ marcado con badge estrella verde, tasa conv→pago en 7+/8+/9+) + acumulado inline + weekly cohort table con columnas ev1-ev9, 10+. Cross-filters: `eventos_valor` (0-9, 10+, 7+), `plan_status` (free/paid/cancelled), `plan_id` sub-dropdown (when paid). Onboarding + Paywall funnels from Mixpanel via `get_onboarding_funnel` RPC (requiere pipeline n8n `GRW_Sync_Mixpanel_Funnels`).
 - **Adquisición** (Fase 2+3): WeekSelector + toggle acumulado. Country×Status cross-table, Channel×Status (8 grouped channels) cross-table, Channel×Plan cross-table. `pctOfGrandTotal` column. Requires `growth_users`.
 - **Comportamiento** (Fase 3): DAU/WAU/MAU chart (ComposedChart), DAU pagados vs gratuitos (stacked AreaChart), retention cohorte semanal (tabla triangular color-coded), retention dias clave (Day 1/3/7/14/30). Data: `growth_metrics_daily` + `growth_retention` via Mixpanel n8n pipelines (`GRW_Sync_Mixpanel_Metrics`, `GRW_Sync_Mixpanel_Retention`). RPCs: `get_behavior_metrics(p_days)`, `get_onboarding_funnel(p_weeks)`.
 - **Reportes** (Fase 4, superadmin only): Report recipients CRUD, send history, test send.
@@ -192,17 +197,36 @@ CRM para tracking de leads B2B (colegios) que entran desde landings de Califica.
 - **Notificaciones**: Cuando entran leads nuevos via sync, se inserta una notificación in-app por recipient (resuelto via `get_notification_recipients('crm_lead_new')`). El bell del topbar la muestra en realtime.
 - **Components**: `components/crm/` — PipelineKanban, LeadCard, LeadSidePeek, LeadsList, CrmReports, CrmConfig, NewLeadModal, LostReasonModal. Types en `lib/crm-types.ts`: `CrmLead`, `CrmPipelineStage`, `CrmLostReason`, `CrmLeadActivity`, `CrmSyncLog`, `CrmUser`.
 
-### Product Module (Backlog | Roadmap | Experimentos)
+### Product Module (Tareas Backlog | Finalizadas | Experimentos)
 
-The `/producto` route implements a product management system with three independent tabs:
-- **Backlog tab**: TanStack-style table with RICE scoring (Reach×Impact×Confidence/Effort), inline-editable cells, sorted by score. Quick-create row at bottom. Items can be promoted to Roadmap or Experimentos via PromoteForm.
-- **Roadmap tab** (phase=`delivery` in DB): Kanban board (dnd-kit) with 3 columns: En diseño, En progreso, Terminado. Simple task-like cards showing title, owner email, and dates. Dragging to "Terminado" auto-triggers FinalizeModal. Quick-create button ("+ Nueva tarea"). No project linking.
-- **Experimentos tab** (phase=`discovery` in DB): Notion-style table with 17 columns and horizontal scroll (`min-w-[1800px]`). Inline editing with auto-save (1500ms debounce for text, immediate for dropdowns/checkboxes). Sticky "Experimento" column. Click name to open SidePeek with full experiment fields. Quick-create row at bottom.
-- **SidePeek**: Right-side drawer (480px) for initiative detail editing. Auto-save with 1500ms debounce. Contains PromoteForm (backlog→roadmap/experimentos), experiment data fields (discovery phase), finalize button (delivery phase).
-- **FinalizeModal**: Marks initiative as finalized and creates a `company_events` calendar entry.
-- **No interaction between Roadmap and Experimentos** — tabs are independent. No escalation from experiments to roadmap.
-- **Table**: `product_initiatives` with RICE columns, `experiment_data` JSONB (includes `result: 'won'|'lost'|'inconclusive'|'pending'`), self-referencing `parent_id`, and `phase`/`status` workflow. Paused delivery items auto-move to `design` on load.
-- **Components**: `components/producto/` — BacklogTable, QuickCreateRow, SidePeek, PromoteForm, RoadmapKanban, ExperimentosTable, InitiativeCard, FinalizeModal.
+The `/producto` route implements a simplified product management system with three tabs:
+- **Tareas Backlog tab**: Simple checklist operativo diario. Lista de tareas con drag & drop vertical (dnd-kit) para reordenar por prioridad manual (`manual_order` column). Cada tarea: título (max 80 chars) + descripción + checkbox para completar. Botón "Nueva tarea" abre modal con título + descripción. Al completar: `phase = 'finalized'`, `status = 'completed'`, `completed_at = now()`. RICE scoring eliminado de la UI (columnas quedan en DB pero no se muestran).
+- **Finalizadas tab** (phase=`finalized` in DB): Lista de tareas completadas con check verde, título tachado, fecha+hora de finalización y tiempo de vida (ej: "3d 4h"). Agrupado por día (Hoy, Ayer, fecha). Badge "X completadas hoy" para tracking diario. Filtros por período: Todo, Hoy, 7 días, 30 días, Rango custom con date pickers. Botón "Reabrir" devuelve a backlog (limpia `completed_at`).
+- **Experimentos tab** (phase=`discovery` in DB): Sin cambios — Notion-style table con experiment fields, hipótesis, métricas, resultados.
+- **SidePeek**: Simplificado para backlog (solo título + descripción editables). Para finalizadas: solo lectura con fecha y botón reabrir. Para discovery: campos completos de experimento sin cambios.
+- **Table**: `product_initiatives` with `manual_order` (int) for drag ordering, `completed_at` (timestamptz) for completion tracking. RICE columns exist in DB but not shown in UI.
+- **Components**: `components/producto/` — BacklogTable, SidePeek, PromoteForm, RoadmapKanban, ExperimentosTable, FinalizeModal.
+
+### Contenido Social Module (5-screen at `/contenido-social`)
+
+Module for generating social media carousels from blog posts using AI (OpenRouter via califica.ai API).
+- **Screen 1 — Blog List**: Fetches blogs from `GET /api/content-social/blogs` (proxy to califica.ai). Table with search, status filters (sin generar/generados/publicados), cross-referenced with `content_generations` table. Tab Historial with cost/model metrics.
+- **Screen 2 — Generator** (`/contenido-social/[blogId]`): Config form (model, tone, platform, CTA, slides count). Model comparison side-by-side. Toast loading during generation (~15-30s). History of generations per blog.
+- **Screen 3 — Editor** (`/contenido-social/[blogId]/[generationId]`): Carousel tabs. Slide thumbnails with click-to-edit. SlidePreview renders 1080x1080 with 3 templates (centered, split, minimal). SlideEditor with: text editing (title/body/CTA with char counter), typography (font family Nunito/Codec Pro/Lazy Dog, size, weight, italic, alignment), 7 color schemes (naranja/navy/blanco/negro/lima/arena/lavanda), image bank (Supabase Storage bucket `content-images` with upload/delete/position/size/rotation/layer). Auto-save with 1500ms debounce. Caption + hashtags editor with clipboard copy.
+- **Screen 4 — Export Modal**: Format selector (1080x1080/1080x1920/1200x628). Per-slide checkboxes. Include caption as .txt. html2canvas → JSZip → file-saver download.
+- **Screen 5 — History**: Table with date, blog, model, tokens, cost, time, status. Monthly KPIs (spend, generations, most efficient model).
+- **API Routes** (server-side proxy, key not exposed): `app/api/content-social/blogs/route.ts` (GET), `app/api/content-social/generate/route.ts` (POST). Auth via `CALIFICA_API_KEY` env var (server-only).
+- **Tables**: `content_generations` (blog_id, result jsonb, edited_result jsonb, status, tokens_used, cost_usd, processing_time_ms). Storage bucket `content-images` for image bank.
+- **Dependencies**: html2canvas, jszip, file-saver.
+- **Components**: `components/contenido-social/` — BlogList, GeneratorConfig, CarouselEditor, SlidePreview, SlideEditor, ImageBank, ExportModal, HistoryTable, ModelComparison.
+
+### Public API Endpoints
+
+External-facing API endpoints for integration with other Califica platforms:
+- **`POST /api/calendar/events`**: Create calendar events. Auth: Bearer `EVENTS_API_SECRET`. Required: title, start_date, team. Optional: end_date, description, video_link, custom_data, notify (default true). Teams: Marketing, Producto, Customer Success, General, Kali Te Enseña. Notifications via existing Supabase trigger. `notify: false` creates as draft.
+- **`GET /api/calendar/events`**: List events filtered by from/to/team/limit (max 200).
+- **Admin panel** (`/admin/api`): API key CRUD (SHA-256 hashed, key shown once on creation). Endpoint documentation with markdown export ("Copiar todo" for AI agents). Granular permissions per key (calendar:read/write, content:read/write).
+- **Table**: `api_keys` (name, key_hash, key_prefix, permissions text[], is_active, last_used). RLS superadmin only.
 
 ## Language
 
