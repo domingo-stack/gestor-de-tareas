@@ -157,12 +157,13 @@ The `/revenue` route implements a Growth Dashboard with 10 tabs:
 ### Communications Module (5-tab dashboard at `/comunicaciones`)
 
 The `/comunicaciones` route implements a WhatsApp communications dashboard with 5 tabs: Campañas, Métricas, Automatizaciones, Templates, Configuración.
-- **Templates tab**: CRUD for WhatsApp message templates with Meta approval workflow. Bulk CSV upload via `BulkUploadTemplatesModal`. Individual/bulk delete (from Meta + local DB).
-- **Template Queue System**: Bulk uploads use a queue to avoid saturating Meta's review. Templates are assigned to batches of 3 (`queue_batch` column). A cron job (every 15 min) or manual button calls `process-template-queue` API to: check active batch status with Meta → advance to next batch when resolved → submit next batch. Queue status banner in Templates tab shows progress with auto-polling every 60s.
-- **API Routes** (`app/api/communication/`): `submit-template`, `bulk-submit-templates`, `delete-template`, `check-template-status`, `process-template-queue` (queue processor, CRON_SECRET or auth), `queue-status` (GET, queue state for UI), `send-broadcast`, `sync-broadcast`, `send-test`, `event` (webhook), `status-update` (webhook).
-- **Tables**: `comm_templates` (with `queue_batch`, `queue_priority` for queue system), `comm_broadcasts`, `comm_variables`, `comm_test_contacts`, `comm_message_logs`, `comm_automations`.
-- **Kapso integration**: `lib/kapso.ts` — `submitTemplateToMeta`, `getTemplateStatus`, `deleteTemplateFromMeta`, `createBroadcast`, `addBroadcastRecipients`, `sendBroadcast`, `getBroadcastStatus`, `sendTemplateMessage`.
-- **Components**: `components/comunicaciones/` — Templates, BulkUploadTemplatesModal, Campanias, Metricas, Automatizaciones, Configuracion.
+- **Templates tab**: CRUD for WhatsApp message templates with Meta approval workflow. Bulk CSV upload via `BulkUploadTemplatesModal`. Individual/bulk delete and archive (from Meta + local DB). Archive system: `archived_at` column, archived templates hidden from campaign selector, bulk archive via checkbox selection, reactivate from "Archivados" filter tab.
+- **Campañas tab**: 3-step campaign creation (Step1: segmentation filters, Step2: template selector with search/filter/sort + split layout with scrollable list + sticky preview, Step3: name/schedule/auto-reply + test button). Auto-reply per campaign via `comm_broadcasts.auto_reply_message` (12h window, no cooldown). Test button sends to all `comm_test_contacts` with temporary broadcast for auto-reply testing. Supports single message and sequence modes.
+- **Template Queue System**: Bulk uploads use a queue to avoid saturating Meta's review. Templates are assigned to batches (`queue_batch` column). A cron job (every 15 min) or manual button calls `process-template-queue` API to: check active batch status with Meta → advance to next batch when resolved → submit next batch. Queue status banner in Templates tab shows progress with auto-polling every 60s.
+- **API Routes** (`app/api/communication/`): `submit-template`, `bulk-submit-templates`, `delete-template`, `check-template-status`, `process-template-queue` (queue processor, CRON_SECRET or auth), `queue-status` (GET, queue state for UI), `send-broadcast`, `sync-broadcast`, `send-test` (sends to test contacts, supports auto-reply testing via temporary broadcast), `event` (Bubble webhook), `status-update` (Kapso webhook), `incoming` (incoming WhatsApp messages, campaign-specific auto-reply within 12h window + global auto-reply with 24h cooldown).
+- **Tables**: `comm_templates` (with `queue_batch`, `queue_priority`, `archived_at` for archive system), `comm_broadcasts` (with `auto_reply_message` for campaign-specific replies), `comm_variables`, `comm_test_contacts`, `comm_message_logs`, `comm_automations`, `comm_drip_campaigns`, `comm_drip_steps`, `comm_drip_optouts`.
+- **Kapso integration**: `lib/kapso.ts` — `submitTemplateToMeta`, `getTemplateStatus`, `deleteTemplateFromMeta`, `createBroadcast`, `addBroadcastRecipients`, `sendBroadcast`, `getBroadcastStatus`, `sendTemplateMessage`, `sendTextMessage`.
+- **Components**: `components/comunicaciones/` — Templates, BulkUploadTemplatesModal, Campanias, Metricas, Automatizaciones, DripCampaigns, Configuracion.
 
 ### Marketing Module (6-tab dashboard at `/marketing`)
 
@@ -222,10 +223,18 @@ Module for generating social media carousels from blog posts using AI (OpenRoute
 
 ### Public API Endpoints
 
-External-facing API endpoints for integration with other Califica platforms:
-- **`POST /api/calendar/events`**: Create calendar events. Auth: Bearer `EVENTS_API_SECRET`. Required: title, start_date, team. Optional: end_date, description, video_link, custom_data, notify (default true). Teams: Marketing, Producto, Customer Success, General, Kali Te Enseña. Notifications via existing Supabase trigger. `notify: false` creates as draft.
-- **`GET /api/calendar/events`**: List events filtered by from/to/team/limit (max 200).
-- **Admin panel** (`/admin/api`): API key CRUD (SHA-256 hashed, key shown once on creation). Endpoint documentation with markdown export ("Copiar todo" for AI agents). Granular permissions per key (calendar:read/write, content:read/write).
+External-facing API endpoints for integration with other Califica platforms. Auth via `api_keys` table (SHA-256 hash validation, `lib/api-auth.ts`).
+
+**Calendar:**
+- **`POST /api/calendar/events`** (calendar:write): Create events. Required: title, start_date, team. Optional: end_date, description, video_link, custom_data, notify.
+- **`GET /api/calendar/events`** (calendar:read): List events filtered by from/to/team/limit.
+
+**Tasks (Producto):**
+- **`GET /api/tasks`** (tasks:read): List tasks. Params: status (active/completed/all), category (producto/customer_success/marketing/otro), limit.
+- **`POST /api/tasks`** (tasks:write): Create task. Required: title. Optional: description, category.
+- **`PATCH /api/tasks`** (tasks:write): Update/complete/reopen. Body: id + action (complete/reopen) or field updates.
+
+**Admin panel** (`/admin/api`): API key CRUD (SHA-256 hashed, key shown once on creation, revoke/reactivate). Endpoint documentation with category sidebar (Calendario/Producto/Contenido), search, markdown export for AI agents. Granular permissions per key (calendar:read/write, tasks:read/write, content:read/write).
 - **Table**: `api_keys` (name, key_hash, key_prefix, permissions text[], is_active, last_used). RLS superadmin only.
 
 ## Language
