@@ -8,7 +8,8 @@ import PnLSection from './PnLSection';
 
 const PREPAGO_NAMES = ['1 mes', '3 meses', '6 meses', '12 meses'];
 
-function classifyPlan(productName: string): 'Ingresos Suscripción' | 'Ingresos Prepago' {
+function classifyPlan(productName: string | null | undefined): 'Ingresos Suscripción' | 'Ingresos Prepago' {
+  if (!productName) return 'Ingresos Suscripción';
   return PREPAGO_NAMES.includes(productName.toLowerCase())
     ? 'Ingresos Prepago'
     : 'Ingresos Suscripción';
